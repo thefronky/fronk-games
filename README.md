@@ -8,8 +8,6 @@ phone or computer and play; **Add to Home Screen** to install it like an app.
 - **[Monster Fighter](monster-fighter/)** — first-person dark-fantasy survival.
   Fight waves of monsters through the night, gather loot by day, climb, buy
   upgrades from the merchant. Touch controls + gamepad supported.
-- **[Neon Arena](neon-arena/)** — true-3D first-person shooter. Chain kills,
-  trigger Overdrive. Touch + mouse + controller.
 - **[Officer Frank](officer-frank/)** — noir suspense. Read the street, ask the
   right questions, decide when to draw.
 - **[Jetpack Jungle](jetpack-jungle/)** — jetpack platformer through a slimy,
