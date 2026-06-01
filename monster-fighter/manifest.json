@@ -1,0 +1,15 @@
+{
+  "name": "Monster Fighter — Curse of the Witch",
+  "short_name": "Monster Fighter",
+  "description": "A first-person monster-slaying survival game. Survive the night, gather by day.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#05060a",
+  "theme_color": "#05060a",
+  "icons": [
+    { "src": "assets/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "assets/icon.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

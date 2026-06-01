@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Fronk's Games</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{min-height:100vh;background:radial-gradient(circle at 50% 30%,#1a1230,#06060c);color:#fff;
+    font-family:'Trebuchet MS','Segoe UI',sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:30px;text-align:center}
+  h1{font-size:clamp(34px,7vw,64px);letter-spacing:4px;text-shadow:0 0 30px #3fe0ff}
+  p.sub{opacity:.7;letter-spacing:2px;margin-top:8px}
+  .grid{display:flex;flex-wrap:wrap;gap:22px;justify-content:center;margin-top:38px}
+  a.card{width:300px;text-decoration:none;color:#fff;background:rgba(255,255,255,.04);border:2px solid rgba(255,255,255,.15);
+    border-radius:16px;overflow:hidden;transition:all .15s}
+  a.card:hover{border-color:#3fe0ff;box-shadow:0 0 34px rgba(63,224,255,.35);transform:translateY(-4px)}
+  a.card img{width:100%;height:200px;object-fit:cover;display:block}
+  a.card .nm{font-size:22px;letter-spacing:1px;padding:14px 10px 4px}
+  a.card .ds{font-size:13px;opacity:.7;padding:0 14px 16px}
+</style>
+</head>
+<body>
+  <h1>FRONK'S GAMES</h1>
+  <p class="sub">tap a game to play · add to home screen to install</p>
+  <div class="grid">
+    <a class="card" href="monster-fighter/index.html">
+      <img src="monster-fighter/assets/title_bg.png" alt="" />
+      <div class="nm">Monster Fighter</div>
+      <div class="ds">First-person survival. Fight the night, gather by day. Touch + controller.</div>
+    </a>
+  </div>
+</body>
+</html>
