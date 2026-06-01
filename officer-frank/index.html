@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<title>Officer Frank</title>
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#0a0a0e" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Officer Frank" />
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
+<style>
+  :root{ --blood:#b8121a; --gold:#d9a441; --steel:#7d8aa0; --paper:#e7e2d4; --ink:#0a0a0e; }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;user-select:none}
+  html,body{height:100%;overflow:hidden;background:#000;color:var(--paper);
+    font-family:'Courier New',ui-monospace,monospace;touch-action:manipulation}
+  #app{position:fixed;inset:0;overflow:hidden}
+
+  /* film treatment */
+  #grain{position:fixed;inset:-50%;pointer-events:none;z-index:60;opacity:.06;mix-blend-mode:overlay;
+    background-image:repeating-conic-gradient(#000 0 0.0006turn,#fff 0 0.0012turn);background-size:3px 3px;animation:gr .5s steps(3) infinite}
+  @keyframes gr{to{transform:translate(3px,2px)}}
+  #vig{position:fixed;inset:0;pointer-events:none;z-index:55;box-shadow:inset 0 0 240px 60px rgba(0,0,0,.9)}
+  .bars{position:fixed;left:0;right:0;height:7vh;background:#000;z-index:54;pointer-events:none}
+  .bars.t{top:0} .bars.b{bottom:0}
+
+  .scene{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:8vh 22px;z-index:5}
+  .scene.on{display:flex}
+
+  /* ---- title ---- */
+  #s-title{background:
+    linear-gradient(180deg,rgba(5,5,7,.62),rgba(5,5,7,.82)),
+    radial-gradient(circle at 50% 28%,rgba(22,22,31,.35),rgba(5,5,7,.7)),
+    #060608 center/cover no-repeat;
+    background-image:
+    linear-gradient(180deg,rgba(5,5,7,.62),rgba(5,5,7,.86)),
+    url("assets/title_bg.jpg");
+    background-size:cover;background-position:center}
+  .badge{font-size:11px;letter-spacing:6px;color:var(--steel);text-transform:uppercase;margin-bottom:14px}
+  h1{font-family:'Times New Roman',serif;font-weight:bold;font-size:clamp(46px,13vw,110px);letter-spacing:4px;line-height:.92;
+    color:var(--paper);text-shadow:0 0 30px rgba(0,0,0,.9),0 4px 0 #000}
+  h1 .red{color:var(--blood);text-shadow:0 0 26px rgba(184,18,26,.6)}
+  .sub{margin-top:14px;max-width:560px;line-height:1.7;font-size:14px;color:#b9b6ac;opacity:.92}
+  .rec{margin-top:18px;font-size:12px;letter-spacing:1px;color:var(--steel)}
+  .btn{margin-top:30px;cursor:pointer;pointer-events:auto;font-family:'Times New Roman',serif;font-size:22px;letter-spacing:3px;
+    padding:14px 46px;border:1px solid var(--steel);background:rgba(255,255,255,.03);color:var(--paper);transition:.15s}
+  .btn:hover{background:var(--blood);border-color:var(--blood);box-shadow:0 0 30px rgba(184,18,26,.5)}
+  .btn.ghost:hover{background:rgba(255,255,255,.08);border-color:var(--paper);box-shadow:none}
+
+  /* ---- encounter ---- */
+  #s-enc{display:none;position:absolute;inset:0;flex-direction:column;z-index:5}
+  #s-enc.on{display:flex}
+  #portrait{position:absolute;inset:0;background:#0c0c12 center/cover no-repeat;z-index:1;
+    filter:saturate(.72) contrast(1.06)}
+  #portrait.ph{background:
+    radial-gradient(120% 80% at 50% 18%,rgba(217,164,65,.10),transparent 60%),
+    linear-gradient(180deg,#1c1d27,#0a0a0f 70%)}
+  #pdesc{position:absolute;left:0;right:0;top:30%;text-align:center;color:#6f7689;font-size:13px;letter-spacing:2px;
+    text-transform:uppercase;opacity:.7;z-index:2;padding:0 30px;display:none}
+  #portrait.ph + #pdesc{display:block}
+  #envTint{position:absolute;inset:0;z-index:3;pointer-events:none;mix-blend-mode:multiply;background:transparent;transition:background .8s}
+
+  #topbar{position:relative;z-index:8;display:flex;justify-content:space-between;align-items:center;
+    padding:calc(7vh + 8px) 16px 8px;font-size:11px;letter-spacing:1px;color:var(--steel);text-shadow:0 1px 3px #000}
+  #topbar .q{color:var(--paper)}
+  #tension{position:absolute;left:16px;right:16px;top:calc(7vh + 34px);height:3px;background:rgba(255,255,255,.12);z-index:8;border-radius:2px;overflow:hidden}
+  #tensionFill{height:100%;width:0%;background:linear-gradient(90deg,#3a6,#d9a441,#b8121a);transition:width .25s}
+
+  #convo{position:relative;z-index:8;flex:1;overflow-y:auto;padding:30px 18px 8px;display:flex;flex-direction:column;gap:12px;
+    -webkit-mask-image:linear-gradient(180deg,transparent,#000 26px);mask-image:linear-gradient(180deg,transparent,#000 26px)}
+  .line{max-width:84%;font-size:15px;line-height:1.5;padding:9px 13px;border-radius:3px;text-shadow:0 1px 3px #000;animation:fade .25s}
+  @keyframes fade{from{opacity:0;transform:translateY(6px)}}
+  .line.me{align-self:flex-end;background:rgba(125,138,160,.18);border-right:2px solid var(--steel);color:#dfe3ec}
+  .line.them{align-self:flex-start;background:rgba(0,0,0,.5);border-left:2px solid var(--gold);color:#f0ddb6}
+  .line.sys{align-self:center;font-size:12px;letter-spacing:2px;text-transform:uppercase;color:#8a8f9c;opacity:.85;background:none}
+  .tell{display:block;margin-top:4px;font-size:12px;font-style:italic;color:#9aa0ad;opacity:.85}
+
+  /* choices + actions */
+  #dock{position:relative;z-index:9;padding:8px 14px calc(7vh + 12px);background:linear-gradient(0deg,rgba(5,5,8,.96),rgba(5,5,8,.5) 70%,transparent)}
+  #choices{display:flex;flex-direction:column;gap:7px;margin-bottom:9px}
+  .choice{pointer-events:auto;cursor:pointer;text-align:left;font-size:14px;line-height:1.35;padding:11px 13px;color:#dcd9cf;
+    background:rgba(231,226,212,.05);border:1px solid rgba(231,226,212,.16);border-radius:3px;transition:.12s}
+  .choice:hover,.choice.sel{background:rgba(217,164,65,.16);border-color:var(--gold);color:#fff}
+  .choice .k{color:var(--steel);font-size:11px;margin-right:8px}
+  .resolve{display:flex;gap:8px;margin-bottom:9px}
+  .resolve .choice{flex:1;text-align:center}
+  #actions{display:flex;gap:10px}
+  .abtn{pointer-events:auto;cursor:pointer;flex:1;text-align:center;font-weight:bold;letter-spacing:2px;font-size:16px;
+    padding:16px 8px;border-radius:4px;border:2px solid;transition:transform .06s}
+  .abtn:active{transform:scale(.96)}
+  #bPull{border-color:var(--steel);color:#cfd5e2;background:rgba(125,138,160,.12)}
+  #bPull.armed{border-color:var(--gold);color:#fff;background:rgba(217,164,65,.22);box-shadow:0 0 20px rgba(217,164,65,.4)}
+  #bShoot{border-color:var(--blood);color:#ff6b72;background:rgba(184,18,26,.14)}
+  #bShoot.live{color:#fff;background:rgba(184,18,26,.4);box-shadow:0 0 24px rgba(184,18,26,.6)}
+
+  /* first-person gun */
+  #gun{position:absolute;left:50%;bottom:-4%;width:min(62vw,360px);z-index:20;transform:translate(-30%,120%);
+    transition:none;pointer-events:none;filter:drop-shadow(0 -6px 14px rgba(0,0,0,.7))}
+  #muzzle{position:absolute;z-index:21;left:50%;top:42%;width:30vw;height:30vw;transform:translate(-50%,-50%);pointer-events:none;
+    background:radial-gradient(circle,rgba(255,240,200,.95),rgba(255,150,40,.5) 35%,transparent 65%);opacity:0}
+  #npcMuzzle{position:absolute;z-index:19;left:50%;top:40%;width:18vw;height:18vw;transform:translate(-50%,-50%);pointer-events:none;
+    background:radial-gradient(circle,rgba(255,240,200,.9),rgba(255,120,40,.5) 40%,transparent 68%);opacity:0}
+  #cyl{position:absolute;right:16px;top:calc(7vh + 48px);z-index:22;display:none;gap:5px}
+  #cyl .r{width:11px;height:11px;border-radius:50%;border:1px solid var(--steel);background:var(--gold)}
+  #cyl .r.spent{background:transparent;opacity:.4}
+
+  /* overlays */
+  #blood{position:absolute;inset:0;z-index:40;pointer-events:none;opacity:0;transition:opacity .12s;
+    background:radial-gradient(circle at 30% 40%,rgba(184,18,26,.0),rgba(120,0,6,.0))}
+  .splat{position:absolute;border-radius:50%;background:radial-gradient(circle,#7a0008,#3a0004 60%,transparent 72%);pointer-events:none;z-index:41;opacity:.9}
+  #flash{position:absolute;inset:0;z-index:45;background:#fff;opacity:0;pointer-events:none}
+  #hb{position:absolute;inset:0;z-index:44;pointer-events:none;box-shadow:inset 0 0 200px 30px rgba(184,18,26,0)}
+
+  /* ---- ending ---- */
+  #s-end{z-index:50}
+  #s-end h1{font-size:clamp(40px,11vw,92px)}
+  #endIcon{font-size:64px;margin-bottom:6px}
+  #endBody{margin-top:14px;max-width:520px;line-height:1.7;font-size:15px;color:#cfccc2}
+  #endRec{margin-top:16px;font-size:13px;letter-spacing:1px;color:var(--steel);line-height:1.9}
+  .ending-just{background:radial-gradient(circle at 50% 30%,#16240f,#050805)}
+  .ending-just h1{color:#9bd66b;text-shadow:0 0 30px rgba(120,200,70,.4)}
+  .ending-jail{background:linear-gradient(rgba(8,14,22,.62),rgba(2,4,8,.86)),url("assets/end_jail.jpg") center/cover}
+  .ending-jail h1{color:var(--steel)}
+  .ending-mark{background:radial-gradient(circle at 50% 30%,#241c0c,#080603)}
+  .ending-mark h1{color:var(--gold)}
+  .ending-grave{background:linear-gradient(rgba(12,2,5,.58),rgba(0,0,0,.88)),url("assets/end_grave.jpg") center/cover}
+  .ending-grave h1{color:var(--blood)}
+  .ending-clean{background:radial-gradient(circle at 50% 30%,#101820,#05070a)}
+  .ending-clean h1{color:var(--paper)}
+
+  .hide{display:none!important}
+  @media(min-width:760px){ .line{font-size:16px} .choice{font-size:15px} }
+</style>
+</head>
+<body>
+<div id="app">
+  <!-- TITLE -->
+  <section class="scene on" id="s-title">
+    <div class="badge">Metro Vice · Night Shift</div>
+    <h1>OFFICER<br><span class="red">FRANK</span></h1>
+    <div class="sub">Every face on this street is a question. Some are working. Some are running a game.
+      Most are just trying to get home. Read them. Decide. Live with it.</div>
+    <div class="rec" id="titleRec"></div>
+    <div class="btn" id="startBtn">CLOCK IN</div>
+    <div class="btn ghost" id="howBtn" style="font-size:14px;padding:9px 22px;margin-top:12px">HOW IT WORKS</div>
+  </section>
+
+  <!-- HOW -->
+  <section class="scene" id="s-how">
+    <h1 style="font-size:clamp(30px,8vw,56px)">THE JOB</h1>
+    <div class="sub" style="text-align:left;max-width:580px">
+      • You talk. Pick what to ask — up to <b>5 questions</b>. Ask more and it's <b>harassment</b> (a mark).<br><br>
+      • Their answers cut both ways. A guilty look isn't proof. An innocent one isn't either.<br><br>
+      • <b>PULL GUN</b> raises your revolver — it takes a beat to settle. <b>SHOOT</b> only hits when it's <b>on target</b>. Fire mid-draw and you put one in the dirt. Each shot kicks up — let it fall back before the next. Six rounds.<br><br>
+      • Draw on an innocent → <b>a mark</b>. Shoot an innocent → <b>prison</b>. They shoot first → <b>the graveyard</b>.<br><br>
+      • Sometimes they go quiet, say "never mind"… and reach. You won't always get a warning.
+    </div>
+    <div class="btn ghost" id="howBack" style="font-size:16px">BACK</div>
+  </section>
+
+  <!-- ENCOUNTER -->
+  <section id="s-enc">
+    <div id="portrait" class="ph"></div>
+    <div id="pdesc"></div>
+    <div id="envTint"></div>
+    <div id="topbar"><div>CASE <span id="caseNo">01</span> · <span id="caseLoc">—</span></div><div>QUESTIONS <span class="q" id="qLeft">5</span></div></div>
+    <div id="tension"><div id="tensionFill"></div></div>
+    <div id="convo"></div>
+    <div id="muzzle"></div><div id="npcMuzzle"></div>
+    <img id="gun" alt="" />
+    <div id="cyl"></div>
+    <div id="dock">
+      <div id="choices"></div>
+      <div class="resolve" id="resolve"></div>
+      <div id="actions">
+        <div class="abtn" id="bPull">PULL GUN</div>
+        <div class="abtn" id="bShoot">SHOOT</div>
+      </div>
+    </div>
+    <div id="hb"></div>
+    <div id="blood"></div>
+    <div id="flash"></div>
+  </section>
+
+  <!-- ENDING -->
+  <section class="scene" id="s-end">
+    <div id="endIcon"></div>
+    <h1 id="endTitle"></h1>
+    <div id="endBody"></div>
+    <div id="endRec"></div>
+    <div class="btn" id="nextBtn">NEXT CASE</div>
+    <div class="btn ghost" id="quitBtn" style="font-size:14px;padding:9px 22px;margin-top:10px">END SHIFT</div>
+  </section>
+</div>
+
+<div id="grain"></div><div id="vig"></div>
+<div class="bars t"></div><div class="bars b"></div>
+
+<script src="game.js"></script>
+</body>
+</html>
