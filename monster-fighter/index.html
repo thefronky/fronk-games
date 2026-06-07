@@ -177,6 +177,8 @@
 <script type="module">
 import * as THREE from 'three';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 const $ = id => document.getElementById(id);
 const lerp=(a,b,t)=>a+(b-a)*t, rand=(a,b)=>a+Math.random()*(b-a), pick=a=>a[Math.floor(Math.random()*a.length)], clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const ASSET_DIR='assets/';
@@ -418,22 +420,34 @@ function setWeapon(key){ const w=WEAPONS[key]; player.weapon=key; player.element
 /* ===================== MONSTERS ===================== */
 const MTYPES={
   goblin:{hp:34,speed:6.6,dmg:7,scale:2.6,w:1.7,gold:5},skeleton:{hp:50,speed:5.4,dmg:9,scale:2.9,w:1.8,gold:6},ghoul:{hp:66,speed:4.9,dmg:12,scale:2.8,w:1.9,gold:7},
+  revenant:{hp:90,speed:4.6,dmg:13,scale:2.7,w:1.8,gold:10,model:'revenant'},   // real 3D animated enemy
   imp:{hp:24,speed:8.6,dmg:5,scale:1.8,w:1.5,gold:4},spider:{hp:46,speed:8.0,dmg:9,scale:2.2,w:2.6,gold:6,climb:true},slime:{hp:78,speed:4.2,dmg:8,scale:2.0,w:2.2,gold:6},
   bat:{hp:26,speed:9.6,dmg:6,scale:1.7,w:2.2,gold:5,fly:true},wraith:{hp:56,speed:7.4,dmg:11,scale:3.0,w:1.9,gold:9,fly:true},gargoyle:{hp:90,speed:6.4,dmg:14,scale:2.8,w:2.4,gold:11,fly:true},
   harpy:{hp:60,speed:8.4,dmg:12,scale:2.6,w:2.4,gold:10,fly:true},wisp:{hp:30,speed:7.0,dmg:8,scale:1.6,w:1.5,gold:7,fly:true},
   ogre:{hp:240,speed:3.6,dmg:26,scale:6.4,w:5.2,gold:24,massive:true},demon:{hp:520,speed:3.2,dmg:40,scale:9.4,w:7.8,gold:55,massive:true},troll:{hp:420,speed:3.4,dmg:34,scale:8.0,w:6.6,gold:44,massive:true},
   golem:{hp:620,speed:2.8,dmg:44,scale:8.6,w:7.2,gold:64,massive:true},cyclops:{hp:700,speed:3.0,dmg:48,scale:10.5,w:8.4,gold:80,massive:true},wendigo:{hp:560,speed:3.8,dmg:42,scale:9.0,w:6.8,gold:70,massive:true},
 };
+/* ---- 3D animated models (GLTF) ---- */
+const gltfLoader=new GLTFLoader(); const MODELS={};
+async function loadModels(){ try{ const g=await gltfLoader.loadAsync(ASSET_DIR+'models/enemy3d.glb'); g.scene.traverse(o=>{ if(o.isMesh){ o.frustumCulled=false; o.castShadow=false; } }); MODELS.revenant={scene:g.scene,anims:g.animations,nativeH:1.8}; }catch(e){ console.warn('3D model load failed',e); } }
+function setAnim(m,name){ if(!m.A) return; const a=m.A[name]; if(!a||m.anim===name) return; const prev=m.A[m.anim]; if(prev&&prev!==a) prev.fadeOut(0.18); a.reset().fadeIn(0.18).play(); m.anim=name; }
 const monsters=[];
 function findSpawnPos(){ const p=controls.getObject().position; for(let i=0;i<12;i++){ const ang=rand(0,6.28),r=rand(14,46),x=p.x+Math.cos(ang)*r,z=p.z+Math.sin(ang)*r; if(Math.hypot(x,z)>BOUND) continue; if(inObstacle(x,z,2)) continue; return {x,z}; } const ang=rand(0,6.28); return {x:p.x+Math.cos(ang)*24,z:p.z+Math.sin(ang)*24}; }
 function spawnMonster(type,at,entrance){ const cfg=MTYPES[type]; const pos=at||findSpawnPos(); entrance=entrance||(cfg.fly?'air':'rise');
-  const sizeJ=rand(0.86,1.16); const mesh=makeUpright(TEX[type],cfg.w*sizeJ,cfg.scale*sizeJ); const baseY=cfg.fly?rand(2.6,4.2):0;
-  let startY = entrance==='drop' ? 15+rand(0,7) : (entrance==='air'? baseY : -cfg.scale*sizeJ);
+  const sizeJ=rand(0.86,1.16); const baseY=cfg.fly?rand(2.6,4.2):0;
+  let mesh, kind='2d', mixer=null, A=null, yawOff=0;
+  if(cfg.model && MODELS[cfg.model]){ const src=MODELS[cfg.model]; mesh=cloneSkinned(src.scene);
+    mesh.scale.setScalar((cfg.scale*sizeJ)/(src.nativeH||1.8));   // fixed native height (skinned bbox is unreliable)
+    mixer=new THREE.AnimationMixer(mesh); const by={}; src.anims.forEach(a=>by[a.name]=a); const mk=c=>c?mixer.clipAction(c):null;
+    A={ idle:mk(by['Idle']), walk:mk(by['Walking']||by['Walk']||by['Running']), attack:mk(by['Punch']||by['Attack']), die:mk(by['Death']) };
+    kind='3d'; yawOff=0; }   // RobotExpressive faces +Z → no offset needed to face the player
+  else { mesh=makeUpright(TEX[type],cfg.w*sizeJ,cfg.scale*sizeJ); }
+  let startY = entrance==='drop' ? 15+rand(0,7) : (entrance==='air'? baseY : -(cfg.scale*sizeJ));
   mesh.position.set(pos.x,startY,pos.z); scene.add(mesh);
   const sh=groundShadow(cfg.w*1.25*sizeJ); sh.position.set(pos.x,0.05,pos.z); sh.material.opacity=0; scene.add(sh);
   if(entrance==='rise'){ spawnDecal(pos.x,pos.z,cfg.w*1.4); for(let i=0;i<3;i++) spawnFX('spark',pos.x+rand(-1,1),rand(0.3,1.5),pos.z+rand(-1,1),cfg.w*0.5,0.5); SFX.rise(); }
   const rb=Math.random(); const behavior = cfg.massive ? 'rush' : (cfg.fly ? (rb<0.6?'rush':'circle') : (rb<0.52?'rush':rb<0.72?'wander':rb<0.9?'circle':'lurk'));
-  monsters.push({mesh,shadow:sh,type,hp:cfg.hp,maxhp:cfg.hp,cfg,baseY,sizeJ,atkCd:0,hitFlash:0,flinch:0,bob:rand(0,6),sway:rand(0,9),
+  monsters.push({mesh,shadow:sh,kind,mixer,A,anim:null,yawOff,type,hp:cfg.hp,maxhp:cfg.hp,cfg,baseY,sizeJ,atkCd:0,hitFlash:0,flinch:0,bob:rand(0,6),sway:rand(0,9),
     state: entrance==='air'?'active':'rising', entrance, riseT:0, riseDur: entrance==='drop'?rand(0.45,0.8):rand(1.0,1.7), startY,
     tx:pos.x,tz:pos.z,fleeT:0,slow:0, spd:cfg.speed*rand(0.78,1.32), behavior, wanderAng:rand(0,6.28), wanderT:rand(0,1), circleDir:Math.random()<0.5?-1:1, lurkGo:true }); }
 const ambushZones=[
@@ -445,7 +459,7 @@ function checkAmbush(dt,p){ for(const z of ambushZones){ if(z.cd>0){ z.cd-=dt; c
   if(Math.hypot(p.x-z.c.x,p.z-z.c.z)<z.r && monsters.length<MAX_MONSTERS){ banner(z.msg); SFX.wave();
     for(let i=0;i<z.n;i++){ const ang=rand(0,6.28),rr=rand(6,16); spawnMonster(z.type,{x:p.x+Math.cos(ang)*rr,z:p.z+Math.sin(ang)*rr},z.entrance); }
     z.cd=z.interval; } } }
-function damageMonster(m,dmg,impact,el){ if(m.state==='rising'||m.state==='flee') return; m.hp-=dmg; m.hitFlash=0.12; m.flinch=0.16; m.mesh.material.color.setRGB(2.4,2.4,2.4);
+function damageMonster(m,dmg,impact,el){ if(m.state==='rising'||m.state==='flee') return; m.hp-=dmg; m.hitFlash=0.12; m.flinch=0.16; if(m.mesh.material) m.mesh.material.color.setRGB(2.4,2.4,2.4);
   if(el==='frost'){ m.slow=2.5; }
   if(impact){ const k=m.cfg.massive?0.4:2.0; m.mesh.position.x+=impact.x*k; m.mesh.position.z+=impact.z*k; }
   spawnFX(el==='lightning'?'spark':'spark',m.mesh.position.x,m.baseY+m.cfg.scale*0.45,m.mesh.position.z,m.cfg.w*0.7,0.35);
@@ -478,10 +492,10 @@ function jump(){ if(player.grounded){ player.vy=JUMP; player.grounded=false; SFX
 let phase='night', phaseT=0, dayNum=0, dayFactor=0, dayTarget=0, segT=0, segIdx=0, spawnTimer=0, cycleStarted=false;
 const NIGHT_DUR=180, DAY_DUR=120, SEG_DUR=34, MAX_MONSTERS=15;   // 3-min night, 2-min day; fewer foes
 const SEGMENTS=[
-  {name:'THE DEAD WALK',pool:['goblin','skeleton','ghoul','slime'],gap:2.2},
+  {name:'THE DEAD WALK',pool:['goblin','skeleton','ghoul','revenant','slime'],gap:2.2},
   {name:'PREDATORS',pool:['spider','imp','goblin','bat'],gap:2.0},
   {name:'AERIAL ASSAULT',pool:['bat','wraith','gargoyle','harpy','wisp'],gap:2.4},
-  {name:'GRAVE LEGION',pool:['skeleton','ghoul','spider','wraith'],gap:2.2},
+  {name:'GRAVE LEGION',pool:['skeleton','ghoul','revenant','spider','wraith'],gap:2.2},
   {name:'THE GIANTS COME',pool:['ogre','troll','golem','cyclops','wendigo'],gap:6.0},
   {name:'CHAOS',pool:['goblin','spider','bat','ghoul','ogre','harpy','wendigo'],gap:1.9},
 ];
@@ -625,10 +639,11 @@ function update(dt){
     else { it.spr.position.y=it.y+Math.sin(tt*2+it.bob)*0.22; if(Math.hypot(p.x-it.x,p.z-it.z)<2.6){ gold+=it.val; $('gold').textContent=gold; SFX.coin(); spawnFX('spark',it.x,it.spr.position.y,it.z,1,0.3); scene.remove(it.spr); loot.splice(i,1); } } }
 
   for(const m of monsters){
+    if(m.mixer) m.mixer.update(dt);
     if(m.state==='rising'){ m.riseT+=dt; const k=Math.min(1,m.riseT/m.riseDur),e=1-(1-k)*(1-k); const jig=(m.entrance==='rise')?0.18:0; m.mesh.position.y=lerp(m.startY,m.baseY,e); m.mesh.position.x=m.tx+Math.sin(m.riseT*40)*jig*(1-k); m.mesh.position.z=m.tz+Math.cos(m.riseT*37)*jig*(1-k);
       m.shadow.material.opacity=0.5*k; m.shadow.position.set(m.mesh.position.x,0.05,m.mesh.position.z); m.mesh.rotation.y=Math.atan2(p.x-m.mesh.position.x,p.z-m.mesh.position.z); if(k>=1){ m.state='active'; } continue; }
     m.mesh.rotation.y=Math.atan2(p.x-m.mesh.position.x,p.z-m.mesh.position.z);
-    if(m.hitFlash>0){ m.hitFlash-=dt; if(m.hitFlash<=0) m.mesh.material.color.setRGB(1,1,1); } if(m.slow>0) m.slow-=dt;
+    if(m.hitFlash>0){ m.hitFlash-=dt; if(m.hitFlash<=0&&m.mesh.material) m.mesh.material.color.setRGB(1,1,1); } if(m.slow>0) m.slow-=dt;
     if(m.state==='flee'){ m.fleeT-=dt; const away=new THREE.Vector3(m.mesh.position.x-p.x,0,m.mesh.position.z-p.z).normalize(); m.mesh.position.addScaledVector(away,(m.cfg.speed+3)*dt); m.mesh.position.y-=dt*1.4; if(m.fleeT<=0||m.mesh.position.y<-m.cfg.scale){ scene.remove(m.mesh); scene.remove(m.shadow); const i=monsters.indexOf(m); if(i>=0) monsters.splice(i,1); } continue; }
     m.bob+=dt; m.sway+=dt; const sp=m.spd*(m.slow>0?0.45:1);
     const to=new THREE.Vector3().subVectors(p,m.mesh.position); const dist3=to.length(); to.y=0; const horiz=to.length(); const tn=to.clone().normalize();
@@ -644,13 +659,18 @@ function update(dt){
     else { tgtY=support(m.mesh.position.x,m.mesh.position.z); }
     if(horiz>reach){ m.mesh.position.addScaledVector(dir,sp*mul*dt); }
     else { m.atkCd-=dt; if(m.atkCd<=0 && dist3<reach+2.4){ hurtPlayer(m.cfg.dmg); m.atkCd=1.0; } }
-    m.mesh.rotation.y=Math.atan2(p.x-m.mesh.position.x,p.z-m.mesh.position.z);
-    let sq=1; if(m.flinch>0){ m.flinch-=dt; sq=1-Math.sin((1-m.flinch/0.16)*Math.PI)*0.16; }
-    const wob=(m.cfg.fly?Math.sin(m.bob*2)*0.45:Math.abs(Math.sin(m.bob*7))*0.13);
-    if(m.cfg.fly||m.cfg.climb) m.mesh.position.y=lerp(m.mesh.position.y, tgtY+wob, 0.08); else m.mesh.position.y=tgtY+wob;
-    m.mesh.rotation.z=Math.sin(m.sway*1.6)*0.05;                       // gentle sway → less cardboard
-    const br=1+Math.sin(m.bob*3)*0.03;                                // idle breathing
-    m.mesh.scale.set(br/sq, sq*br, 1);
+    m.mesh.rotation.y=Math.atan2(p.x-m.mesh.position.x,p.z-m.mesh.position.z)+(m.yawOff||0);
+    if(m.kind==='3d'){
+      m.mesh.position.y=tgtY;
+      setAnim(m, (horiz<=reach && m.A&&m.A.attack) ? 'attack' : 'walk');
+    } else {
+      let sq=1; if(m.flinch>0){ m.flinch-=dt; sq=1-Math.sin((1-m.flinch/0.16)*Math.PI)*0.16; }
+      const wob=(m.cfg.fly?Math.sin(m.bob*2)*0.45:Math.abs(Math.sin(m.bob*7))*0.13);
+      if(m.cfg.fly||m.cfg.climb) m.mesh.position.y=lerp(m.mesh.position.y, tgtY+wob, 0.08); else m.mesh.position.y=tgtY+wob;
+      m.mesh.rotation.z=Math.sin(m.sway*1.6)*0.05;                     // gentle sway → less cardboard
+      const br=1+Math.sin(m.bob*3)*0.03;                               // idle breathing
+      m.mesh.scale.set(br/sq, sq*br, 1);
+    }
     m.shadow.position.set(m.mesh.position.x,0.05,m.mesh.position.z); m.shadow.material.opacity=clamp(0.5-(m.mesh.position.y-tgtY)*0.04,0.12,0.5); }
 
   for(let i=bolts.length-1;i>=0;i--){ const b=bolts[i]; b.sprite.position.addScaledVector(b.vel,dt); b.life-=dt; b.sprite.material.rotation+=dt*8; let hit=false;
@@ -727,7 +747,7 @@ $('startBtn').addEventListener('click',()=>{ audio(); MUSIC.start(); startCutsce
 
 /* ===================== BOOT ===================== */
 async function boot(){
-  await Promise.all(Object.keys(ASSETS).map(loadTex)); initScene(); bindControls(); setWeapon('arcane');
+  await Promise.all(Object.keys(ASSETS).map(loadTex)); await loadModels(); initScene(); bindControls(); setWeapon('arcane');
   isTouch = matchMedia('(pointer:coarse)').matches || ('ontouchstart' in window) || navigator.maxTouchPoints>0;
   if(isTouch) document.body.classList.add('touch');
   bindTouch();

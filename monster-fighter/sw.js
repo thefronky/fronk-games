@@ -1,6 +1,6 @@
 /* Monster Fighter service worker — runtime cache-first so it works offline
    after the first load (no need to enumerate the ~100 asset files). */
-const CACHE = 'monster-fighter-v2';
+const CACHE = 'monster-fighter-v3';
 
 self.addEventListener('install', e => { self.skipWaiting(); });
 self.addEventListener('activate', e => {
