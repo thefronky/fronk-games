@@ -1,7 +1,7 @@
 {
   "name": "Space Knights",
   "short_name": "Space Knights",
-  "description": "Fast arcade space combat. Defend the planet across the void.",
+  "description": "First-person island defense. Mine gold, raise towers, keep the fire alive — drones are coming from orbit.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "fullscreen",
