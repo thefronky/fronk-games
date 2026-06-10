@@ -13,7 +13,7 @@ phone or computer and play; **Add to Home Screen** to install it like an app.
 - **[Jetpack Jungle](jetpack-jungle/)** — jetpack platformer through a slimy,
   bioluminescent canopy. Two heroes (pellet gun vs. bazooka), one-way platforms,
   hoppers, rollers, spitters and brutes. Touch + keyboard.
-- **[Space Knights](space-knights/)** — fast arcade space combat. Touch + mouse
+- **[Space Knights](space-knights/)** — first-person island defense: mine gold, raise towers, keep the fire alive. Touch + keyboard
   + keyboard.
 
 ## Adding a new game
