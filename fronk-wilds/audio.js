@@ -1,15 +1,17 @@
 // FRONK WILDS — generative audio engine.
 // Everything is synthesized in WebAudio at runtime: no samples, no
-// copyright, no downloads. The score is the Outer-Wilds job: warm,
-// sparse, melodic — the world feels alive and a little sacred.
+// copyright, no downloads. The score's job is dread that never quite
+// announces itself: the world is beautiful, and it is not on your side.
 //
 // Layers:
-//   pads      — slow detuned chord drones, progression drifts forever
-//   plucks    — kalimba/music-box pentatonic melody, probabilistic
-//   danger    — low tension drone, gain tied to nearest-wolf distance
+//   pads      — slow detuned minor drones, progression drifts forever
+//   plucks    — sparse low plucks; the motif is a half-remembered hymn
+//   presence  — sub-bass swell that rises VERY slowly after dark
+//   danger    — detuned cluster drone + breath, tied to nearest predator
 //   wind      — filtered noise bed, slowly breathing
 //   water     — lowpassed noise, gain tied to lake proximity
-//   birds     — synthesized chirps, random, daytime
+//   birds     — rare; some replaced by a single distant corvid caw
+//   howls     — far synthesized wolf-howls at night (also public howl())
 //   foley     — footsteps, bow draw/loose, documented-chime, hurt thud
 //
 // Usage:
@@ -19,8 +21,8 @@
 //   audio.drawCreak(t01)        — call every frame while drawing the bow
 //   audio.impact(kind, dist01)  — 'flesh' | 'ground' | 'wood', 0=close 1=far
 
-const PENT = [0, 2, 4, 7, 9];          // major pentatonic degrees
-const ROOTS = [146.83, 164.81, 110.0, 130.81];   // D3 E3 A2 C3 — drift between
+const PENT = [0, 3, 5, 7, 10];         // minor pentatonic degrees
+const ROOTS = [110.0, 98.0, 82.41, 73.42];   // A2 G2 E2 D2 — drift low
 
 function noteHz(root, degree, octave = 0) {
   const d = PENT[((degree % 5) + 5) % 5] + 12 * Math.floor(degree / 5);
@@ -32,9 +34,9 @@ export class AudioEngine {
     this.started = false;
     this.muted = false;
     this._stepT = 0;
-    this._melT = 1.5;
+    this._melT = 4;
     this._chordT = 0;
-    this._birdT = 4;
+    this._birdT = 9;
     this._chordIx = 0;
     this._rootIx = 0;
     this._padVoices = [];
@@ -71,7 +73,7 @@ export class AudioEngine {
     // ── buses (music runs through a warm lowpass — no glassy edges)
     this.musicBus = C.createGain(); this.musicBus.gain.value = 0.8;
     this.musicLp = C.createBiquadFilter();
-    this.musicLp.type = 'lowpass'; this.musicLp.frequency.value = 1900;
+    this.musicLp.type = 'lowpass'; this.musicLp.frequency.value = 1450;
     this.musicLp.Q.value = 0.5;
     this.musicBus.connect(this.musicLp);
     this.musicLp.connect(this.master); this.musicLp.connect(this.verb);
@@ -106,20 +108,37 @@ export class AudioEngine {
     const wf = C.createBiquadFilter(); wf.type = 'lowpass'; wf.frequency.value = 600;
     ws.connect(wf).connect(this.waterGain).connect(this.master);
 
-    // ── danger drone (wolves)
+    // ── danger drone (predators) — detuned three-voice cluster, plus a
+    // breath of bandpassed noise so it sounds like something breathing
     this.dangerGain = C.createGain(); this.dangerGain.gain.value = 0;
     const d1 = C.createOscillator(); d1.type = 'sawtooth'; d1.frequency.value = 55;
     const d2 = C.createOscillator(); d2.type = 'sawtooth'; d2.frequency.value = 58.3; // minor-2nd beat
-    const dlp = C.createBiquadFilter(); dlp.type = 'lowpass'; dlp.frequency.value = 220;
-    const dg = C.createGain(); dg.gain.value = 0.5;
-    d1.connect(dg); d2.connect(dg); dg.connect(dlp).connect(this.dangerGain)
-      .connect(this.master);
-    d1.start(); d2.start();
+    const d3 = C.createOscillator(); d3.type = 'sawtooth'; d3.frequency.value = 53.6; // cluster underside
+    d3.detune.value = -9;
+    const dlp = C.createBiquadFilter(); dlp.type = 'lowpass'; dlp.frequency.value = 210;
+    const dg = C.createGain(); dg.gain.value = 0.46;
+    d1.connect(dg); d2.connect(dg); d3.connect(dg);
+    dg.connect(dlp).connect(this.dangerGain).connect(this.master);
+    d1.start(); d2.start(); d3.start();
+    const breath = this._noiseLoop();
+    const bbp = C.createBiquadFilter(); bbp.type = 'bandpass';
+    bbp.frequency.value = 640; bbp.Q.value = 1.8;
+    const bg = C.createGain(); bg.gain.value = 0.30;
+    breath.connect(bbp).connect(bg).connect(this.dangerGain);
+
+    // ── presence — paired sines just under hearing's floor; the swell
+    // is driven from update() and rises VERY slowly at night
+    this.subGain = C.createGain(); this.subGain.gain.value = 0;
+    const sub1 = C.createOscillator(); sub1.type = 'sine'; sub1.frequency.value = 31;
+    const sub2 = C.createOscillator(); sub2.type = 'sine'; sub2.frequency.value = 31.43; // slow beat
+    sub1.connect(this.subGain); sub2.connect(this.subGain);
+    this.subGain.connect(this.master);
+    sub1.start(); sub2.start();
 
     // ── pads: 3 chord voices, retuned at chord changes
     for (let v = 0; v < 3; v++) {
       const o1 = C.createOscillator(); o1.type = 'triangle';
-      const o2 = C.createOscillator(); o2.type = 'sine'; o2.detune.value = 7;
+      const o2 = C.createOscillator(); o2.type = 'sine'; o2.detune.value = 11;
       const g = C.createGain(); g.gain.value = 0;
       const lp = C.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 900;
       o1.connect(lp); o2.connect(lp); lp.connect(g);
@@ -180,18 +199,20 @@ export class AudioEngine {
     o.start(t); o2.start(t); o.stop(t + 9.2); o2.stop(t + 9.2);
   }
 
-  // the recurring theme — a real motif, so the score has an identity.
-  // Same bones every time, small variations, like someone remembering
-  // a song rather than playing one.
+  // the recurring theme — a hymn nobody fully remembers. Slow, falling,
+  // plagal bones; notes simply fail to arrive sometimes, like a verse
+  // sung alone in a big dark room.
   _motif() {
     const root = ROOTS[this._rootIx];
-    const oct = Math.random() < 0.3 ? 1 : 0;
-    const notes = [[4, 0, .5], [7, .42, .42], [9, .84, .5], [7, 1.5, .38],
-                   [4, 1.92, .42], [Math.random() < 0.5 ? 2 : 5, 2.62, .5]];
+    const oct = Math.random() < 0.12 ? 1 : 0;
+    const notes = [[3, 0, .38], [2, 1.15, .30], [0, 2.4, .40], [1, 3.8, .26],
+                   [0, 5.0, .34], [Math.random() < 0.5 ? -1 : -2, 6.6, .28]];
     for (const [deg, when, vel] of notes)
-      this._pluck(noteHz(root, deg, oct), vel, when);
-    // answering low note, like an exhale
-    this._pluck(noteHz(root, 0, oct - 1), 0.3, 3.4);
+      if (Math.random() < 0.8)            // half-remembered: notes go missing
+        this._pluck(noteHz(root, deg, oct), vel, when);
+    // low tonic exhale, an octave under, not always there
+    if (Math.random() < 0.7)
+      this._pluck(noteHz(root, 0, oct - 1), 0.24, 8.3);
   }
 
   // kalimba pluck — the melodic voice
@@ -421,7 +442,7 @@ export class AudioEngine {
   }
   _cricket() {
     const C = this.ctx, t = C.currentTime;
-    const n = 5 + (Math.random() * 5 | 0);
+    const n = 3 + (Math.random() * 3 | 0);    // sparser — fewer voices left
     const base = 4200 + Math.random() * 800;
     for (let i = 0; i < n; i++) {
       const o = C.createOscillator(); o.type = 'sine';
@@ -453,6 +474,66 @@ export class AudioEngine {
       else o.connect(g).connect(this.master);
       o.start(t0); o.stop(t0 + 0.12);
     }
+  }
+  _corvid() {                       // one far crow — dry, wrong, alone
+    const C = this.ctx, t = C.currentTime;
+    const o = C.createOscillator(); o.type = 'sawtooth';
+    o.frequency.setValueAtTime(620 + Math.random() * 140, t);
+    o.frequency.exponentialRampToValueAtTime(420, t + 0.17);
+    const rasp = C.createOscillator(); rasp.type = 'square';
+    rasp.frequency.value = 64 + Math.random() * 28;   // AM rasp in the throat
+    const rg = C.createGain(); rg.gain.value = 0.5;
+    const am = C.createGain(); am.gain.value = 1;
+    rasp.connect(rg).connect(am.gain);
+    const bp = C.createBiquadFilter(); bp.type = 'bandpass';
+    bp.frequency.value = 1050 + Math.random() * 250; bp.Q.value = 1.5;
+    const g = C.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.05, t + 0.025);
+    g.gain.exponentialRampToValueAtTime(0.0006, t + 0.23);
+    o.connect(am); am.connect(bp).connect(g);
+    let tail = g;
+    if (C.createStereoPanner) {
+      const p = C.createStereoPanner(); p.pan.value = Math.random() * 1.6 - 0.8;
+      g.connect(p); tail = p;
+    }
+    tail.connect(this.verb);          // distance is mostly reverb
+    const dry = C.createGain(); dry.gain.value = 0.35;
+    tail.connect(dry).connect(this.master);
+    o.start(t); o.stop(t + 0.25); rasp.start(t); rasp.stop(t + 0.25);
+  }
+
+  howl(pan = 0, vol = 0.07) {         // far wolf — sine glide, vibrato, reverb
+    if (!this.started) return;
+    const C = this.ctx, t = C.currentTime;
+    const o = C.createOscillator(); o.type = 'sine';
+    const f0 = 215 + Math.random() * 65;
+    o.frequency.setValueAtTime(f0, t);
+    o.frequency.linearRampToValueAtTime(f0 * 1.9, t + 0.9);    // the rise
+    o.frequency.setValueAtTime(f0 * 1.9, t + 2.1);
+    o.frequency.exponentialRampToValueAtTime(f0 * 1.12, t + 3.4); // sag away
+    const vib = C.createOscillator(); vib.frequency.value = 4.8 + Math.random();
+    const vg = C.createGain();
+    vg.gain.setValueAtTime(0, t);
+    vg.gain.linearRampToValueAtTime(9, t + 1.5);               // vibrato blooms late
+    vib.connect(vg).connect(o.frequency);
+    const lp = C.createBiquadFilter(); lp.type = 'lowpass';
+    lp.frequency.value = 880; lp.Q.value = 0.7;
+    const g = C.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(vol, t + 1.1);
+    g.gain.setValueAtTime(vol, t + 2.3);
+    g.gain.exponentialRampToValueAtTime(0.0005, t + 3.6);
+    o.connect(lp).connect(g);
+    let tail = g;
+    if (C.createStereoPanner) {
+      const p = C.createStereoPanner(); p.pan.value = pan;
+      g.connect(p); tail = p;
+    }
+    tail.connect(this.verb);          // mostly wet — it is far away
+    const dry = C.createGain(); dry.gain.value = 0.28;
+    tail.connect(dry).connect(this.master);
+    o.start(t); o.stop(t + 3.7); vib.start(t); vib.stop(t + 3.7);
   }
 
   beacon(pan = 0, vol = 0.15) {       // distant chime toward a landmark
@@ -499,6 +580,7 @@ export class AudioEngine {
       return;
     }
     const t = C.currentTime;
+    const night = s.night || 0;
 
     // creak watchdog: if the game stops calling drawCreak (draw was
     // cancelled), fade the managed creak nodes out instead of droning.
@@ -518,9 +600,14 @@ export class AudioEngine {
 
     // danger by wolf proximity (starts at 34m, max at 6m)
     const dz = Math.max(0, Math.min(1, 1 - (s.wolfDist - 6) / 28));
-    this.dangerGain.gain.setTargetAtTime(dz * dz * 0.26, t, 0.4);
+    this.dangerGain.gain.setTargetAtTime(dz * dz * 0.3, t, 0.4);
     // melody backs off when danger is high
     const melodyDamp = 1 - dz * 0.85;
+
+    // presence — sub-bass that rises VERY slowly once it's truly dark,
+    // and drains away much faster at dawn
+    const presence = night > 0.55 ? 0.10 + 0.025 * Math.sin(t * 0.045) : 0;
+    this.subGain.gain.setTargetAtTime(presence, t, presence > 0 ? 24 : 4);
 
     // chord drift
     this._chordT -= dt;
@@ -531,24 +618,24 @@ export class AudioEngine {
       this._setChord(this._chordIx);
     }
 
-    // the motif returns every 40-75s — the score's identity
-    this._motifT = (this._motifT ?? 14) - dt;
+    // the hymn returns every 60-110s — long enough to half-forget it
+    this._motifT = (this._motifT ?? 20) - dt;
     if (this._motifT <= 0 && dz < 0.3) {
-      this._motifT = 40 + Math.random() * 35;
+      this._motifT = 60 + Math.random() * 50;
       this._motif();
     }
 
     // sparse melody — random walk on the current chord's scale
     this._melT -= dt;
     if (this._melT <= 0) {
-      this._melT = 1.6 + Math.random() * 3.4;
-      if (Math.random() < 0.78 * melodyDamp) {
-        this._melDeg = (this._melDeg ?? 4) + ((Math.random() * 5 | 0) - 2);
-        this._melDeg = Math.max(-2, Math.min(11, this._melDeg));
+      this._melT = 3 + Math.random() * 6;
+      if (Math.random() < 0.55 * melodyDamp) {
+        this._melDeg = (this._melDeg ?? 2) + ((Math.random() * 5 | 0) - 2);
+        this._melDeg = Math.max(-4, Math.min(8, this._melDeg));
         const root = ROOTS[this._rootIx];
-        this._pluck(noteHz(root, this._melDeg, 0), 0.3 + Math.random() * 0.3);
-        if (Math.random() < 0.3)   // grace echo a third up
-          this._pluck(noteHz(root, this._melDeg + 2, 0), 0.18, 0.21);
+        this._pluck(noteHz(root, this._melDeg, 0), 0.26 + Math.random() * 0.26);
+        if (Math.random() < 0.22)  // grace echo a third up
+          this._pluck(noteHz(root, this._melDeg + 2, 0), 0.15, 0.26);
       }
     }
 
