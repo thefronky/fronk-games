@@ -1,10 +1,14 @@
 // FRONK WILDS — open-world scout-survey (hunting) game
 // Three.js r160, Quaternius CC0 animated animals, all procedural world.
-window._V = 7;
+window._V = 8;
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
+import { AudioEngine } from './audio.js';
+
+const audio = new AudioEngine();
+window._audio = audio;
 
 // ───────────────────────── config ─────────────────────────
 const IS_TOUCH = matchMedia('(pointer: coarse)').matches;
@@ -439,6 +443,7 @@ function killAnimal(a) {
   setAnim(a, 'Death', true);
   score[a.name] = (score[a.name] || 0) + 1;
   toast(pick(LINES[a.name]));
+  audio.documented();
   renderNotes();
 }
 
@@ -453,6 +458,7 @@ let started = false, drawT = 0, drawing = false, dead = false;
 function hurtPlayer(dmg) {
   if (dead) return;
   player.hp -= dmg; player.lastHit = clock.elapsedTime;
+  audio.thud();
   document.getElementById('hurt').style.opacity = 1;
   setTimeout(() => document.getElementById('hurt').style.opacity = 0, 280);
   toast(pick(LINES.bite));
@@ -481,6 +487,7 @@ function loose() {
   m.position.copy(camera.position).addScaledVector(dir, 0.8);
   scene.add(m);
   arrows.push({ m, v: dir.multiplyScalar(26 + power * 38), t: 6, power });
+  audio.twang();
   drawT = 0;
 }
 
@@ -675,6 +682,18 @@ function tickBody() {
 
     // slow regen
     if (t - player.lastHit > 8 && player.hp < 100) { player.hp = Math.min(100, player.hp + dt * 6); renderHP(); }
+
+    // feed the score
+    let wolfDist = 999;
+    for (const a of animals)
+      if (a.cfg.hunts && !a.dead) {
+        const dd = Math.hypot(a.obj.position.x - player.x, a.obj.position.z - player.z);
+        if (dd < wolfDist) wolfDist = dd;
+      }
+    audio.update(dt, {
+      moving: !!(mx || mz), sprint: !!keys.ShiftLeft,
+      wolfDist, lakeDist: Math.hypot(player.x - 70, player.z + 90),
+    });
   }
 
   camera.position.set(player.x, player.y + EYE, player.z);
@@ -707,6 +726,7 @@ loadAnimals().then(() => {
 
 document.getElementById('play').addEventListener('click', () => {
   started = true;
+  try { audio.start(); } catch (e) { console.warn('audio unavailable:', e); }
   document.getElementById('title').style.opacity = 0;
   setTimeout(() => document.getElementById('title').style.display = 'none', 650);
   if (!IS_TOUCH) canvas.requestPointerLock();
@@ -715,5 +735,13 @@ document.getElementById('play').addEventListener('click', () => {
 canvas.addEventListener('click', () => {
   if (started && !IS_TOUCH && !document.pointerLockElement) canvas.requestPointerLock();
 });
+{
+  const muteEl = document.getElementById('mute');
+  const toggle = (e) => { e.preventDefault(); e.stopPropagation();
+    audio.setMuted(!audio.muted);
+    muteEl.textContent = audio.muted ? '🔇' : '🔊'; };
+  muteEl.addEventListener('click', toggle);
+  muteEl.addEventListener('touchstart', toggle, { passive: false });
+}
 
 tick();
