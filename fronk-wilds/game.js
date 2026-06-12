@@ -29,8 +29,8 @@ const SPECIES = {
   Stag: { n: 3,  speed: 2.7, gallop: 10.0, hp: 2, flee: 26, r: 1.7 },
   Fox:  { n: 4,  speed: 3.4, gallop: 11.5, hp: 1, flee: 22, r: 1.0 },
   Wolf: { n: 3,  speed: 3.2, gallop: 8.8,  hp: 2, flee: 0,  r: 1.2,
-          hunts: true, aggroR: 38, dmg: 22, packR: 70 },
-          // circles before committing; after dark it calls a partner
+          hunts: true, aggroR: 38, dmg: 22, packR: 80 },
+          // circles before committing; after dark the whole pack answers
   Bull: { n: 3,  speed: 2.2, gallop: 9.6,  hp: 3, flee: 0,  r: 1.7,
           territorial: 16, dmg: 30 },
           // wanders calm — gives ONE warning stomp, then it's a freight train
@@ -931,17 +931,36 @@ async function loadAnimals() {
   const names = Object.keys(SPECIES);
   await Promise.all(names.map(n => new Promise((res, rej) =>
     loader.load(`assets/animals/${n}.glb`, g => { prefabs[n] = g; res(); }, undefined, rej))));
-  for (const n of names) for (let i = 0; i < SPECIES[n].n; i++) spawn(n);
+  for (const n of names) {
+    if (n === 'Deer') {                 // deer come in herds, 2–4 to a group
+      let left = SPECIES.Deer.n, herd = 0;
+      while (left > 0) {
+        const size = Math.min(left, 2 + Math.floor(Math.random() * 3));
+        const lead = spawn('Deer');
+        lead.herdId = ++herd;
+        for (let i = 1; i < size; i++) {
+          const f = spawn('Deer', lead.obj.position);
+          f.herdId = herd; f.herdLeader = lead;
+        }
+        left -= size;
+      }
+    } else for (let i = 0; i < SPECIES[n].n; i++) spawn(n);
+  }
 }
 
-function spawn(name) {
+function spawn(name, near) {
   const cfg = SPECIES[name], prefab = prefabs[name];
   const obj = SkeletonUtils.clone(prefab.scene);
   obj.traverse(o => { if (o.isMesh) { o.castShadow = true; o.frustumCulled = true; } });
   let x, z, y, tries = 0;
   do {
-    x = (Math.random() - 0.5) * WORLD * 0.85;
-    z = (Math.random() - 0.5) * WORLD * 0.85;
+    if (near && tries < 40) {           // herd member — settle near the anchor
+      x = near.x + (Math.random() - 0.5) * 18;
+      z = near.z + (Math.random() - 0.5) * 18;
+    } else {
+      x = (Math.random() - 0.5) * WORLD * 0.85;
+      z = (Math.random() - 0.5) * WORLD * 0.85;
+    }
     y = heightAt(x, z);
   } while ((y < WATER_Y + 1 || Math.hypot(x, z) < 45) && tries++ < 60);
   obj.position.set(x, y, z);
@@ -1016,9 +1035,24 @@ function animalUpdate(a, dt) {
     a.t -= dt;
     // a kill is MEAT — walk to the carcass and you eat (or pack it)
     if (!a.eaten && !a.isCryptid) {
+      // left to rot 60s+, the smell travels — the nearest calm wolf claims it
+      a.rotAge = (a.rotAge || 0) + dt;
+      a._scavRetry = (a._scavRetry || 0) - dt;
+      if (a.rotAge > 60 && !a.claimed && a._scavRetry <= 0) {
+        a._scavRetry = 4;
+        let best = null, bd = 1e9;
+        for (const o of animals) {
+          if (o.name !== 'Wolf' || o.dead || o.aggro || o.scavTarget || o.scavT > 0) continue;
+          const ddx = o.obj.position.x - a.obj.position.x,
+                ddz = o.obj.position.z - a.obj.position.z;
+          const d2 = ddx * ddx + ddz * ddz;
+          if (d2 < bd) { bd = d2; best = o; }
+        }
+        if (best) { best.scavTarget = a; a.claimed = true; a.t = Math.max(a.t, 40); }
+      }
       const dd = Math.hypot(player.x - a.obj.position.x, player.z - a.obj.position.z);
       if (dd < 2.4) {
-        a.eaten = true;
+        a.eaten = true; a.t = Math.min(a.t, 9);
         player.lastAte = clock.elapsedTime;
         if (player.hp < 95) {
           player.hp = Math.min(100, player.hp + 40); renderHP();
@@ -1050,12 +1084,14 @@ function animalUpdate(a, dt) {
     // wolves grow bolder after dark — wider trigger, and they don't come alone
     const night = window._night || 0;
     const trigger = (a.cfg.aggroR || a.cfg.territorial)
-      * (a.cfg.hunts && !a.isCryptid && night > 0.4 ? 1.25 : 1);
+      * (a.cfg.hunts && !a.isCryptid && night > 0.4 ? 1.3 : 1);
     if (a.aggro && dist > trigger * 2.2) {    // lost you
-      a.aggro = false; a.warned = false; a.circleT = 0;
+      a.aggro = false; a.warned = false; a.circleT = 0; a.packBias = 0;
       if (a.state === 'warn' || a.state === 'stare') { a.state = 'idle'; a.t = 1; }
     }
-    if (dist < 2.8) {
+    if (scavUpdate(a, dt, dist)) {
+      // the carcass has its attention — you are not interesting yet
+    } else if (dist < 2.8) {
       a.state = 'attack'; a.aggro = true;
       if (a.attackCd <= 0) {
         setAnim(a, 'Attack', true); a.attackCd = 1.5;
@@ -1091,12 +1127,15 @@ function animalUpdate(a, dt) {
         a.state = 'stalk';
         // the cryptid circles as it closes — unsettling, hard to hit
         const drift = a.isCryptid ? Math.sin(clock.elapsedTime * 0.9) * 0.55 : 0;
+        // wolves run a touch hotter every night you survive (cap +15%)
+        const haste = a.name === 'Wolf'
+          ? 1 + Math.min(0.15, 0.05 * (window._nights || 0)) : 1;
         if (a.circleT > 0 && dist > 8 && dist < trigger * 1.5) {
           // the circling pass — flank-walk, spiraling slowly inward
           a.circleT -= dt;
           a.dir = Math.atan2(dx, dz) + a.circleDir * 1.25;
           setAnim(a, 'Walk');
-          stepAnimal(a, a.cfg.speed * 1.3, dt);
+          stepAnimal(a, a.cfg.speed * 1.3 * haste, dt);
         } else {
           // committed. Wolves prefer the side you AREN'T looking at —
           // if you can see it coming, it angles for your back instead.
@@ -1105,10 +1144,12 @@ function animalUpdate(a, dt) {
               && Math.sin(player.yaw) * dx + Math.cos(player.yaw) * dz > 0) {
             ax += Math.sin(player.yaw) * 6; az += Math.cos(player.yaw) * 6;
           }
-          a.dir = Math.atan2(ax, az) + drift;
+          // pack members hold offset bearings — they arrive from different angles
+          a.dir = Math.atan2(ax, az) + drift
+            + (a.packBias && dist > 11 ? a.packBias : 0);
           const fast = dist < (a.isCryptid ? 30 : 17);
           setAnim(a, fast ? 'Gallop' : 'Walk');
-          stepAnimal(a, fast ? a.cfg.gallop : a.cfg.speed, dt);
+          stepAnimal(a, (fast ? a.cfg.gallop : a.cfg.speed) * haste, dt);
         }
       }
     } else wander(a, dt);
@@ -1137,28 +1178,76 @@ function animalUpdate(a, dt) {
     } else if (dist < spookRadius(a, dist)) {
       a.state = 'flee'; a.t = 5 + Math.random() * 4;
       a.dir = Math.atan2(-dx, -dz) + (Math.random() - 0.5) * 0.7;
+      spookHerd(a);                       // one spooks, the herd spooks
     } else wander(a, dt);
   }
   a.obj.rotation.y = lerpAngle(a.obj.rotation.y, a.dir, Math.min(1, dt * 6));
 }
 
-// a wolf that commits to a hunt calls the nearest calm wolf to join —
-// loose pairs after dark. Runs once per aggro transition, scalars only.
+// a wolf that commits to a hunt calls EVERY calm wolf in earshot —
+// the whole pack answers after dark, each fanning to its own bearing.
+// Runs once per aggro transition, scalars only.
 function packCall(w) {
-  const pr = (w.cfg.packR || 70); const pr2 = pr * pr;
-  let best = null, bd = pr2;
+  const pr = (w.cfg.packR || 80); const pr2 = pr * pr;
+  w.packBias = 0;                           // the caller takes the straight line
+  let side = 1;
   for (const o of animals) {
     if (o === w || o.name !== 'Wolf' || o.dead || o.aggro) continue;
     const ddx = o.obj.position.x - w.obj.position.x,
           ddz = o.obj.position.z - w.obj.position.z;
-    const d2 = ddx * ddx + ddz * ddz;
-    if (d2 < bd) { bd = d2; best = o; }
+    if (ddx * ddx + ddz * ddz > pr2) continue;
+    o.aggro = true;
+    o.state = 'stalk';
+    o.scavTarget = null; o.scavT = 0;       // the live hunt outranks carrion
+    o.circleT = 3 + Math.random() * 2;
+    o.circleDir = side * -(w.circleDir || 1);
+    o.packBias = side * 0.7;                // approach from a DIFFERENT angle
+    side = -side;
   }
-  if (best) {
-    best.aggro = true;
-    best.state = 'stalk';
-    best.circleT = 3 + Math.random() * 2;
-    best.circleDir = -(w.circleDir || 1);   // it takes the OTHER side
+}
+
+// scavenger detour — a wolf claimed by a rotting carcass walks to it,
+// parks 20s to feed, and ignores you unless you walk into its meal.
+function scavUpdate(a, dt, dist) {
+  if (a.scavT > 0) {                        // parked, feeding
+    if (dist < 8) { a.scavT = 0; a.scavTarget = null; return false; }
+    a.scavT -= dt;
+    const c = a.scavTarget;
+    if (c) a.dir = Math.atan2(c.obj.position.x - a.obj.position.x,
+                              c.obj.position.z - a.obj.position.z);
+    setAnim(a, 'Eating');
+    if (a.scavT <= 0) {                     // done — the woods waste nothing
+      if (c && !c.eaten) { c.eaten = true; c.t = Math.min(c.t, 7); }
+      a.scavTarget = null;
+    }
+    return true;
+  }
+  const c = a.scavTarget;
+  if (!c) return false;
+  if (c.eaten || c.t <= 0 || a.aggro || dist < 8) { a.scavTarget = null; return false; }
+  const cdx = c.obj.position.x - a.obj.position.x,
+        cdz = c.obj.position.z - a.obj.position.z;
+  if (Math.hypot(cdx, cdz) < 2.3) { a.scavT = 20; setAnim(a, 'Eating'); }
+  else {
+    a.dir = Math.atan2(cdx, cdz);
+    setAnim(a, 'Walk');
+    stepAnimal(a, a.cfg.speed * 1.15, dt);
+  }
+  return true;
+}
+
+// one deer catches you — every herd-mate inside 25m bolts with it
+function spookHerd(a) {
+  if (!a.herdId) return;
+  const p = a.obj.position;
+  for (const o of animals) {
+    if (o === a || o.herdId !== a.herdId || o.dead
+        || o.state === 'flee' || o.state === 'waddle') continue;
+    const dx = o.obj.position.x - p.x, dz = o.obj.position.z - p.z;
+    if (dx * dx + dz * dz > 625) continue;  // 25m
+    o.state = 'flee'; o.t = 5 + Math.random() * 4;
+    o.dir = Math.atan2(o.obj.position.x - player.x,
+                       o.obj.position.z - player.z) + (Math.random() - 0.5) * 0.7;
   }
 }
 
@@ -1176,6 +1265,16 @@ function wander(a, dt) {
         const p = a.obj.position;
         a.dir = Math.atan2(player.x - p.x, player.z - p.z)
           + (Math.random() - 0.5) * 1.2;
+      }
+      // herd followers drift back toward the leader when they stray >12m
+      if (a.herdLeader) {
+        if (a.herdLeader.dead) a.herdLeader = null;   // herd broken
+        else {
+          const lp = a.herdLeader.obj.position, p = a.obj.position;
+          const ldx = lp.x - p.x, ldz = lp.z - p.z;
+          if (ldx * ldx + ldz * ldz > 144)
+            a.dir = Math.atan2(ldx, ldz) + (Math.random() - 0.5) * 0.8;
+        }
       }
     }
   }
@@ -1292,7 +1391,7 @@ const VOICE = {
 };
 
 function killAnimal(a, suffered = false) {
-  a.dead = true; a.t = 12;
+  a.dead = true; a.t = 75;   // carcasses linger — long enough for scavengers
   a.suffered = suffered || !!a.bleeding || a.state === 'waddle';
   setAnim(a, 'Death', true);
   score[a.name] = (score[a.name] || 0) + 1;
@@ -1385,12 +1484,36 @@ function cryptidStare(a, dx, dz, dist, dt) {
   return true;
 }
 
+// the world notices you: each dawn survived raises the stakes
+window._nights = window._nights || 0;
+let dreadAmt = 0, musicDucked = false;
+
+// stare-freeze silences the music — the woods hold their breath
+function duckMusic(on) {
+  if (on === musicDucked) return;
+  const A = audio;
+  if (!A || !A.musicBus || A._musicLevel == null) return;   // guard: pre-init
+  musicDucked = on;
+  A._musicBase = A._musicBase ?? A._musicLevel;
+  A._musicLevel = on ? A._musicBase * 0.05 : A._musicBase;  // sidechain-safe
+  A.musicBus.gain.setTargetAtTime(
+    A._musicLevel, A.musicBus.context.currentTime, on ? 0.35 : 0.9);
+}
+
 function cryptidUpdate(night) {
   if (night > 0.65 && !nightRolled) {
     nightRolled = true;
-    if (!cryptid && Math.random() < CRYPTID_CHANCE) spawnCryptid();
+    const n = window._nights;
+    // nights 2+: it comes more often, and the woods send another wolf
+    if (!cryptid && Math.random() < (n >= 1 ? 0.65 : CRYPTID_CHANCE)) spawnCryptid();
+    if (n >= 1 && prefabs.Wolf) {
+      let wolves = 0;
+      for (const o of animals) if (o.name === 'Wolf' && !o.dead) wolves++;
+      if (wolves < 6) spawn('Wolf');
+    }
   }
   if (night < 0.3) {
+    if (nightRolled) window._nights++;    // you lasted the dark. It counts.
     nightRolled = false;
     if (cryptid && !cryptid.dead) {       // dawn — it leaves. For now.
       scene.remove(cryptid.obj);
@@ -1399,6 +1522,22 @@ function cryptidUpdate(night) {
       toast('Dawn. It withdrew, unfed. It will not stay unfed.', 4200);
     }
   }
+  // dread veil — while it stands within 80m, light drains and the fog
+  // leans in. Smooth both ways; bases are recomputed upstream each frame,
+  // so multiplying here self-restores the moment it dies or withdraws.
+  let want = 0;
+  if (cryptid && !cryptid.dead) {
+    const d = Math.hypot(cryptid.obj.position.x - player.x,
+                         cryptid.obj.position.z - player.z);
+    if (d < 80) want = 1;
+  }
+  dreadAmt += (want - dreadAmt) * 0.045;
+  if (dreadAmt > 0.002) {
+    hemi.intensity *= 1 - 0.25 * dreadAmt;
+    scene.fog.near *= 1 - 0.15 * dreadAmt;
+    scene.fog.far  *= 1 - 0.15 * dreadAmt;
+  }
+  duckMusic(!!(cryptid && !cryptid.dead && cryptid.state === 'stare'));
 }
 
 // ───────────────────────── player ─────────────────────────
