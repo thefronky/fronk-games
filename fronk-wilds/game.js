@@ -1,6 +1,6 @@
 // FRONK WILDS — open-world scout-survey (hunting) game
 // Three.js r160, Quaternius CC0 animated animals, all procedural world.
-window._V = 13;
+window._V = 14;
 window._spawnCryptid = () => spawnCryptid();   // debug
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
@@ -72,8 +72,11 @@ renderer.toneMappingExposure = 1.22;
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xe8b07a);
 
-// post-processing — the single biggest "rendered" multiplier: bloom
-// makes the sun, fire, fireflies, mushrooms and the Door GLOW
+// post-processing — bloom makes sun/fire/fireflies/the Door GLOW.
+// DISABLED on touch devices: mobile Safari renders the composer
+// chain black (Fronk's phone, 2026-06-12). ?bloom=1 forces it on.
+const USE_POST = !IS_TOUCH
+  || new URLSearchParams(location.search).get('bloom') === '1';
 const composer = new EffectComposer(renderer);
 let bloomPass;
 scene.fog = new THREE.Fog(0xe8b07a, 80, 400);
@@ -161,14 +164,51 @@ function vnoise(x, z) {
   return (_h(ix, iz) * (1 - ux) + _h(ix + 1, iz) * ux) * (1 - uz)
        + (_h(ix, iz + 1) * (1 - ux) + _h(ix + 1, iz + 1) * ux) * uz;
 }
+function ridged(x, z, f) {
+  return 1 - Math.abs(vnoise(x * f, z * f) * 2 - 1);
+}
+
+// Terrain v2 — the reference-demo recipe: COMPOSED features, not
+// uniform noise. An alpine massif, a valley carved toward the lake,
+// a mountain rim ringing the world, rolling hills as filler — all
+// domain-warped so nothing reads as flat planes.
 function heightAt(x, z) {
-  let a = 0, f = 0.0042, amp = 26;
-  for (let o = 0; o < 4; o++) { a += (vnoise(x * f + 37, z * f + 91) - 0.5) * 2 * amp; f *= 2.1; amp *= 0.44; }
+  // domain warp — bends every feature organically
+  const wx = x + (vnoise(x * 0.004 + 91, z * 0.004 + 17) - 0.5) * 64;
+  const wz = z + (vnoise(x * 0.004 - 44, z * 0.004 + 71) - 0.5) * 64;
+
+  // rolling hills baseline
+  let a = 0, f = 0.0042, amp = 21;
+  for (let o = 0; o < 4; o++) { a += (vnoise(wx * f + 37, wz * f + 91) - 0.5) * 2 * amp; f *= 2.1; amp *= 0.44; }
+
+  // NE alpine massif — serrated ridges, the vista anchor
+  const dm = Math.hypot(wx - 235, wz - 235) / 250;
+  if (dm < 1.3) {
+    const m = Math.pow(Math.max(0, 1 - dm), 1.5);
+    const r = ridged(wx + 13, wz - 7, 0.011) * 0.62 + ridged(wx, wz, 0.026) * 0.38;
+    a += m * r * 125;
+  }
+
+  // mountain rim — the whole world sits in a bowl of peaks
+  const rr = Math.hypot(x, z);
+  if (rr > 330) {
+    const rim = Math.min((rr - 330) / 100, 1.25);
+    a += Math.pow(rim, 1.7) * (35 + ridged(wx - 31, wz + 57, 0.015) * 85);
+  }
+
+  // glacial valley: massif → lake, carved along the segment
+  {
+    const ax = 200, az = 200, bx = 70, bz = -90;
+    const abx = bx - ax, abz = bz - az;
+    const tt = Math.max(0, Math.min(1,
+      ((x - ax) * abx + (z - az) * abz) / (abx * abx + abz * abz)));
+    const dv = Math.hypot(x - (ax + abx * tt), z - (az + abz * tt));
+    a -= Math.max(0, 1 - dv / 90) * 26 * (0.4 + tt * 0.6);
+  }
+
   // central lake basin
   const d = Math.hypot(x - 70, z + 90) / 130;
   a -= Math.max(0, 1 - d * d) * 17;
-  // gentle bowl toward edges so you see hills around you
-  a += Math.hypot(x, z) / WORLD * 13;
   return a;
 }
 
@@ -179,16 +219,22 @@ function heightAt(x, z) {
   const pos = g.attributes.position;
   const colors = new Float32Array(pos.count * 3);
   const grassC = new THREE.Color(0x6d8f3e), dryC = new THREE.Color(0x9aa04c),
-        dirtC = new THREE.Color(0x7c5b35), rockC = new THREE.Color(0x8d8678),
+        dirtC = new THREE.Color(0x7c5b35), rockC = new THREE.Color(0x73716b),
         sandC = new THREE.Color(0xc2a368);
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i), z = pos.getZ(i), y = heightAt(x, z);
     pos.setY(i, y);
     const t = vnoise(x * 0.02, z * 0.02);
     let c = grassC.clone().lerp(dryC, t * 0.9);
-    if (y < WATER_Y + 1.2) c = sandC.clone();
-    else if (y > 21) c = rockC.clone();
-    else if (y > 15) c = c.lerp(rockC, (y - 15) / 6);
+    const snowLine = 50 + (t - 0.5) * 12;
+    if (y < WATER_Y + 0.55) c = sandC.clone();
+    else if (y < WATER_Y + 1.8) c = sandC.clone()
+      .lerp(c, (y - WATER_Y - 0.55) / 1.25);
+    else if (y > snowLine) c = new THREE.Color(0xf2f4f6)
+      .lerp(rockC, Math.max(0, 1 - (y - snowLine) / 10) * 0.5);
+    else if (y > 26) c = rockC.clone()
+      .lerp(dirtC, vnoise(x * 0.05, z * 0.05) * 0.3);
+    else if (y > 19) c = c.lerp(rockC, (y - 19) / 7);
     else if (t > 0.86) c = c.lerp(dirtC, 0.3);
     // micro variation — kills the flat "planes" look up close
     c.offsetHSL(0, 0, (vnoise(x * 0.31 + 7, z * 0.31 + 3) - 0.5) * 0.07);
@@ -292,27 +338,60 @@ const windUniforms = { uTime: { value: 0 } };
        transformed.x += (sin(uTime*1.9 + ph) + 0.4*sin(uTime*3.7 + ph*1.7)) * bendY * 0.55;
        transformed.z += cos(uTime*1.4 + ph) * bendY * 0.38;`);
   };
+  // REAL grass = density where you're standing. The field is a dense
+  // ±R box that follows the player: blades that fall behind wrap
+  // toroidally to the front and re-sample the terrain. ~5 blades/m²
+  // instead of a bald 0.05 spread over the whole map.
   const inst = new THREE.InstancedMesh(geo, mat, CFG.grass);
+  inst.frustumCulled = false;
+  const R = 42;
+  const gPos = [];
   const M = new THREE.Matrix4(), Q = new THREE.Quaternion(),
         S = new THREE.Vector3(), P = new THREE.Vector3(), E = new THREE.Euler();
-  let placed = 0, guard = 0;
-  while (placed < CFG.grass && guard++ < CFG.grass * 12) {
-    const x = (Math.random() - 0.5) * WORLD * 0.94,
-          z = (Math.random() - 0.5) * WORLD * 0.94,
-          y = heightAt(x, z);
-    if (y < WATER_Y + 0.7 || y > 16) continue;
-    P.set(x, y - 0.05, z);
-    E.set((Math.random() - 0.5) * 0.3, Math.random() * Math.PI,
-          (Math.random() - 0.5) * 0.3); Q.setFromEuler(E);
-    const s = 0.6 + Math.random() * 0.75; S.set(s, s * (0.75 + Math.random() * 0.6), s);
-    inst.setMatrixAt(placed, M.compose(P, Q, S));
-    inst.setColorAt(placed, new THREE.Color().setHSL(
+  const setBlade = (i) => {
+    const g = gPos[i];
+    const y = heightAt(g.x, g.z);
+    // fade out toward the field edge so the follow-ring never shows a line
+    const dEdge = Math.max(Math.abs(g.x - player.x), Math.abs(g.z - player.z));
+    const fade = Math.max(0, Math.min(1, (R - dEdge) / 9));
+    if (y < WATER_Y + 0.5 || y > 18 || fade <= 0) { S.set(0, 0, 0); }
+    else S.set(g.s * fade, g.s * g.sy * fade, g.s * fade);
+    P.set(g.x, y - 0.05, g.z);
+    E.set(g.tx, g.rot, g.tz); Q.setFromEuler(E);
+    inst.setMatrixAt(i, M.compose(P, Q, S));
+  };
+  for (let i = 0; i < CFG.grass; i++) {
+    gPos.push({
+      x: (Math.random() - 0.5) * 2 * R, z: 26 + (Math.random() - 0.5) * 2 * R,
+      rot: Math.random() * Math.PI, tx: (Math.random() - 0.5) * 0.3,
+      tz: (Math.random() - 0.5) * 0.3,
+      s: 0.5 + Math.random() * 0.5, sy: 0.7 + Math.random() * 0.4,
+    });
+    setBlade(i);
+    inst.setColorAt(i, new THREE.Color().setHSL(
       0.24 + Math.random() * 0.05, 0.42 + Math.random() * 0.2, 0.32 + Math.random() * 0.12));
-    placed++;
   }
-  inst.count = placed;
+  inst.count = CFG.grass;
   inst.instanceColor.needsUpdate = true;
+  inst.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   scene.add(inst);
+  let gCursor = 0;
+  window._updateGrassField = () => {        // amortized: 1/6 per frame
+    const slice = Math.ceil(CFG.grass / 6);
+    let touched = false;
+    for (let k = 0; k < slice; k++) {
+      const i = (gCursor + k) % CFG.grass;
+      const g = gPos[i];
+      let moved = false;
+      while (g.x - player.x > R)  { g.x -= 2 * R; moved = true; }
+      while (player.x - g.x > R)  { g.x += 2 * R; moved = true; }
+      while (g.z - player.z > R)  { g.z -= 2 * R; moved = true; }
+      while (player.z - g.z > R)  { g.z += 2 * R; moved = true; }
+      if (moved) { setBlade(i); touched = true; }
+    }
+    gCursor = (gCursor + slice) % CFG.grass;
+    if (touched) inst.instanceMatrix.needsUpdate = true;
+  };
 }
 
 function mergeGeoms(list) {
@@ -391,12 +470,12 @@ function mergeGeoms(list) {
     const x = (Math.random() - 0.5) * WORLD * 0.92,
           z = (Math.random() - 0.5) * WORLD * 0.92,
           y = heightAt(x, z);
-    if (y < WATER_Y + 1.5 || y > 17) continue;
+    if (y < WATER_Y + 1.5 || y > 26) continue;      // treeline at 26
     if (Math.hypot(x, z) < 18) continue;            // spawn clearing
     const roll = Math.random();
     let sp;
     if (y < 8)       sp = roll < 0.45 ? species[1] : roll < 0.75 ? species[0] : species[2];
-    else if (y < 13) sp = roll < 0.65 ? species[0] : roll < 0.9 ? species[1] : species[2];
+    else if (y < 14) sp = roll < 0.65 ? species[0] : roll < 0.9 ? species[1] : species[2];
     else             sp = species[0];
     P.set(x, y - 0.15, z);
     E.set(0, Math.random() * Math.PI * 2, 0); Q.setFromEuler(E);
@@ -527,7 +606,7 @@ const LANDMARKS = [
     },
   },
   {
-    id: 'cairn', name: 'The Summit Cairn', x: 296, z: -262, r: 14,
+    id: 'cairn', name: 'The Summit Cairn', x: 220, z: 220, r: 14,
     journal: 'A pile of rocks at the highest point for miles. Someone carried these up here, one at a time, to say "I existed." The survey concurs: they existed.',
     build(g) {
       let y = 0;
@@ -617,8 +696,7 @@ let lmCheckT = 0;
 
 function showJournal(lm, ix) {
   const el = document.getElementById('journal');
-  document.getElementById('jr-kicker').textContent =
-    `FIELD JOURNAL — ENTRY ${foundSet.size}/${LANDMARKS.length}`;
+  document.getElementById('jr-kicker').textContent = 'FIELD JOURNAL';
   document.getElementById('jr-name').textContent = lm.name;
   document.getElementById('jr-body').textContent = lm.journal;
   el.style.opacity = 1; el.style.transform = 'translateX(-50%) translateY(0)';
@@ -817,6 +895,21 @@ function animalUpdate(a, dt) {
   a.mixer.update(dt);
   if (a.dead) {
     a.t -= dt;
+    // a kill is MEAT — walk to the carcass and you eat (or pack it)
+    if (!a.eaten && !a.isCryptid) {
+      const dd = Math.hypot(player.x - a.obj.position.x, player.z - a.obj.position.z);
+      if (dd < 2.4) {
+        a.eaten = true;
+        player.lastAte = clock.elapsedTime;
+        if (player.hp < 95) {
+          player.hp = Math.min(100, player.hp + 40); renderHP();
+          toast('You eat. The wilds provide.');
+        } else if (player.meat < 3) {
+          player.meat++; renderNotes();
+          toast('Meat, packed for the dark hours.');
+        } else toast('You are carrying all the meat one scout can carry.');
+      }
+    }
     if (a.t <= 0) { scene.remove(a.obj); animals.splice(animals.indexOf(a), 1); spawn(a.name); }
     return;
   }
@@ -971,7 +1064,8 @@ function cryptidUpdate(night) {
 }
 
 // ───────────────────────── player ─────────────────────────
-const player = { x: 0, z: 26, yaw: Math.PI, pitch: -0.04, hp: 100, lastHit: -99 };
+const player = { x: 0, z: 26, yaw: Math.PI, pitch: -0.04, hp: 100, lastHit: -99,
+                 meat: 0, lastAte: 0 };
 window._player = player;
 player.y = heightAt(player.x, player.z);
 const score = {};
@@ -1211,14 +1305,14 @@ function toast(msg, ms = 2600) {
 }
 function pick(arr) { return arr[Math.random() * arr.length | 0]; }
 function renderNotes() {
-  const parts = Object.entries(score).map(([k, v]) => `${k} <b>${v}</b>`);
-  const j = `JOURNAL <b>${foundSet.size}</b>/${LANDMARKS.length}`;
+  // no scores, no counters — just the meat you carry, as quiet marks
   document.getElementById('notes').innerHTML =
-    'TROPHIES' + (parts.length ? ' — ' + parts.join(' · ') : ' — none yet. The wilds are watching.')
-    + '<br>' + j;
+    '◆'.repeat(player.meat) || '';
 }
 function renderHP() {
   document.getElementById('hpfill').style.width = Math.max(0, player.hp) + '%';
+  // health is invisible until it matters
+  document.getElementById('hp').style.opacity = player.hp < 99 ? 1 : 0;
 }
 
 // ───────────────────────── main loop ─────────────────────────
@@ -1258,6 +1352,7 @@ function tickBody() {
   scene.background.copy(scene.fog.color);
   updateFireflies(t, night);
   updateMist(t, night);
+  if (window._updateGrassField) window._updateGrassField();
   if (started) cryptidUpdate(night);
   farDisc.material.color.copy(scene.fog.color);
   farDisc.position.x = player.x; farDisc.position.z = player.z;
@@ -1306,8 +1401,31 @@ function tickBody() {
     bow.position.x = 0.27 - drawT * 0.07;
     updateBowString(drawT);
 
-    // slow regen
-    if (t - player.lastHit > 8 && player.hp < 100) { player.hp = Math.min(100, player.hp + dt * 6); renderHP(); }
+    // survival: hunger gnaws after ~2 min without eating — hunt or fade
+    const starving = t - player.lastAte > 120;
+    if (starving) {
+      player.hp -= dt * 0.7; renderHP();
+      if (!tickBody._hungerWarned || t - tickBody._hungerWarned > 30) {
+        tickBody._hungerWarned = t;
+        toast('Hunger. The wilds are patient. Hunt.');
+      }
+      if (player.hp <= 0 && !dead) { dead = true;
+        toast('The wilds kept you. Respawning…', 4000);
+        setTimeout(() => { player.hp = 100; player.meat = 0;
+          player.lastAte = clock.elapsedTime; player.x = 0; player.z = 26;
+          dead = false; renderHP(); }, 3500);
+      }
+    }
+    // packed meat saves you automatically when it gets bad
+    if (player.hp < 35 && player.meat > 0 && !dead) {
+      player.meat--; player.hp = Math.min(100, player.hp + 40);
+      player.lastAte = t; renderNotes(); renderHP();
+      toast('You eat from the pack. Keep moving.');
+    }
+    // slow regen, only when fed
+    if (!starving && t - player.lastHit > 8 && player.hp < 100) {
+      player.hp = Math.min(100, player.hp + dt * 6); renderHP();
+    }
 
     // feed the score
     let wolfDist = 999;
@@ -1319,7 +1437,7 @@ function tickBody() {
     audio.update(dt, {
       moving: !!(mx || mz), sprint: !!keys.ShiftLeft,
       wolfDist, lakeDist: Math.hypot(player.x - 70, player.z + 90),
-      night: window._night || 0,
+      night: window._night || 0, hp: player.hp,
     });
   }
 
@@ -1344,10 +1462,14 @@ function tickBody() {
                        px: Math.round(player.x), pz: Math.round(player.z) };
   for (const a of animals) animalUpdate(a, dt);
   arrowUpdate(dt);
-  // night needs a softer bloom threshold so fireflies/stars breathe
-  bloomPass.threshold = 0.82 - (window._night || 0) * 0.32;
-  bloomPass.strength = 0.45 + (window._night || 0) * 0.25;
-  composer.render();
+  if (USE_POST) {
+    // night needs a softer bloom threshold so fireflies/stars breathe
+    bloomPass.threshold = 0.82 - (window._night || 0) * 0.32;
+    bloomPass.strength = 0.45 + (window._night || 0) * 0.25;
+    composer.render();
+  } else {
+    renderer.render(scene, camera);
+  }
 }
 
 addEventListener('resize', () => {

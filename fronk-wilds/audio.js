@@ -69,7 +69,7 @@ export class AudioEngine {
     // ── buses (music runs through a warm lowpass — no glassy edges)
     this.musicBus = C.createGain(); this.musicBus.gain.value = 0.8;
     this.musicLp = C.createBiquadFilter();
-    this.musicLp.type = 'lowpass'; this.musicLp.frequency.value = 2600;
+    this.musicLp.type = 'lowpass'; this.musicLp.frequency.value = 1900;
     this.musicLp.Q.value = 0.5;
     this.musicBus.connect(this.musicLp);
     this.musicLp.connect(this.master); this.musicLp.connect(this.verb);
@@ -189,11 +189,11 @@ export class AudioEngine {
     o.frequency.value = hz; o2.frequency.value = hz * 2; // bright partial
     const g = C.createGain(), g2 = C.createGain();
     g.gain.setValueAtTime(0, t);
-    g.gain.linearRampToValueAtTime(vel * 0.34, t + 0.008);
-    g.gain.exponentialRampToValueAtTime(0.0004, t + 1.9);
+    g.gain.linearRampToValueAtTime(vel * 0.27, t + 0.028);   // soft felt attack
+    g.gain.exponentialRampToValueAtTime(0.0004, t + 2.3);
     g2.gain.setValueAtTime(0, t);
-    g2.gain.linearRampToValueAtTime(vel * 0.10, t + 0.005);
-    g2.gain.exponentialRampToValueAtTime(0.0004, t + 0.5);
+    g2.gain.linearRampToValueAtTime(vel * 0.05, t + 0.02);
+    g2.gain.exponentialRampToValueAtTime(0.0004, t + 0.6);
     o.connect(g); o2.connect(g2);
     g.connect(this.musicBus); g.connect(this.echo);
     g2.connect(this.musicBus);
@@ -373,6 +373,26 @@ export class AudioEngine {
       const night = s.night || 0;
       if (night < 0.5 && Math.random() < 0.65 * (1 - night)) this._bird();
       else if (night > 0.5 && Math.random() < 0.8) this._cricket();
+    }
+
+    // fear — your own heart when it gets bad
+    if (s.hp !== undefined && s.hp < 35 && s.hp > 0) {
+      this._heartT = (this._heartT ?? 0) - dt;
+      if (this._heartT <= 0) {
+        const urgency = 1 - s.hp / 35;
+        this._heartT = 1.05 - urgency * 0.45;
+        const thump = (when, v) => {
+          const o = C.createOscillator(); o.frequency.value = 52;
+          o.frequency.exponentialRampToValueAtTime(34, t + when + 0.1);
+          const g = C.createGain();
+          g.gain.setValueAtTime(0, t + when);
+          g.gain.linearRampToValueAtTime(v, t + when + 0.015);
+          g.gain.exponentialRampToValueAtTime(0.001, t + when + 0.16);
+          o.connect(g).connect(this.master);
+          o.start(t + when); o.stop(t + when + 0.2);
+        };
+        thump(0, 0.22 + urgency * 0.2); thump(0.17, 0.13 + urgency * 0.12);
+      }
     }
 
     // footsteps

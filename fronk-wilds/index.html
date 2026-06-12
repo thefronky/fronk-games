@@ -24,7 +24,9 @@
     font-size:17px;font-weight:600;letter-spacing:.04em;text-align:center;
     text-shadow:0 2px 10px rgba(0,0,0,.9);opacity:0;transition:opacity .4s;max-width:88%}
   #hp{position:absolute;top:max(14px,env(safe-area-inset-top));right:16px;width:120px;height:10px;
-    border:1px solid rgba(245,234,216,.5);border-radius:6px;overflow:hidden}
+    border:1px solid rgba(245,234,216,.5);border-radius:6px;overflow:hidden;
+    opacity:0;transition:opacity .6s}
+  #notes{color:#e8b07a;font-size:15px;letter-spacing:.3em}
   #hpfill{height:100%;width:100%;background:#c9543a;transition:width .3s}
   #hurt{position:fixed;inset:0;background:radial-gradient(ellipse at center,transparent 40%,rgba(160,20,10,.55));
     opacity:0;transition:opacity .25s;pointer-events:none}
@@ -101,6 +103,6 @@
   "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
 }}
 </script>
-<script type="module" src="game.js?v=13"></script>
+<script type="module" src="game.js?v=14"></script>
 </body>
 </html>
