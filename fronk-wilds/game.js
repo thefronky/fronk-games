@@ -67,16 +67,17 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.22;
+renderer.toneMappingExposure = 1.08;
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0xe8b07a);
+scene.background = new THREE.Color(0xd89a55);
 
 // post-processing — bloom makes sun/fire/fireflies/the Door GLOW.
 // DISABLED on touch devices: mobile Safari renders the composer
 // chain black (Fronk's phone, 2026-06-12). ?bloom=1 forces it on.
 const USE_POST = !IS_TOUCH
   || new URLSearchParams(location.search).get('bloom') === '1';
+<<<<<<< ours
 scene.fog = new THREE.Fog(0xe8b07a, 80, 400);
 
 const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.1, 1200);
@@ -95,14 +96,30 @@ if (USE_POST) {
   composer.addPass(bloomPass);
   composer.addPass(new OutputPass());
 }
+=======
+const composer = new EffectComposer(renderer);
+let bloomPass;
+scene.fog = new THREE.Fog(0xd89a55, 60, 340);
+
+const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.1, 1200);
+composer.addPass(new RenderPass(scene, camera));
+bloomPass = new UnrealBloomPass(
+  new THREE.Vector2(innerWidth, innerHeight),
+  0.38,   // strength — restrained; the light should feel withheld
+  0.65,   // radius
+  0.85);  // threshold — only genuinely bright things bloom
+composer.addPass(bloomPass);
+composer.addPass(new OutputPass());
+>>>>>>> theirs
 
 // golden hour — Fronk's signature light. A full day/night cycle runs
 // on top of it: golden hour is "home base", night brings stars and
 // fireflies, then dawn returns. One cycle every DAY_LEN seconds.
 const DAY_LEN = 480;
-const SUN_WARM = new THREE.Color(0xffd9a0), SUN_NIGHT = new THREE.Color(0x6f88c8);
-const FOG_DAY = new THREE.Color(0xe8b07a), FOG_NIGHT = new THREE.Color(0x10141f);
-const sun = new THREE.DirectionalLight(0xffd9a0, 2.6);
+const SUN_WARM = new THREE.Color(0xffc46a), SUN_NIGHT = new THREE.Color(0x4d5f96);
+const FOG_DAY = new THREE.Color(0xd89a55), FOG_NIGHT = new THREE.Color(0x080b12);
+const SUN_DAWN = new THREE.Color(0xe8dcc8), FOG_DAWN = new THREE.Color(0xc9bfae);
+const sun = new THREE.DirectionalLight(0xffc46a, 2.6);
 sun.position.set(-180, 95, -60);
 sun.castShadow = true;
 sun.shadow.mapSize.setScalar(CFG.shadow);
@@ -111,7 +128,7 @@ sun.shadow.camera.right = sun.shadow.camera.top = 90;
 sun.shadow.camera.far = 600;
 sun.shadow.bias = -0.0008;
 scene.add(sun, sun.target);
-const hemi = new THREE.HemisphereLight(0xffc890, 0x3a4a2a, 0.85);
+const hemi = new THREE.HemisphereLight(0xe6b277, 0x2c3220, 0.78);
 scene.add(hemi);
 
 // sky dome — sunset gradient + sun glow
@@ -132,13 +149,13 @@ const sky = new THREE.Mesh(
       void main(){
         vec3 dir = normalize(vDir);
         float h = clamp(dir.y, -0.05, 1.0);
-        vec3 horizon = mix(vec3(0.99, 0.62, 0.34), vec3(0.07, 0.10, 0.18), night);
-        vec3 zenith  = mix(vec3(0.18, 0.26, 0.45), vec3(0.015, 0.02, 0.05), night);
+        vec3 horizon = mix(vec3(0.95, 0.48, 0.23), vec3(0.045, 0.055, 0.10), night);
+        vec3 zenith  = mix(vec3(0.11, 0.20, 0.40), vec3(0.008, 0.012, 0.035), night);
         vec3 col = mix(horizon, zenith, pow(h, 0.62));
         float s = max(dot(dir, sunDir), 0.0);
         float dayGlow = 1.0 - night;
-        col += vec3(1.0, 0.78, 0.45) * pow(s, 220.0) * 1.6 * dayGlow;
-        col += vec3(1.0, 0.6, 0.3) * pow(s, 6.0) * 0.32 * dayGlow;
+        col += vec3(1.0, 0.58, 0.26) * pow(s, 220.0) * 1.7 * dayGlow;
+        col += vec3(1.0, 0.42, 0.20) * pow(s, 6.0) * 0.36 * dayGlow;
         // procedural stars, twinkling, night only
         if (night > 0.02 && dir.y > -0.02) {
           vec3 cell = floor(dir * 160.0);
@@ -149,7 +166,7 @@ const sky = new THREE.Mesh(
           }
           // soft milky band for depth
           float band = pow(max(0.0, 1.0 - abs(dot(dir, normalize(vec3(0.5, 0.22, -0.8)))) * 1.6), 3.0);
-          col += vec3(0.10, 0.11, 0.16) * band * night;
+          col += vec3(0.11, 0.12, 0.18) * band * night;
         }
         gl_FragColor = vec4(col, 1.0);
       }`,
@@ -223,9 +240,9 @@ function heightAt(x, z) {
   g.rotateX(-Math.PI / 2);
   const pos = g.attributes.position;
   const colors = new Float32Array(pos.count * 3);
-  const grassC = new THREE.Color(0x6d8f3e), dryC = new THREE.Color(0x9aa04c),
-        dirtC = new THREE.Color(0x7c5b35), rockC = new THREE.Color(0x73716b),
-        sandC = new THREE.Color(0xc2a368);
+  const grassC = new THREE.Color(0x5c7434), dryC = new THREE.Color(0x988a48),
+        dirtC = new THREE.Color(0x624628), rockC = new THREE.Color(0x646467),
+        sandC = new THREE.Color(0xb5a47f);
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i), z = pos.getZ(i), y = heightAt(x, z);
     pos.setY(i, y);
@@ -235,7 +252,7 @@ function heightAt(x, z) {
     if (y < WATER_Y + 0.45) c = sandC.clone();
     else if (y < WATER_Y + 1.0) c = sandC.clone()
       .lerp(c, (y - WATER_Y - 0.45) / 0.55);
-    else if (y > snowLine) c = new THREE.Color(0xf2f4f6)
+    else if (y > snowLine) c = new THREE.Color(0xe7edf4)
       .lerp(rockC, Math.max(0, 1 - (y - snowLine) / 10) * 0.5);
     else if (y > 26) c = rockC.clone()
       .lerp(dirtC, vnoise(x * 0.05, z * 0.05) * 0.3);
@@ -257,7 +274,7 @@ function heightAt(x, z) {
 const waterUniforms = { uTime: { value: 0 } };
 {
   const m = new THREE.MeshStandardMaterial({
-    color: 0x3f86a0, transparent: true, opacity: 0.8,
+    color: 0x2e5a62, transparent: true, opacity: 0.8,
     roughness: 0.28, metalness: 0.12,
   });
   m.onBeforeCompile = (sh) => {
@@ -277,8 +294,8 @@ const waterUniforms = { uTime: { value: 0 } };
   // shallows tint — a paler sheet just under the surface reads as
   // shore depth-gradient without a real depth shader
   const sh = new THREE.Mesh(new THREE.PlaneGeometry(440, 440),
-    new THREE.MeshStandardMaterial({ color: 0x7ec2bb, transparent: true,
-      opacity: 0.35, roughness: 0.6, metalness: 0 }));
+    new THREE.MeshStandardMaterial({ color: 0x5e8a80, transparent: true,
+      opacity: 0.30, roughness: 0.6, metalness: 0 }));
   sh.rotation.x = -Math.PI / 2;
   sh.position.set(70, WATER_Y - 0.4, -90);
   scene.add(sh);
@@ -293,7 +310,7 @@ const waterUniforms = { uTime: { value: 0 } };
   const gg = new THREE.BufferGeometry();
   gg.setAttribute('position', new THREE.BufferAttribute(gp, 3));
   const glitter = new THREE.Points(gg, new THREE.PointsMaterial({
-    color: 0xffe9c4, size: 0.14, transparent: true, opacity: 0.5,
+    color: 0xffd9a4, size: 0.14, transparent: true, opacity: 0.5,
     blending: THREE.AdditiveBlending, depthWrite: false }));
   glitter.frustumCulled = false;
   scene.add(glitter);
@@ -552,7 +569,7 @@ function mergeGeoms(list) {
 const clouds = [];
 {
   const geo = new THREE.IcosahedronGeometry(1, 0);
-  const mat = new THREE.MeshLambertMaterial({ color: 0xfff1de, transparent: true, opacity: 0.92 });
+  const mat = new THREE.MeshLambertMaterial({ color: 0xf0dcc2, transparent: true, opacity: 0.88 });
   window._cloudMat = mat;
   for (let i = 0; i < 10; i++) {
     const grp = new THREE.Group();
@@ -801,7 +818,7 @@ function landmarkUpdate(dt, t) {
 // A vast fog-colored ground sheet beyond the playfield: every below-
 // horizon sightline ends in fogged geometry — no more void band.
 const farDisc = new THREE.Mesh(new THREE.CircleGeometry(2400, 40),
-  new THREE.MeshBasicMaterial({ color: 0xe8b07a }));
+  new THREE.MeshBasicMaterial({ color: 0xd89a55 }));
 farDisc.rotation.x = -Math.PI / 2;
 farDisc.position.y = WATER_Y - 0.55;
 scene.add(farDisc);
@@ -812,8 +829,8 @@ const mists = [];
   const cv = document.createElement('canvas'); cv.width = cv.height = 128;
   const cx = cv.getContext('2d');
   const grad = cx.createRadialGradient(64, 64, 4, 64, 64, 62);
-  grad.addColorStop(0, 'rgba(255,245,230,0.55)');
-  grad.addColorStop(1, 'rgba(255,245,230,0)');
+  grad.addColorStop(0, 'rgba(224,221,212,0.6)');
+  grad.addColorStop(1, 'rgba(224,221,212,0)');
   cx.fillStyle = grad; cx.fillRect(0, 0, 128, 128);
   const tex = new THREE.CanvasTexture(cv);
   for (let i = 0; i < 11; i++) {
@@ -828,13 +845,13 @@ const mists = [];
 function updateMist(t, night) {
   // mist belongs to the edges of the day — fades in toward and out of night
   const edge = Math.min(1, Math.abs(night - 0.5) < 0.45 ? 1 - Math.abs(night - 0.5) / 0.45 : 0)
-    * 0.55 + night * 0.25;
+    * 0.6 + night * 0.34;
   for (const sp of mists) {
     const u = sp.userData;
     u.a += u.v * 0.016;
     const x = player.x + Math.cos(u.a) * u.r, z = player.z + Math.sin(u.a) * u.r;
     sp.position.set(x, heightAt(x, z) + 1.6 + Math.sin(t * 0.2 + u.ph) * 0.4, z);
-    sp.material.opacity = edge * (0.16 + 0.1 * Math.sin(t * 0.13 + u.ph));
+    sp.material.opacity = edge * (0.18 + 0.11 * Math.sin(t * 0.13 + u.ph));
   }
 }
 
@@ -1535,10 +1552,16 @@ function tickBody() {
   _sunDir.set(_sunAz.x * azS, Math.max(-0.5, elev), _sunAz.z * azS).normalize();
   skyUniforms.sunDir.value.copy(_sunDir);
   skyUniforms.night.value = night;
-  sun.intensity = 0.18 + 2.45 * Math.max(0, Math.min(1, (elev + 0.1) * 3.2)) * (1 - night * 0.92);
+  sun.intensity = 0.14 + 2.55 * Math.max(0, Math.min(1, (elev + 0.1) * 3.2)) * (1 - night * 0.95);
+  // dawn is pale and anemic — color drains, then golden hour curdles back in
+  const dawn = (phase > 0.7 ? Math.max(0, 1 - Math.abs(phase - 0.88) / 0.12) : 0) * (1 - night);
   sun.color.copy(SUN_WARM).lerp(SUN_NIGHT, night);
-  hemi.intensity = 0.85 - night * 0.58;
+  if (dawn > 0) sun.color.lerp(SUN_DAWN, dawn * 0.7);
+  hemi.intensity = (0.78 - night * 0.62) * (1 - dawn * 0.18);
   scene.fog.color.copy(FOG_DAY).lerp(FOG_NIGHT, night);
+  if (dawn > 0) scene.fog.color.lerp(FOG_DAWN, dawn * 0.65);
+  scene.fog.near = 60 - night * 24;     // night closes in
+  scene.fog.far = 340 - night * 110;
   scene.background.copy(scene.fog.color);
   updateFireflies(t, night);
   updateMist(t, night);
@@ -1548,8 +1571,13 @@ function tickBody() {
   farDisc.position.x = player.x; farDisc.position.z = player.z;
   landmarkUpdate(dt, t);
   if (window._cloudMat) {
+<<<<<<< ours
     window._cloudMat.color.setHex(0xfff1de).lerp(_CLOUD_NIGHT, night);
     window._cloudMat.opacity = 0.92 - night * 0.45;
+=======
+    window._cloudMat.color.setHex(0xf0dcc2).lerp(new THREE.Color(0x171c2a), night);
+    window._cloudMat.opacity = 0.88 - night * 0.5;
+>>>>>>> theirs
   }
   if (window._glitter) {
     const g = window._glitter;
@@ -1672,8 +1700,8 @@ function tickBody() {
   arrowUpdate(dt);
   if (USE_POST) {
     // night needs a softer bloom threshold so fireflies/stars breathe
-    bloomPass.threshold = 0.82 - (window._night || 0) * 0.32;
-    bloomPass.strength = 0.45 + (window._night || 0) * 0.25;
+    bloomPass.threshold = 0.85 - (window._night || 0) * 0.38;
+    bloomPass.strength = 0.38 + (window._night || 0) * 0.34;
     composer.render();
   } else {
     renderer.render(scene, camera);
