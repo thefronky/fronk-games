@@ -58,6 +58,9 @@ const LINES = {
   '???': ['The Hollow Stag is down. It has no insides. Do not eat it.'],
   wound: ['Wounded. It bleeds. The woods count every drop.',
           'You hurt it and it lived. That goes on the ledger.'],
+  longshot: ['From a distance it looks like mercy. It looks like that up close, too.',
+             'It never heard the string. The distance kept your secret. The arrow told it.',
+             'That far away, and still yours. Distance is not a defense here. Nothing is.'],
   bite:  ['Teeth. Some of you is missing now.',
           'Bitten. Something wanted your insides first.'],
   death: 'CONSUMED. Fair, all things considered. The woods start you over…',
@@ -1033,6 +1036,15 @@ function animalUpdate(a, dt) {
   const dx = player.x - p.x, dz = player.z - p.z;
   const dist = Math.hypot(dx, dz);
 
+  // kill-feel: a charging bull thundering past inside ~3m rattles the
+  // camera. dist>=2.8 = it brushed by; attackCd>0 = inside but jaws shut.
+  if (a.cfg.territorial && a.aggro && a.state !== 'warn') {
+    a._missCd = (a._missCd || 0) - dt;
+    if (a._missCd <= 0 && dist < 3.2 && (dist >= 2.8 || a.attackCd > 0)) {
+      a._missCd = 1.5; camShakeT = SHAKE_DUR;
+    }
+  }
+
   if (a.cfg.hunts || a.cfg.territorial) {     // ── predator / territorial brain
     a.attackCd -= dt;
     // wolves grow bolder after dark — wider trigger, and they don't come alone
@@ -1220,6 +1232,56 @@ function dropBlood(a) {
   bloodCursor++;
 }
 
+// ── kill-feel juice: hitstop, camera kick, blood puff ──────────────
+// every timer ticks down on the dt loop in tickBody — zero setTimeout
+let juiceT = 0;        // hitstop: world runs at 5% speed while > 0
+let kickT = 0;         // bow-release pitch kick
+let fovPunchT = 0;     // lethal-hit FOV punch-in
+let camShakeT = 0;     // bull near-miss / bite rattle
+const KICK_DUR = 0.12, PUNCH_DUR = 0.18, SHAKE_DUR = 0.15;
+
+// ONE pooled Points burst, rewound for every flesh hit — no per-hit allocs
+const PUFF_N = 10, PUFF_LIFE = 0.5;
+const _puffVel = new Float32Array(PUFF_N * 3);
+let puffT = 0;
+const puff = (() => {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(PUFF_N * 3), 3));
+  const p = new THREE.Points(g, new THREE.PointsMaterial({
+    color: 0x5e0c0c, size: 0.17, transparent: true, opacity: 0,
+    depthWrite: false, sizeAttenuation: true }));     // blood-trail red
+  p.frustumCulled = false; p.visible = false;
+  scene.add(p);
+  return p;
+})();
+function bloodPuff(x, y, z) {
+  const pos = puff.geometry.attributes.position.array;
+  for (let i = 0; i < PUFF_N; i++) {
+    pos[i * 3] = x; pos[i * 3 + 1] = y; pos[i * 3 + 2] = z;
+    const a = Math.random() * Math.PI * 2, u = Math.random() * 2 - 1;
+    const r = Math.sqrt(Math.max(0, 1 - u * u)), s = 1.1 + Math.random() * 2.2;
+    _puffVel[i * 3]     = Math.cos(a) * r * s;
+    _puffVel[i * 3 + 1] = (u * 0.6 + 0.5) * s;        // biased upward
+    _puffVel[i * 3 + 2] = Math.sin(a) * r * s;
+  }
+  puff.geometry.attributes.position.needsUpdate = true;
+  puffT = PUFF_LIFE; puff.visible = true;
+}
+function puffUpdate(dt) {
+  if (puffT <= 0) return;
+  puffT -= dt;
+  if (puffT <= 0) { puff.visible = false; puff.material.opacity = 0; return; }
+  const pos = puff.geometry.attributes.position.array;
+  for (let i = 0; i < PUFF_N; i++) {
+    _puffVel[i * 3 + 1] -= 5 * dt;                    // droplets fall
+    pos[i * 3]     += _puffVel[i * 3] * dt;
+    pos[i * 3 + 1] += _puffVel[i * 3 + 1] * dt;
+    pos[i * 3 + 2] += _puffVel[i * 3 + 2] * dt;
+  }
+  puff.geometry.attributes.position.needsUpdate = true;
+  puff.material.opacity = 0.9 * (puffT / PUFF_LIFE);
+}
+
 const VOICE = {
   peaceful: ['“Glad it went peaceful,” you say, to no one. No one answers.',
              'Quick. Alive, then food. The kindest order of operations.',
@@ -1351,6 +1413,7 @@ let started = false, drawT = 0, drawing = false, dead = false, bobPhase = 0;
 function hurtPlayer(dmg) {
   if (dead) return;
   player.hp -= dmg; player.lastHit = clock.elapsedTime;
+  camShakeT = SHAKE_DUR;           // kill-feel: teeth rattle the camera too
   audio.thud();
   document.getElementById('hurt').style.opacity = 1;
   setTimeout(() => document.getElementById('hurt').style.opacity = 0, 280);
@@ -1424,8 +1487,10 @@ function loose() {
   m.lookAt(m.position.clone().add(dir));
   scene.add(m);
   arrows.push({ m, v: dir.multiplyScalar(ARROW_SPEED_BASE + power * ARROW_SPEED_DRAW),
-                t: ARROW_LIFE, power });
+                t: ARROW_LIFE, power,
+                ox: m.position.x, oy: m.position.y, oz: m.position.z });
   audio.twang();
+  kickT = KICK_DUR;        // kill-feel: the string snaps your aim up a hair
   drawT = 0;
 }
 
@@ -1463,7 +1528,18 @@ function arrowUpdate(dt) {
         // Sharpshooting matters.
         const headshot = dy > an.cfg.r * 0.56 && a.power > 0.4;
         an.hp -= headshot ? 999 : (a.power > 0.55 ? 2 : 1);
-        if (an.hp <= 0) killAnimal(an);
+        // kill-feel: flesh always answers — a puff of blood at the wound
+        bloodPuff(a.m.position.x, a.m.position.y, a.m.position.z);
+        juiceT = Math.max(juiceT, 0.04);          // flesh hit: brief hitstop
+        if (an.hp <= 0) {
+          juiceT = 0.09; fovPunchT = PUNCH_DUR;   // lethal: the world holds its breath
+          killAnimal(an);
+          // a kill from real range gets noticed by the ledger
+          const fd = Math.hypot(a.m.position.x - a.ox,
+                                a.m.position.y - a.oy,
+                                a.m.position.z - a.oz);
+          if (fd > 35) toast(pick(LINES.longshot), 5200);
+        }
         else if (an.cfg.hunts || an.cfg.territorial) {
           // wounding a predator does not make it leave. It makes it sure.
           setAnim(an, 'HitReact_Left', true);
@@ -1491,7 +1567,15 @@ function arrowUpdate(dt) {
             toast('Blood.', 2000);
           }
         }
-        scene.remove(a.m); arrows.splice(i, 1); hit = true; break;
+        // kill-feel: the arrow stays in the body — it runs with your
+        // work in it. attach() = worldToLocal reparent; leaves physics.
+        if ((an._stuck || 0) < 3) {
+          an._stuck = (an._stuck || 0) + 1;
+          const vl = Math.hypot(a.v.x, a.v.y, a.v.z) || 1;
+          a.m.position.addScaledVector(a.v, -0.30 / vl);  // fletching proud of the hide
+          an.obj.attach(a.m);     // carcass cleanup removes obj + arrows together
+        } else scene.remove(a.m);
+        arrows.splice(i, 1); hit = true; break;
       }
     }
     if (hit) continue;
@@ -1708,6 +1792,12 @@ window._sim = (seconds) => {   // test hook: advance the world while the
 function tickBody() {
   const dt = simDt ?? Math.min(clock.getDelta(), 0.05);
   const t = clock.elapsedTime;
+  // kill-feel: juice timers decay on REAL time (hitstop scales the
+  // world dt further down, where animals/arrows update)
+  if (kickT > 0) kickT -= dt;
+  if (camShakeT > 0) camShakeT -= dt;
+  if (fovPunchT > 0) fovPunchT -= dt;
+  puffUpdate(dt);                  // blood puff plays through the hitstop
   windUniforms.uTime.value = t;
   waterUniforms.uTime.value = t;
   skyUniforms.uT.value = t;
@@ -1803,7 +1893,9 @@ function tickBody() {
     bobPhase += dt * (mx || mz ? 7.5 : 1.6);
     bow.position.y += Math.sin(bobPhase) * (mx || mz ? 0.012 : 0.004);
     bow.position.x += Math.cos(bobPhase * 0.5) * (mx || mz ? 0.006 : 0.002);
-    const targetFov = 70 - e * 8;
+    let targetFov = 70 - e * 8;
+    // kill-feel: lethal hit = brief 0.96 punch-in, easing back out
+    if (fovPunchT > 0) targetFov *= 0.96 + 0.04 * (1 - fovPunchT / PUNCH_DUR);
     if (Math.abs(camera.fov - targetFov) > 0.05) {
       camera.fov = targetFov; camera.updateProjectionMatrix();
     }
@@ -1863,14 +1955,26 @@ function tickBody() {
     camera.rotation.order = 'YXZ';
     camera.rotation.y = player.yaw;
     camera.rotation.x = player.pitch;
+    // kill-feel: release kick (pitch up, decays 120ms) + near-miss rattle
+    if (kickT > 0) camera.rotation.x += 0.012 * (kickT / KICK_DUR);
+    if (camShakeT > 0) {
+      const s = camShakeT / SHAKE_DUR;
+      camera.rotation.x += Math.sin(t * 97) * 0.011 * s;
+      camera.rotation.y += Math.sin(t * 83) * 0.009 * s;
+    }
   }
   sun.target.position.set(player.x, player.y, player.z);
   sun.position.set(player.x - 180, player.y + 95, player.z - 60);
 
   window._tickInfo = { f: (window._tickInfo?.f || 0) + 1, n: animals.length,
                        px: Math.round(player.x), pz: Math.round(player.z) };
-  for (const a of animals) animalUpdate(a, dt);
-  arrowUpdate(dt);
+  // kill-feel hitstop: a connected arrow holds the world at 5% speed
+  // for a few real frames (0.04s flesh / 0.09s lethal). No setTimeout —
+  // juiceT burns down on real dt, world dt gets scaled while it lasts.
+  let wdt = dt;
+  if (juiceT > 0) { juiceT -= dt; wdt = dt * 0.05; }
+  for (const a of animals) animalUpdate(a, wdt);
+  arrowUpdate(wdt);
   if (USE_POST) {
     // night needs a softer bloom threshold so fireflies/stars breathe
     bloomPass.threshold = 0.85 - (window._night || 0) * 0.38;
