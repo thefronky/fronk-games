@@ -1367,21 +1367,65 @@ function hurtPlayer(dmg) {
 }
 
 // ───────────────────────── arrows ─────────────────────────
+// Ballistics: real longbow numbers. ~60 m/s at full draw, true 9.81
+// gravity, no drag, long lifetime so far shots actually land.
+const ARROW_SPEED_BASE = 34, ARROW_SPEED_DRAW = 26;   // v = 34 + power*26
+const ARROW_GRAVITY = 9.81;
+const ARROW_LIFE = 9, ARROW_STUCK_LIFE = 12;
+
 const arrows = [];
 const _arrowAim = new THREE.Vector3();   // scratch for per-frame lookAt
-const arrowGeo = new THREE.ConeGeometry(0.05, 0.95, 5);
-arrowGeo.rotateX(Math.PI / 2);
-const arrowMat = new THREE.MeshStandardMaterial({ color: 0x8a6a3a, roughness: 0.8 });
+// Real arrow template — built ONCE, cloned per shot (clones share
+// geometry + material, so this is cheap). Tip points +z so the
+// existing lookAt-along-velocity orientation just works.
+const arrowTemplate = new THREE.Group();
+{
+  const woodM  = new THREE.MeshStandardMaterial({ color: 0xa8865a, roughness: 0.75 });
+  const steelM = new THREE.MeshStandardMaterial({ color: 0x3e444c, roughness: 0.35, metalness: 0.75 });
+  const hornM  = new THREE.MeshStandardMaterial({ color: 0x2e2418, roughness: 0.9 });
+  const fM     = new THREE.MeshStandardMaterial({ color: 0xc94f3a, roughness: 1, side: THREE.DoubleSide });
+  // 0.78 m shaft, slightly tapered toward the head — centered on z
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.0055, 0.0075, 0.78, 6), woodM);
+  shaft.rotation.x = Math.PI / 2;
+  // forged head: elongated cone + tiny collar where it seats
+  const head = new THREE.Mesh(new THREE.ConeGeometry(0.013, 0.095, 6), steelM);
+  head.rotation.x = Math.PI / 2; head.position.z = 0.437;
+  const collar = new THREE.Mesh(new THREE.CylinderGeometry(0.0085, 0.0085, 0.018, 6), steelM);
+  collar.rotation.x = Math.PI / 2; collar.position.z = 0.382;
+  // nock notch hint at the tail
+  const nock = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.0055, 0.02, 5), hornM);
+  nock.rotation.x = Math.PI / 2; nock.position.z = -0.396;
+  arrowTemplate.add(shaft, head, collar, nock);
+  // 3 fletches — thin doubled planes (two slightly splayed planes per
+  // fletch fake real vane thickness for free)
+  const fGeo = new THREE.PlaneGeometry(0.016, 0.085);
+  for (let i = 0; i < 3; i++) {
+    const ang = i * Math.PI * 2 / 3;
+    for (let s = -1; s <= 1; s += 2) {
+      const f = new THREE.Mesh(fGeo, fM);
+      f.position.z = -0.33;
+      f.position.x = -Math.sin(ang) * 0.008;
+      f.position.y =  Math.cos(ang) * 0.008;
+      f.rotation.z = ang;
+      f.rotation.x = Math.PI / 2;
+      f.rotation.y = 0.10 * s;       // splay → thickness + slight helical
+      arrowTemplate.add(f);
+    }
+  }
+}
+
 
 function loose() {
   const power = Math.min(1, drawT);
   if (power < 0.12) { drawT = 0; return; }
   const dir = new THREE.Vector3();
   camera.getWorldDirection(dir);
-  const m = new THREE.Mesh(arrowGeo, arrowMat);
+  const m = arrowTemplate.clone();
   m.position.copy(camera.position).addScaledVector(dir, 0.8);
+  m.lookAt(m.position.clone().add(dir));
   scene.add(m);
-  arrows.push({ m, v: dir.multiplyScalar(26 + power * 38), t: 6, power });
+  arrows.push({ m, v: dir.multiplyScalar(ARROW_SPEED_BASE + power * ARROW_SPEED_DRAW),
+                t: ARROW_LIFE, power });
   audio.twang();
   drawT = 0;
 }
@@ -1394,13 +1438,18 @@ window._dbg = () => ({ started, dead, arrows: arrows.length,
                                 player.z - animals[0].obj.position.z)) } });
 window._score = score;
 
+const _arrowAim = new THREE.Vector3();   // scratch — no per-frame allocs
 function arrowUpdate(dt) {
   for (let i = arrows.length - 1; i >= 0; i--) {
     const a = arrows[i];
     if (a.stuck) { a.t -= dt; if (a.t <= 0) { scene.remove(a.m); arrows.splice(i, 1); } continue; }
-    a.v.y -= 21 * dt;
+    a.v.y -= ARROW_GRAVITY * dt;
     a.m.position.addScaledVector(a.v, dt);
-    a.m.lookAt(_arrowAim.copy(a.m.position).add(a.v));
+    // orient along velocity — skip when v is near-vertical (apex of a
+    // straight-up shot) so lookAt never degenerates against the up axis
+    if (a.v.x * a.v.x + a.v.z * a.v.z > 1e-4)
+      a.m.lookAt(_arrowAim.copy(a.m.position).add(a.v));
+
     // animal hit
     let hit = false;
     for (const an of animals) {
@@ -1409,7 +1458,12 @@ function arrowUpdate(dt) {
       const dy = a.m.position.y - (ap.y + an.cfg.r * 0.75);
       if (Math.hypot(a.m.position.x - ap.x, a.m.position.z - ap.z) < an.cfg.r &&
           Math.abs(dy) < an.cfg.r * 1.4) {
-        an.hp -= (a.power > 0.55 ? 2 : 1);
+        if (audio.impact) audio.impact('flesh',
+          Math.min(1, Math.hypot(a.m.position.x - player.x, a.m.position.z - player.z) / 60));
+        // upper 30% of the collision window + a real draw = clean kill.
+        // Sharpshooting matters.
+        const headshot = dy > an.cfg.r * 0.56 && a.power > 0.4;
+        an.hp -= headshot ? 999 : (a.power > 0.55 ? 2 : 1);
         if (an.hp <= 0) killAnimal(an);
         else if (an.cfg.hunts || an.cfg.territorial) {
           // wounding a predator does not make it leave. It makes it sure.
@@ -1442,9 +1496,14 @@ function arrowUpdate(dt) {
       }
     }
     if (hit) continue;
-    // ground hit
+    // ground hit — embed it at the impact angle, head buried,
+    // fletching proud of the dirt
     if (a.m.position.y < heightAt(a.m.position.x, a.m.position.z)) {
-      a.stuck = true; a.t = 5;
+      const vl = Math.hypot(a.v.x, a.v.y, a.v.z) || 1;
+      a.m.position.addScaledVector(a.v, -0.30 / vl);   // back out ~30 cm along the shot line
+      a.stuck = true; a.t = ARROW_STUCK_LIFE;
+      if (audio.impact) audio.impact('ground',
+        Math.min(1, Math.hypot(a.m.position.x - player.x, a.m.position.z - player.z) / 60));
     }
     a.t -= dt; if (a.t <= 0) { scene.remove(a.m); arrows.splice(i, 1); }
   }
@@ -1736,6 +1795,7 @@ function tickBody() {
     // nock at the cheek, slight zoom like focusing down the arrow
     if (drawing) drawT = Math.min(1, drawT + dt / 0.85);
     else drawT = Math.max(0, drawT - dt * 4);   // relax down if cancelled
+    if (drawing && drawT > 0 && audio.drawCreak) audio.drawCreak(drawT);
     document.getElementById('crosshair').classList.toggle('drawn', drawT > 0.5);
     const e = drawT * drawT * (3 - 2 * drawT);  // smoothstep — weighty
     bow.position.set(0.34 + (-0.055 - 0.34) * e,   // riser lands LEFT of the eye-line
