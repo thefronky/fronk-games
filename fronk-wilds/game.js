@@ -1,6 +1,6 @@
 // FRONK WILDS — open-world scout-survey (hunting) game
 // Three.js r160, Quaternius CC0 animated animals, all procedural world.
-window._V = 14;
+window._V = 15;
 window._spawnCryptid = () => spawnCryptid();   // debug
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
@@ -227,9 +227,9 @@ function heightAt(x, z) {
     const t = vnoise(x * 0.02, z * 0.02);
     let c = grassC.clone().lerp(dryC, t * 0.9);
     const snowLine = 50 + (t - 0.5) * 12;
-    if (y < WATER_Y + 0.55) c = sandC.clone();
-    else if (y < WATER_Y + 1.8) c = sandC.clone()
-      .lerp(c, (y - WATER_Y - 0.55) / 1.25);
+    if (y < WATER_Y + 0.45) c = sandC.clone();
+    else if (y < WATER_Y + 1.0) c = sandC.clone()
+      .lerp(c, (y - WATER_Y - 0.45) / 0.55);
     else if (y > snowLine) c = new THREE.Color(0xf2f4f6)
       .lerp(rockC, Math.max(0, 1 - (y - snowLine) / 10) * 0.5);
     else if (y > 26) c = rockC.clone()
@@ -1072,7 +1072,7 @@ window._player = player;
 player.y = heightAt(player.x, player.z);
 const score = {};
 const keys = {};
-let started = false, drawT = 0, drawing = false, dead = false;
+let started = false, drawT = 0, drawing = false, dead = false, bobPhase = 0;
 
 function hurtPlayer(dmg) {
   if (dead) return;
@@ -1167,16 +1167,17 @@ let bowString1, bowString2, nockedArrow;
 {
   const woodM = new THREE.MeshStandardMaterial({ color: 0x7a5530, roughness: 0.7 });
   const limbPts = [];
-  // recurve profile (y, z): grip → out → sweep back at the tip
-  const prof = [[0, 0], [0.05, -0.012], [0.1, -0.03], [0.145, -0.038],
-                [0.175, -0.026], [0.193, 0.004]];
+  // LONGBOW profile (y, z): a man-tall D-bow — the limbs run out of
+  // frame when held. You should feel 6'2" behind it.
+  const prof = [[0, 0], [0.14, -0.018], [0.30, -0.048], [0.44, -0.085],
+                [0.55, -0.125]];
   for (const [y, z] of prof) limbPts.push(new THREE.Vector3(0, y, z));
   const upCurve = new THREE.CatmullRomCurve3(limbPts);
-  const upper = new THREE.Mesh(new THREE.TubeGeometry(upCurve, 16, 0.0095, 6), woodM);
+  const upper = new THREE.Mesh(new THREE.TubeGeometry(upCurve, 20, 0.012, 6), woodM);
   const lower = upper.clone(); lower.scale.y = -1;
   bow.add(upper, lower);
   const grip = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.0145, 0.0145, 0.085, 8),
+    new THREE.CylinderGeometry(0.017, 0.017, 0.13, 8),
     new THREE.MeshStandardMaterial({ color: 0x2e1d10, roughness: 1 }));
   bow.add(grip);
   const strM = new THREE.MeshBasicMaterial({ color: 0xd8cdbb });
@@ -1185,12 +1186,12 @@ let bowString1, bowString2, nockedArrow;
   bow.add(bowString1, bowString2);
   // nocked arrow — fades in while drawing
   nockedArrow = new THREE.Group();
-  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.62, 5),
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.0045, 0.0045, 0.8, 5),
     new THREE.MeshStandardMaterial({ color: 0xa8865a, roughness: 0.8 }));
-  shaft.rotation.x = Math.PI / 2; shaft.position.z = -0.31;
-  const head = new THREE.Mesh(new THREE.ConeGeometry(0.011, 0.05, 5),
+  shaft.rotation.x = Math.PI / 2; shaft.position.z = -0.4;
+  const head = new THREE.Mesh(new THREE.ConeGeometry(0.012, 0.055, 5),
     new THREE.MeshStandardMaterial({ color: 0x707880, roughness: 0.4, metalness: 0.6 }));
-  head.rotation.x = -Math.PI / 2; head.position.z = -0.64;
+  head.rotation.x = -Math.PI / 2; head.position.z = -0.83;
   const fM = new THREE.MeshStandardMaterial({ color: 0xc94f3a, roughness: 1,
     side: THREE.DoubleSide });
   for (let i = 0; i < 3; i++) {
@@ -1203,18 +1204,17 @@ let bowString1, bowString2, nockedArrow;
   nockedArrow.add(shaft, head);
   nockedArrow.visible = false;
   bow.add(nockedArrow);
-  bow.scale.setScalar(0.62);
-  bow.position.set(0.27, -0.21, -0.5);
-  bow.rotation.set(0.05, -0.85, 0.14);   // angled so the recurve profile reads
+  bow.position.set(0.34, -0.4, -0.62);
+  bow.rotation.set(0.05, -0.55, 0.21);   // canted at rest, archer-style
   bow.visible = false;            // hidden on the title screen
   camera.add(bow);
   scene.add(camera);
 }
 
 function updateBowString(draw) {
-  // string runs tip→nock→tip; nock pulls toward the camera with draw
-  const tipY = 0.193, tipZ = 0.004;
-  const nock = new THREE.Vector3(0, 0, tipZ + 0.02 + draw * 0.16);
+  // string runs tip→nock→tip; nock pulls back toward your eye
+  const tipY = 0.55, tipZ = -0.125;
+  const nock = new THREE.Vector3(0, 0, tipZ + 0.02 + draw * 0.34);
   const tip1 = new THREE.Vector3(0, tipY, tipZ);
   const tip2 = new THREE.Vector3(0, -tipY, tipZ);
   const UP = new THREE.Vector3(0, 1, 0);
@@ -1395,13 +1395,25 @@ function tickBody() {
     const ny = heightAt(nx, nz);
     if (ny > WATER_Y - 0.4) { player.x = nx; player.z = nz; player.y = ny; }
 
-    // bow
+    // bow — at full draw it RAISES to your eye: grip near center,
+    // nock at the cheek, slight zoom like focusing down the arrow
     if (drawing) drawT = Math.min(1, drawT + dt / 0.85);
+    else drawT = Math.max(0, drawT - dt * 4);   // relax down if cancelled
     document.getElementById('crosshair').classList.toggle('drawn', drawT > 0.5);
-    bow.position.z = -0.5 + drawT * 0.05;
-    bow.rotation.y = -0.85 + drawT * 0.45;    // swings toward center as you draw
-    bow.position.x = 0.27 - drawT * 0.07;
-    updateBowString(drawT);
+    const e = drawT * drawT * (3 - 2 * drawT);  // smoothstep — weighty
+    bow.position.set(0.34 + (-0.055 - 0.34) * e,   // riser lands LEFT of the eye-line
+                     -0.4 + (-0.09 + 0.4) * e,
+                     -0.62 + (-0.52 + 0.62) * e);
+    bow.rotation.set(0.05, -0.55 + 0.41 * e, 0.21 - 0.17 * e);
+    // walk bob + breath — you're holding it, not gliding with it
+    bobPhase += dt * (mx || mz ? 7.5 : 1.6);
+    bow.position.y += Math.sin(bobPhase) * (mx || mz ? 0.012 : 0.004);
+    bow.position.x += Math.cos(bobPhase * 0.5) * (mx || mz ? 0.006 : 0.002);
+    const targetFov = 70 - e * 8;
+    if (Math.abs(camera.fov - targetFov) > 0.05) {
+      camera.fov = targetFov; camera.updateProjectionMatrix();
+    }
+    updateBowString(e);
 
     // survival: hunger gnaws after ~2 min without eating — hunt or fade
     const starving = t - player.lastAte > 120;
