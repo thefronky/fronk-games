@@ -116,10 +116,16 @@ composer.addPass(new OutputPass());
 // on top of it: golden hour is "home base", night brings stars and
 // fireflies, then dawn returns. One cycle every DAY_LEN seconds.
 const DAY_LEN = 480;
+<<<<<<< ours
 const SUN_WARM = new THREE.Color(0xffc46a), SUN_NIGHT = new THREE.Color(0x4d5f96);
 const FOG_DAY = new THREE.Color(0xd89a55), FOG_NIGHT = new THREE.Color(0x080b12);
 const SUN_DAWN = new THREE.Color(0xe8dcc8), FOG_DAWN = new THREE.Color(0xc9bfae);
 const sun = new THREE.DirectionalLight(0xffc46a, 2.6);
+=======
+const SUN_WARM = new THREE.Color(0xffd9a0), SUN_NIGHT = new THREE.Color(0x6f88c8);
+const FOG_DAY = new THREE.Color(0xe8b07a), FOG_NIGHT = new THREE.Color(0x080b14);
+const sun = new THREE.DirectionalLight(0xffd9a0, 2.6);
+>>>>>>> theirs
 sun.position.set(-180, 95, -60);
 sun.castShadow = true;
 sun.shadow.mapSize.setScalar(CFG.shadow);
@@ -128,7 +134,12 @@ sun.shadow.camera.right = sun.shadow.camera.top = 90;
 sun.shadow.camera.far = 600;
 sun.shadow.bias = -0.0008;
 scene.add(sun, sun.target);
+<<<<<<< ours
 const hemi = new THREE.HemisphereLight(0xe6b277, 0x2c3220, 0.78);
+=======
+// hemisphere kept slightly low even by day — canopy shade pockets stay dark
+const hemi = new THREE.HemisphereLight(0xffc890, 0x3a4a2a, 0.72);
+>>>>>>> theirs
 scene.add(hemi);
 
 // sky dome — sunset gradient + sun glow
@@ -149,8 +160,13 @@ const sky = new THREE.Mesh(
       void main(){
         vec3 dir = normalize(vDir);
         float h = clamp(dir.y, -0.05, 1.0);
+<<<<<<< ours
         vec3 horizon = mix(vec3(0.95, 0.48, 0.23), vec3(0.045, 0.055, 0.10), night);
         vec3 zenith  = mix(vec3(0.11, 0.20, 0.40), vec3(0.008, 0.012, 0.035), night);
+=======
+        vec3 horizon = mix(vec3(0.99, 0.62, 0.34), vec3(0.031, 0.043, 0.078), night);
+        vec3 zenith  = mix(vec3(0.18, 0.26, 0.45), vec3(0.008, 0.012, 0.030), night);
+>>>>>>> theirs
         vec3 col = mix(horizon, zenith, pow(h, 0.62));
         float s = max(dot(dir, sunDir), 0.0);
         float dayGlow = 1.0 - night;
@@ -173,6 +189,27 @@ const sky = new THREE.Mesh(
   })
 );
 scene.add(sky);
+
+// moon — a small pale disc, the only honest light left at night.
+// One sprite, one 64px canvas texture: effectively free.
+const moon = (() => {
+  const cv = document.createElement('canvas'); cv.width = cv.height = 64;
+  const cx = cv.getContext('2d');
+  const g = cx.createRadialGradient(32, 32, 2, 32, 32, 30);
+  g.addColorStop(0, 'rgba(228,234,246,1)');
+  g.addColorStop(0.55, 'rgba(206,216,236,0.9)');
+  g.addColorStop(0.72, 'rgba(172,186,216,0.30)');
+  g.addColorStop(1, 'rgba(160,175,210,0)');
+  cx.fillStyle = g; cx.fillRect(0, 0, 64, 64);
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: new THREE.CanvasTexture(cv), transparent: true, opacity: 0,
+    fog: false, depthWrite: false,
+  }));
+  sp.scale.set(46, 46, 1);
+  scene.add(sp);
+  return sp;
+})();
+const _moonDir = new THREE.Vector3();
 
 // ───────────────────────── terrain ─────────────────────────
 // value-noise FBM — heightAt() must match the displaced mesh exactly
@@ -843,20 +880,33 @@ const mists = [];
   }
 }
 function updateMist(t, night) {
-  // mist belongs to the edges of the day — fades in toward and out of night
+  // mist belongs to the edges of the day — thickest at dusk/dawn, lingers all night
   const edge = Math.min(1, Math.abs(night - 0.5) < 0.45 ? 1 - Math.abs(night - 0.5) / 0.45 : 0)
+<<<<<<< ours
     * 0.6 + night * 0.34;
+=======
+    * 0.8 + night * 0.3;
+>>>>>>> theirs
   for (const sp of mists) {
     const u = sp.userData;
     u.a += u.v * 0.016;
     const x = player.x + Math.cos(u.a) * u.r, z = player.z + Math.sin(u.a) * u.r;
+<<<<<<< ours
     sp.position.set(x, heightAt(x, z) + 1.6 + Math.sin(t * 0.2 + u.ph) * 0.4, z);
     sp.material.opacity = edge * (0.18 + 0.11 * Math.sin(t * 0.13 + u.ph));
+=======
+    const gy = heightAt(x, z);
+    // valley bias — mist pools in low ground, thins out on the slopes
+    const low = Math.max(0.2, Math.min(1.3, 1.35 - (gy - WATER_Y) / 12));
+    sp.position.set(x, gy + 1.6 + Math.sin(t * 0.2 + u.ph) * 0.4, z);
+    sp.material.opacity = Math.min(0.5, edge * low * (0.2 + 0.12 * Math.sin(t * 0.13 + u.ph)));
+>>>>>>> theirs
   }
 }
 
 // ───────────────────────── fireflies (night) ─────────────────────────
-const FF_N = IS_TOUCH ? 80 : 140;
+// fewer, brighter — precious points of light in a dark that means it
+const FF_N = IS_TOUCH ? 28 : 48;
 const ffBase = [];
 const fireflies = (() => {
   const pos = new Float32Array(FF_N * 3);
@@ -868,7 +918,7 @@ const fireflies = (() => {
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   const m = new THREE.PointsMaterial({
-    color: 0xc8ff7a, size: 0.16, transparent: true, opacity: 0,
+    color: 0xdfffa6, size: 0.3, transparent: true, opacity: 0,
     blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true,
   });
   const p = new THREE.Points(g, m);
@@ -1544,25 +1594,41 @@ function tickBody() {
   skyUniforms.uT.value = t;
   for (const c of clouds) { c.position.x += c.userData.v * dt * 2; if (c.position.x > 800) c.position.x = -800; }
 
-  // ── day/night cycle ──
-  const phase = (t / DAY_LEN) % 1;                 // 0 = golden hour
+  // ── day/night cycle — night owns ~40% of the loop ──
+  // time-warp: days drift long and slow, the dark falls (and passes) faster
+  const rawPhase = (t / DAY_LEN) % 1;              // 0 = golden hour
+  const phase = rawPhase - 0.04 * Math.sin(rawPhase * Math.PI * 2);
   const elev = 0.35 * Math.cos(phase * Math.PI * 2) - 0.02;
   const night = Math.max(0, Math.min(1, (0.05 - elev) / 0.18));
   const azS = Math.sqrt(Math.max(0.05, 1 - elev * elev));
   _sunDir.set(_sunAz.x * azS, Math.max(-0.5, elev), _sunAz.z * azS).normalize();
   skyUniforms.sunDir.value.copy(_sunDir);
   skyUniforms.night.value = night;
+<<<<<<< ours
   sun.intensity = 0.14 + 2.55 * Math.max(0, Math.min(1, (elev + 0.1) * 3.2)) * (1 - night * 0.95);
   // dawn is pale and anemic — color drains, then golden hour curdles back in
   const dawn = (phase > 0.7 ? Math.max(0, 1 - Math.abs(phase - 0.88) / 0.12) : 0) * (1 - night);
   sun.color.copy(SUN_WARM).lerp(SUN_NIGHT, night);
   if (dawn > 0) sun.color.lerp(SUN_DAWN, dawn * 0.7);
   hemi.intensity = (0.78 - night * 0.62) * (1 - dawn * 0.18);
+=======
+  sun.intensity = 0.12 + 2.45 * Math.max(0, Math.min(1, (elev + 0.1) * 3.2)) * (1 - night * 0.96);
+  sun.color.copy(SUN_WARM).lerp(SUN_NIGHT, night);
+  hemi.intensity = 0.72 - night * 0.58;
+>>>>>>> theirs
   scene.fog.color.copy(FOG_DAY).lerp(FOG_NIGHT, night);
   if (dawn > 0) scene.fog.color.lerp(FOG_DAWN, dawn * 0.65);
   scene.fog.near = 60 - night * 24;     // night closes in
   scene.fog.far = 340 - night * 110;
   scene.background.copy(scene.fog.color);
+  // fog closes in after dark — dusk stays open, true night clamps the world to ~60m
+  const fogClose = night * Math.sqrt(night);
+  scene.fog.near = 80 - 68 * fogClose;
+  scene.fog.far = 400 - 340 * fogClose;
+  // moon rides opposite the sun — only shows once it clears the horizon
+  _moonDir.copy(sd).multiplyScalar(-1);
+  moon.position.set(player.x + _moonDir.x * 820, _moonDir.y * 820, player.z + _moonDir.z * 820);
+  moon.material.opacity = night * Math.max(0, Math.min(1, (_moonDir.y - 0.06) * 6)) * 0.9;
   updateFireflies(t, night);
   updateMist(t, night);
   if (window._updateGrassField) window._updateGrassField();
@@ -1572,11 +1638,16 @@ function tickBody() {
   landmarkUpdate(dt, t);
   if (window._cloudMat) {
 <<<<<<< ours
+<<<<<<< ours
     window._cloudMat.color.setHex(0xfff1de).lerp(_CLOUD_NIGHT, night);
     window._cloudMat.opacity = 0.92 - night * 0.45;
 =======
     window._cloudMat.color.setHex(0xf0dcc2).lerp(new THREE.Color(0x171c2a), night);
     window._cloudMat.opacity = 0.88 - night * 0.5;
+>>>>>>> theirs
+=======
+    window._cloudMat.color.setHex(0xfff1de).lerp(new THREE.Color(0x171d2e), night);
+    window._cloudMat.opacity = 0.92 - night * 0.55;
 >>>>>>> theirs
   }
   if (window._glitter) {
