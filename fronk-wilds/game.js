@@ -44,6 +44,7 @@ const CRYPTID_CFG = { speed: 3.6, gallop: 11.8, hp: 5, flee: 0, r: 1.7,
 const CRYPTID_CHANCE = 0.45;     // per night
 
 const LINES = {
+<<<<<<< ours
   Deer: ['Deer documented. It is at peace now. You did this.',
          'One (1) deer, archived. The forest takes note.'],
   Stag: ['A STAG. The other animals will discuss this for years.',
@@ -60,6 +61,24 @@ const LINES = {
   bite:  ['The wolf disagrees with the survey.',
           'You have been bitten. Note it in the log.'],
   death: 'YOU WERE SURVEYED BY WOLVES. The badge is awarded posthumously.',
+=======
+  Deer: ['Deer. The insides are yours now. That was the arrangement.',
+         'It fed on grass. You feed on it. The ledger balances.'],
+  Stag: ['A stag. That much life has to go somewhere. It goes in you.',
+         'The stag is down. You will live for days on this.'],
+  Fox:  ['A fox. Not much inside. It is yours anyway.',
+         'The fox ate things alive. You understand each other now.'],
+  Wolf: ['The wolf came to eat you. The order is reversed.',
+         'Wolf down. It wanted your insides. It had insides too.'],
+  Bull: ['The bull is down. There is so much of it.',
+         'It did not want to be eaten. Few do.'],
+  '???': ['The Hollow Stag is down. It has no insides. Do not eat it.'],
+  wound: ['Wounded. It bleeds. The woods count every drop.',
+          'You hurt it and it lived. That goes on the ledger.'],
+  bite:  ['Teeth. Some of you is missing now.',
+          'Bitten. Something wanted your insides first.'],
+  death: 'CONSUMED. Fair, all things considered. The woods start you over…',
+>>>>>>> theirs
 };
 
 // ───────────────────────── renderer / scene ─────────────────────────
@@ -640,7 +659,7 @@ const stoneMat = new THREE.MeshStandardMaterial({ color: 0x9a948a, roughness: 1 
 const LANDMARKS = [
   {
     id: 'circle', name: 'The Standing Stones', x: -250, z: 180, r: 16,
-    journal: 'Seven stones in a circle. Arranged, on purpose, by someone with opinions. The wind goes quiet here. Out of respect, presumably.',
+    journal: 'Seven stones, arranged. Something is fed here. The grass inside the circle grows wrong. You do not eat inside the circle.',
     build(g, y) {
       for (let i = 0; i < 7; i++) {
         const a = i / 7 * Math.PI * 2;
@@ -654,7 +673,7 @@ const LANDMARKS = [
   },
   {
     id: 'tree', name: 'The Considerable Tree', x: 280, z: 250, r: 18,
-    journal: 'A tree significantly larger than the other trees. It has clearly been here longer than everything else. It knows something. It is not telling.',
+    journal: 'A tree older than hunger. Things have died at its roots, generously. It eats too. You have just never caught it chewing.',
     build(g) {
       const trunk = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 2.6, 16, 8),
         new THREE.MeshStandardMaterial({ color: 0x4f3a22, roughness: 1 }));
@@ -670,7 +689,7 @@ const LANDMARKS = [
   },
   {
     id: 'spring', name: 'The Generous Spring', x: 60, z: -228, r: 14,
-    journal: 'Water comes out of the mountain here, continuously, for free. Nobody is charging for this. Remarkable. The survey will not be reporting it.',
+    journal: 'Water comes out of the mountain and asks for nothing. Everything else here charges. You keep waiting for the price.',
     build(g) {
       const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(4.2, 0), stoneMat);
       rock.position.y = 2.4; rock.scale.y = 1.5; rock.castShadow = true; g.add(rock);
@@ -688,7 +707,7 @@ const LANDMARKS = [
   },
   {
     id: 'camp', name: 'The Abandoned Camp', x: -180, z: -160, r: 13,
-    journal: 'Someone camped here and left in a hurry. The fire is still going. The tent is fine. Everything is fine. Do not think about it further.',
+    journal: 'A tent, a fire, no one. They left their food. Nobody leaves their food. Whatever ate them was not here for the beans.',
     build(g) {
       const tent = new THREE.Mesh(new THREE.ConeGeometry(2.4, 2.8, 4),
         new THREE.MeshStandardMaterial({ color: 0xa3622f, roughness: 1, flatShading: true }));
@@ -708,7 +727,7 @@ const LANDMARKS = [
   },
   {
     id: 'cairn', name: 'The Summit Cairn', x: 220, z: 220, r: 14,
-    journal: 'A pile of rocks at the highest point for miles. Someone carried these up here, one at a time, to say "I existed." The survey concurs: they existed.',
+    journal: 'Stones stacked by hands, up where nothing grows. Someone climbed above the food chain to die. It almost worked.',
     build(g) {
       let y = 0;
       for (let i = 0; i < 6; i++) {
@@ -722,7 +741,7 @@ const LANDMARKS = [
   },
   {
     id: 'monolith', name: 'The Door That Isn’t', x: -290, z: -290, r: 12,
-    journal: 'A black door, standing alone, going nowhere. It hums, very slightly, in a key the survey does not recognize. The survey recommends not knocking. The survey knocked. Nothing happened. Probably.',
+    journal: 'A black door to nowhere. It hums, and your empty stomach hums back. You knocked. Something inside swallowed once. You stopped knocking.',
     build(g) {
       const slab = new THREE.Mesh(new THREE.BoxGeometry(2.6, 9.5, 0.8),
         new THREE.MeshStandardMaterial({ color: 0x07070a, roughness: 0.35,
@@ -739,7 +758,7 @@ const LANDMARKS = [
   },
   {
     id: 'grotto', name: 'The Glowing Grotto', x: 150, z: 90, r: 13,
-    journal: 'Mushrooms that produce their own light, free of charge. The forest installed night-lighting and told no one. Touching them is not part of the survey.',
+    journal: 'Mushrooms making their own light. They look like food. So did you, once, to something. You leave them alone.',
     build(g) {
       const stemM = new THREE.MeshStandardMaterial({ color: 0xd8d2c2, roughness: 1 });
       for (let i = 0; i < 9; i++) {
@@ -801,7 +820,7 @@ let lmCheckT = 0;
 
 function showJournal(lm, ix) {
   const el = document.getElementById('journal');
-  document.getElementById('jr-kicker').textContent = 'FIELD JOURNAL';
+  document.getElementById('jr-kicker').textContent = 'THE WOODS KEEP SCORE';
   document.getElementById('jr-name').textContent = lm.name;
   document.getElementById('jr-body').textContent = lm.journal;
   el.style.opacity = 1; el.style.transform = 'translateX(-50%) translateY(0)';
@@ -836,7 +855,7 @@ function landmarkUpdate(dt, t) {
         showJournal(lm);
         renderNotes();
         if (foundSet.size === LANDMARKS.length)
-          setTimeout(() => toast('SURVEY COMPLETE. The wilderness has been fully appreciated. It was always ready.', 6000), 7500);
+          setTimeout(() => toast('ALL SEVEN FOUND. You have seen the whole menu. You are on it.', 6000), 7500);
       }
     }
   }
@@ -1058,11 +1077,19 @@ function animalUpdate(a, dt) {
         player.lastAte = clock.elapsedTime;
         if (player.hp < 95) {
           player.hp = Math.min(100, player.hp + 40); renderHP();
+<<<<<<< ours
           toast('You eat where it fell. Warm.');
         } else if (player.meat < 3) {
           player.meat++; renderNotes();
           toast('Nothing wasted.');
         } else toast('Heavy enough already.');
+=======
+          toast('You open it. You eat the insides so yours keep working.');
+        } else if (player.meat < 3) {
+          player.meat++; renderNotes();
+          toast('The insides come with you. The woods waste nothing. Neither do you.');
+        } else toast('You can carry no more. Whatever follows you gets the rest.');
+>>>>>>> theirs
       }
     }
     if (a.t <= 0) { scene.remove(a.obj); animals.splice(animals.indexOf(a), 1); spawn(a.name); }
@@ -1260,12 +1287,12 @@ function dropBlood(a) {
 }
 
 const VOICE = {
-  peaceful: ['“Glad it went peaceful,” you say, to no one.',
-             '“Didn’t feel a thing,” you tell yourself. Probably true.',
-             'Clean. The forest barely noticed.'],
-  suffered: ['It waited for it, at the end. You don’t say anything.',
-             'You made that harder than it needed to be. You know it.',
-             'That one suffered. The woods will remember, even if you won’t.'],
+  peaceful: ['“Glad it went peaceful,” you say, to no one. No one answers.',
+             'Quick. Alive, then food. The kindest order of operations.',
+             'Clean. You say a small grace. Hunger wrote it.'],
+  suffered: ['It took a while. You watched. You were that hungry.',
+             'That one suffered. The woods saw. They mark these things.',
+             'You made it slow. Somewhere, that is being written down.'],
 };
 
 function killAnimal(a, suffered = false) {
@@ -1339,7 +1366,7 @@ function spawnCryptid() {
   setAnim(a, 'Walk');
   animals.push(a);
   cryptid = a;
-  setTimeout(() => toast('Something is out there. It has already seen you.', 5000), 2500);
+  setTimeout(() => toast('Something out there is starving too. It has chosen.', 5000), 2500);
 }
 
 // the staring contest — sometimes it stops DEAD at 25–40m, body frozen,
@@ -1373,7 +1400,7 @@ function cryptidUpdate(night) {
       scene.remove(cryptid.obj);
       animals.splice(animals.indexOf(cryptid), 1);
       cryptid = null;
-      toast('Whatever it was — it’s gone with the dark.', 4200);
+      toast('Dawn. It withdrew, unfed. It will not stay unfed.', 4200);
     }
   }
 }
@@ -1455,7 +1482,7 @@ function arrowUpdate(dt) {
           setAnim(an, 'HitReact_Left', true);
           setTimeout(() => { if (!an.dead) an.cur = null; }, 400);
           an.aggro = true;
-          toast(an.isCryptid ? 'It noticed. It is coming.' : 'Wounded — and now it’s personal.');
+          toast(an.isCryptid ? 'It felt that. It is coming to feed.' : 'Wounded. Now it knows what you are.');
         } else {
           setAnim(an, 'HitReact_Left', true);
           setTimeout(() => { if (!an.dead) an.cur = null; }, 500);
@@ -1468,13 +1495,21 @@ function arrowUpdate(dt) {
           if (rear) {
             an.state = 'waddle';
             an.bleedT = 22 + Math.random() * 18;     // it will bleed out
+<<<<<<< ours
             toast('Low. Bad shot.', 2400);
+=======
+            toast('Gut shot. It walks away dying. The blood writes the route.', 4200);
+>>>>>>> theirs
           } else {
             an.state = 'flee'; an.t = 9;
             an.bleeding = 14 + Math.random() * 8;     // bleeds while running
             an.bleedFatal = a.power > 0.7 && Math.random() < 0.5;
             an.dir = Math.atan2(ap.x - player.x, ap.z - player.z);
+<<<<<<< ours
             toast('Blood.', 2000);
+=======
+            toast('Hit. Blood in the grass. It is owed to someone.', 2800);
+>>>>>>> theirs
           }
         }
         scene.remove(a.m); arrows.splice(i, 1); hit = true; break;
@@ -1813,6 +1848,7 @@ function tickBody() {
       player.hp -= dt * 0.7; renderHP();
       if (!tickBody._hungerWarned || t - tickBody._hungerWarned > 30) {
         tickBody._hungerWarned = t;
+<<<<<<< ours
         toast('Your stomach turns on you.');
       }
       if (player.hp <= 0 && !dead) { dead = true;
@@ -1821,6 +1857,12 @@ function tickBody() {
         toast('The wilds kept you. Respawning…', 4000);
 =======
         toast('You go out empty. Something eats well tonight.', 4000);
+>>>>>>> theirs
+=======
+        toast('Hunger. Your body has begun eating itself. It will finish.');
+      }
+      if (player.hp <= 0 && !dead) { dead = true;
+        toast('Empty. The woods take back the meat that was you…', 4000);
 >>>>>>> theirs
         setTimeout(() => { player.hp = 100; player.meat = 0;
           player.lastAte = clock.elapsedTime; player.x = 0; player.z = 26;
@@ -1831,7 +1873,11 @@ function tickBody() {
     if (player.hp < 35 && player.meat > 0 && !dead) {
       player.meat--; player.hp = Math.min(100, player.hp + 40);
       player.lastAte = t; renderNotes(); renderHP();
+<<<<<<< ours
       toast('You eat from the pack. Cold.');
+=======
+      toast('You eat from the pack, walking. Chewing is for the safe.');
+>>>>>>> theirs
     }
     // slow regen, only when fed
     if (!starving && t - player.lastHit > 8 && player.hp < 100) {
@@ -1932,6 +1978,11 @@ document.getElementById('play').addEventListener('click', () => {
   updateBowString(0);
   document.getElementById('hud').style.opacity = 1;
   try { audio.start(); } catch (e) { console.warn('audio unavailable:', e); }
+<<<<<<< ours
+=======
+  // owner's rule: no tutorial, no informing HUD — they learn the hard way.
+  setTimeout(() => toast('You are hungry. So is everything else here.', 6200), 1200);
+>>>>>>> theirs
   document.getElementById('title').style.opacity = 0;
   setTimeout(() => document.getElementById('title').style.display = 'none', 650);
   if (!IS_TOUCH) canvas.requestPointerLock();
