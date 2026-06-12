@@ -44,24 +44,7 @@ const CRYPTID_CFG = { speed: 3.6, gallop: 11.8, hp: 5, flee: 0, r: 1.7,
 const CRYPTID_CHANCE = 0.45;     // per night
 
 const LINES = {
-<<<<<<< ours
-  Deer: ['Deer documented. It is at peace now. You did this.',
-         'One (1) deer, archived. The forest takes note.'],
-  Stag: ['A STAG. The other animals will discuss this for years.',
-         'Stag acquired. Somewhere, a lodge wall is calling.'],
-  Fox:  ['Fox archived. Nothing personal, it was simply orange.',
-         'The fox has been fully surveyed. Forever.'],
-  Wolf: ['The wolf’s project has been cancelled.',
-         'Wolf neutralized. It started it. This is documented.'],
-  Bull: ['The bull disagreed with your presence. The bull has been overruled.',
-         'Bull down. It charged first. Witnesses: the grass.'],
-  '???': ['THE HOLLOW STAG IS DOWN. Whatever it was — it isn’t anymore. Sleep well, if you can.'],
-  wound: ['Wounded. It remembers your face now.',
-          'A graze. The paperwork calls this “partial data.”'],
-  bite:  ['The wolf disagrees with the survey.',
-          'You have been bitten. Note it in the log.'],
-  death: 'YOU WERE SURVEYED BY WOLVES. The badge is awarded posthumously.',
-=======
+
   Deer: ['Deer. The insides are yours now. That was the arrangement.',
          'It fed on grass. You feed on it. The ledger balances.'],
   Stag: ['A stag. That much life has to go somewhere. It goes in you.',
@@ -78,7 +61,6 @@ const LINES = {
   bite:  ['Teeth. Some of you is missing now.',
           'Bitten. Something wanted your insides first.'],
   death: 'CONSUMED. Fair, all things considered. The woods start you over…',
->>>>>>> theirs
 };
 
 // ───────────────────────── renderer / scene ─────────────────────────
@@ -100,8 +82,7 @@ scene.background = new THREE.Color(0xd89a55);
 // chain black (Fronk's phone, 2026-06-12). ?bloom=1 forces it on.
 const USE_POST = !IS_TOUCH
   || new URLSearchParams(location.search).get('bloom') === '1';
-<<<<<<< ours
-scene.fog = new THREE.Fog(0xe8b07a, 80, 400);
+scene.fog = new THREE.Fog(0xd89a55, 60, 340);
 
 const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.1, 1200);
 // composer + bloom allocate several full-screen render targets at
@@ -113,42 +94,21 @@ if (USE_POST) {
   composer.addPass(new RenderPass(scene, camera));
   bloomPass = new UnrealBloomPass(
     new THREE.Vector2(innerWidth, innerHeight),
-    0.45,   // strength — glow without soup
+    0.38,   // strength — restrained; the light should feel withheld
     0.65,   // radius
-    0.82);  // threshold — only genuinely bright things bloom
+    0.85);  // threshold — only genuinely bright things bloom
   composer.addPass(bloomPass);
   composer.addPass(new OutputPass());
 }
-=======
-const composer = new EffectComposer(renderer);
-let bloomPass;
-scene.fog = new THREE.Fog(0xd89a55, 60, 340);
-
-const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.1, 1200);
-composer.addPass(new RenderPass(scene, camera));
-bloomPass = new UnrealBloomPass(
-  new THREE.Vector2(innerWidth, innerHeight),
-  0.38,   // strength — restrained; the light should feel withheld
-  0.65,   // radius
-  0.85);  // threshold — only genuinely bright things bloom
-composer.addPass(bloomPass);
-composer.addPass(new OutputPass());
->>>>>>> theirs
 
 // golden hour — Fronk's signature light. A full day/night cycle runs
 // on top of it: golden hour is "home base", night brings stars and
 // fireflies, then dawn returns. One cycle every DAY_LEN seconds.
 const DAY_LEN = 480;
-<<<<<<< ours
 const SUN_WARM = new THREE.Color(0xffc46a), SUN_NIGHT = new THREE.Color(0x4d5f96);
 const FOG_DAY = new THREE.Color(0xd89a55), FOG_NIGHT = new THREE.Color(0x080b12);
 const SUN_DAWN = new THREE.Color(0xe8dcc8), FOG_DAWN = new THREE.Color(0xc9bfae);
 const sun = new THREE.DirectionalLight(0xffc46a, 2.6);
-=======
-const SUN_WARM = new THREE.Color(0xffd9a0), SUN_NIGHT = new THREE.Color(0x6f88c8);
-const FOG_DAY = new THREE.Color(0xe8b07a), FOG_NIGHT = new THREE.Color(0x080b14);
-const sun = new THREE.DirectionalLight(0xffd9a0, 2.6);
->>>>>>> theirs
 sun.position.set(-180, 95, -60);
 sun.castShadow = true;
 sun.shadow.mapSize.setScalar(CFG.shadow);
@@ -157,12 +117,8 @@ sun.shadow.camera.right = sun.shadow.camera.top = 90;
 sun.shadow.camera.far = 600;
 sun.shadow.bias = -0.0008;
 scene.add(sun, sun.target);
-<<<<<<< ours
-const hemi = new THREE.HemisphereLight(0xe6b277, 0x2c3220, 0.78);
-=======
 // hemisphere kept slightly low even by day — canopy shade pockets stay dark
-const hemi = new THREE.HemisphereLight(0xffc890, 0x3a4a2a, 0.72);
->>>>>>> theirs
+const hemi = new THREE.HemisphereLight(0xe6b277, 0x2c3220, 0.72);
 scene.add(hemi);
 
 // sky dome — sunset gradient + sun glow
@@ -183,13 +139,8 @@ const sky = new THREE.Mesh(
       void main(){
         vec3 dir = normalize(vDir);
         float h = clamp(dir.y, -0.05, 1.0);
-<<<<<<< ours
-        vec3 horizon = mix(vec3(0.95, 0.48, 0.23), vec3(0.045, 0.055, 0.10), night);
-        vec3 zenith  = mix(vec3(0.11, 0.20, 0.40), vec3(0.008, 0.012, 0.035), night);
-=======
-        vec3 horizon = mix(vec3(0.99, 0.62, 0.34), vec3(0.031, 0.043, 0.078), night);
-        vec3 zenith  = mix(vec3(0.18, 0.26, 0.45), vec3(0.008, 0.012, 0.030), night);
->>>>>>> theirs
+        vec3 horizon = mix(vec3(0.95, 0.48, 0.23), vec3(0.031, 0.043, 0.078), night);
+        vec3 zenith  = mix(vec3(0.11, 0.20, 0.40), vec3(0.008, 0.012, 0.030), night);
         vec3 col = mix(horizon, zenith, pow(h, 0.62));
         float s = max(dot(dir, sunDir), 0.0);
         float dayGlow = 1.0 - night;
@@ -905,25 +856,16 @@ const mists = [];
 function updateMist(t, night) {
   // mist belongs to the edges of the day — thickest at dusk/dawn, lingers all night
   const edge = Math.min(1, Math.abs(night - 0.5) < 0.45 ? 1 - Math.abs(night - 0.5) / 0.45 : 0)
-<<<<<<< ours
-    * 0.6 + night * 0.34;
-=======
-    * 0.8 + night * 0.3;
->>>>>>> theirs
+    * 0.8 + night * 0.34;
   for (const sp of mists) {
     const u = sp.userData;
     u.a += u.v * 0.016;
     const x = player.x + Math.cos(u.a) * u.r, z = player.z + Math.sin(u.a) * u.r;
-<<<<<<< ours
-    sp.position.set(x, heightAt(x, z) + 1.6 + Math.sin(t * 0.2 + u.ph) * 0.4, z);
-    sp.material.opacity = edge * (0.18 + 0.11 * Math.sin(t * 0.13 + u.ph));
-=======
     const gy = heightAt(x, z);
     // valley bias — mist pools in low ground, thins out on the slopes
     const low = Math.max(0.2, Math.min(1.3, 1.35 - (gy - WATER_Y) / 12));
     sp.position.set(x, gy + 1.6 + Math.sin(t * 0.2 + u.ph) * 0.4, z);
     sp.material.opacity = Math.min(0.5, edge * low * (0.2 + 0.12 * Math.sin(t * 0.13 + u.ph)));
->>>>>>> theirs
   }
 }
 
@@ -1077,19 +1019,11 @@ function animalUpdate(a, dt) {
         player.lastAte = clock.elapsedTime;
         if (player.hp < 95) {
           player.hp = Math.min(100, player.hp + 40); renderHP();
-<<<<<<< ours
-          toast('You eat where it fell. Warm.');
-        } else if (player.meat < 3) {
-          player.meat++; renderNotes();
-          toast('Nothing wasted.');
-        } else toast('Heavy enough already.');
-=======
           toast('You open it. You eat the insides so yours keep working.');
         } else if (player.meat < 3) {
           player.meat++; renderNotes();
           toast('The insides come with you. The woods waste nothing. Neither do you.');
         } else toast('You can carry no more. Whatever follows you gets the rest.');
->>>>>>> theirs
       }
     }
     if (a.t <= 0) { scene.remove(a.obj); animals.splice(animals.indexOf(a), 1); spawn(a.name); }
@@ -1495,21 +1429,13 @@ function arrowUpdate(dt) {
           if (rear) {
             an.state = 'waddle';
             an.bleedT = 22 + Math.random() * 18;     // it will bleed out
-<<<<<<< ours
             toast('Low. Bad shot.', 2400);
-=======
-            toast('Gut shot. It walks away dying. The blood writes the route.', 4200);
->>>>>>> theirs
           } else {
             an.state = 'flee'; an.t = 9;
             an.bleeding = 14 + Math.random() * 8;     // bleeds while running
             an.bleedFatal = a.power > 0.7 && Math.random() < 0.5;
             an.dir = Math.atan2(ap.x - player.x, ap.z - player.z);
-<<<<<<< ours
             toast('Blood.', 2000);
-=======
-            toast('Hit. Blood in the grass. It is owed to someone.', 2800);
->>>>>>> theirs
           }
         }
         scene.remove(a.m); arrows.splice(i, 1); hit = true; break;
@@ -1708,7 +1634,7 @@ function renderHP() {
 // preallocated scratch for the day/night math (no per-frame Vector3/Color)
 const _sunAz = new THREE.Vector3(-0.86, 0, -0.28).normalize();
 const _sunDir = new THREE.Vector3();
-const _CLOUD_NIGHT = new THREE.Color(0x2a3245);
+const _CLOUD_NIGHT = new THREE.Color(0x171c2a);
 const clock = new THREE.Clock();
 window._clock = clock;
 function tick() {
@@ -1739,18 +1665,12 @@ function tickBody() {
   _sunDir.set(_sunAz.x * azS, Math.max(-0.5, elev), _sunAz.z * azS).normalize();
   skyUniforms.sunDir.value.copy(_sunDir);
   skyUniforms.night.value = night;
-<<<<<<< ours
-  sun.intensity = 0.14 + 2.55 * Math.max(0, Math.min(1, (elev + 0.1) * 3.2)) * (1 - night * 0.95);
+  sun.intensity = 0.12 + 2.5 * Math.max(0, Math.min(1, (elev + 0.1) * 3.2)) * (1 - night * 0.96);
   // dawn is pale and anemic — color drains, then golden hour curdles back in
   const dawn = (phase > 0.7 ? Math.max(0, 1 - Math.abs(phase - 0.88) / 0.12) : 0) * (1 - night);
   sun.color.copy(SUN_WARM).lerp(SUN_NIGHT, night);
   if (dawn > 0) sun.color.lerp(SUN_DAWN, dawn * 0.7);
-  hemi.intensity = (0.78 - night * 0.62) * (1 - dawn * 0.18);
-=======
-  sun.intensity = 0.12 + 2.45 * Math.max(0, Math.min(1, (elev + 0.1) * 3.2)) * (1 - night * 0.96);
-  sun.color.copy(SUN_WARM).lerp(SUN_NIGHT, night);
-  hemi.intensity = 0.72 - night * 0.58;
->>>>>>> theirs
+  hemi.intensity = (0.72 - night * 0.62) * (1 - dawn * 0.18);
   scene.fog.color.copy(FOG_DAY).lerp(FOG_NIGHT, night);
   if (dawn > 0) scene.fog.color.lerp(FOG_DAWN, dawn * 0.65);
   scene.fog.near = 60 - night * 24;     // night closes in
@@ -1772,18 +1692,8 @@ function tickBody() {
   farDisc.position.x = player.x; farDisc.position.z = player.z;
   landmarkUpdate(dt, t);
   if (window._cloudMat) {
-<<<<<<< ours
-<<<<<<< ours
-    window._cloudMat.color.setHex(0xfff1de).lerp(_CLOUD_NIGHT, night);
-    window._cloudMat.opacity = 0.92 - night * 0.45;
-=======
-    window._cloudMat.color.setHex(0xf0dcc2).lerp(new THREE.Color(0x171c2a), night);
-    window._cloudMat.opacity = 0.88 - night * 0.5;
->>>>>>> theirs
-=======
-    window._cloudMat.color.setHex(0xfff1de).lerp(new THREE.Color(0x171d2e), night);
-    window._cloudMat.opacity = 0.92 - night * 0.55;
->>>>>>> theirs
+    window._cloudMat.color.setHex(0xf0dcc2).lerp(_CLOUD_NIGHT, night);
+    window._cloudMat.opacity = 0.88 - night * 0.55;
   }
   if (window._glitter) {
     const g = window._glitter;
@@ -1848,22 +1758,11 @@ function tickBody() {
       player.hp -= dt * 0.7; renderHP();
       if (!tickBody._hungerWarned || t - tickBody._hungerWarned > 30) {
         tickBody._hungerWarned = t;
-<<<<<<< ours
-        toast('Your stomach turns on you.');
-      }
-      if (player.hp <= 0 && !dead) { dead = true;
-<<<<<<< ours
-        resetDrawState();
-        toast('The wilds kept you. Respawning…', 4000);
-=======
-        toast('You go out empty. Something eats well tonight.', 4000);
->>>>>>> theirs
-=======
         toast('Hunger. Your body has begun eating itself. It will finish.');
       }
       if (player.hp <= 0 && !dead) { dead = true;
+        resetDrawState();
         toast('Empty. The woods take back the meat that was you…', 4000);
->>>>>>> theirs
         setTimeout(() => { player.hp = 100; player.meat = 0;
           player.lastAte = clock.elapsedTime; player.x = 0; player.z = 26;
           dead = false; renderHP(); }, 3500);
@@ -1873,11 +1772,7 @@ function tickBody() {
     if (player.hp < 35 && player.meat > 0 && !dead) {
       player.meat--; player.hp = Math.min(100, player.hp + 40);
       player.lastAte = t; renderNotes(); renderHP();
-<<<<<<< ours
-      toast('You eat from the pack. Cold.');
-=======
       toast('You eat from the pack, walking. Chewing is for the safe.');
->>>>>>> theirs
     }
     // slow regen, only when fed
     if (!starving && t - player.lastHit > 8 && player.hp < 100) {
@@ -1978,11 +1873,8 @@ document.getElementById('play').addEventListener('click', () => {
   updateBowString(0);
   document.getElementById('hud').style.opacity = 1;
   try { audio.start(); } catch (e) { console.warn('audio unavailable:', e); }
-<<<<<<< ours
-=======
-  // owner's rule: no tutorial, no informing HUD — they learn the hard way.
+  // no tutorial, no informing HUD — they learn the hard way.
   setTimeout(() => toast('You are hungry. So is everything else here.', 6200), 1200);
->>>>>>> theirs
   document.getElementById('title').style.opacity = 0;
   setTimeout(() => document.getElementById('title').style.display = 'none', 650);
   if (!IS_TOUCH) canvas.requestPointerLock();
