@@ -1,6 +1,6 @@
 // FRONK WILDS — open-world scout-survey (hunting) game
 // Three.js r160, Quaternius CC0 animated animals, all procedural world.
-window._V = 15;
+window._V = 16;
 window._spawnCryptid = () => spawnCryptid();   // debug
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
@@ -21,8 +21,8 @@ const WORLD = 860;            // square world size
 const WATER_Y = 2.1;          // lake level
 const EYE = 1.7;
 const CFG = IS_TOUCH
-  ? { grass: 15000, trees: 210, rocks: 60, px: 1.6, shadow: 1024, segs: 180 }
-  : { grass: 34000, trees: 320, rocks: 90, px: 2, shadow: 2048, segs: 260 };
+  ? { grass: 15000, trees: 340, bushes: 260, rocks: 60, px: 1.6, shadow: 1024, segs: 180 }
+  : { grass: 34000, trees: 540, bushes: 420, rocks: 90, px: 2, shadow: 2048, segs: 260 };
 
 const SPECIES = {
   Deer: { n: 6,  speed: 3.0, gallop: 10.5, hp: 1, flee: 30, r: 1.5 },
@@ -488,6 +488,42 @@ function mergeGeoms(list) {
   }
   species.forEach(s => { s.inst.count = s.n; });
 
+  // bushes — undergrowth that breaks sightlines. COVER, not collision.
+  const bu1 = new THREE.IcosahedronGeometry(1.0, 0); bu1.translate(0, 0.7, 0);
+  const bu2 = new THREE.IcosahedronGeometry(0.75, 0); bu2.translate(0.8, 0.5, 0.3);
+  const bu3 = new THREE.IcosahedronGeometry(0.6, 0); bu3.translate(-0.7, 0.45, -0.2);
+  const bushGeo = mergeGeoms([bu1, bu2, bu3]);
+  {
+    const n = bushGeo.attributes.position.count, col = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) {
+      const c = new THREE.Color().setHSL(0.22 + Math.random() * 0.07,
+        0.42 + Math.random() * 0.18, 0.24 + Math.random() * 0.1);
+      col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
+    }
+    bushGeo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  }
+  const bushes = new THREE.InstancedMesh(bushGeo,
+    new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1,
+      emissive: 0x121f0a, emissiveIntensity: 0.5 }), CFG.bushes);
+  bushes.castShadow = true;
+  window.BUSHES = [];
+  placed = 0; guard = 0;
+  while (placed < CFG.bushes && guard++ < CFG.bushes * 30) {
+    const x = (Math.random() - 0.5) * WORLD * 0.92,
+          z = (Math.random() - 0.5) * WORLD * 0.92,
+          y = heightAt(x, z);
+    if (y < WATER_Y + 1 || y > 22) continue;
+    if (Math.hypot(x, z) < 14) continue;
+    P.set(x, y - 0.1, z);
+    E.set(0, Math.random() * Math.PI * 2, (Math.random() - 0.5) * 0.15);
+    Q.setFromEuler(E);
+    const s = 0.7 + Math.random() * 1.3; S.set(s, s * (0.7 + Math.random() * 0.5), s);
+    bushes.setMatrixAt(placed++, M.compose(P, Q, S));
+    BUSHES.push({ x, z, r: 1.3 * s });
+  }
+  bushes.count = placed;
+  scene.add(bushes);
+
   const rg = new THREE.DodecahedronGeometry(1.1, 0);
   const rocks = new THREE.InstancedMesh(rg,
     new THREE.MeshStandardMaterial({ color: 0x8d8678, roughness: 1 }), CFG.rocks);
@@ -892,6 +928,42 @@ function setAnim(a, frag, once = false) {
   a.cur = next;
 }
 
+// ── stealth: what the animal can actually perceive ────────────────
+// noiseLevel: 0 = still, 1 = moving, 2 = sprinting (set in the tick)
+let noiseLevel = 0;
+
+function losBlocked(a) {
+  // cached, throttled — is there a tree/bush between player and animal?
+  a._losT = (a._losT ?? 0) - 0.016;
+  if (a._losT > 0) return a._losB;
+  a._losT = 0.4;
+  const ax = a.obj.position.x, az = a.obj.position.z;
+  const dx = ax - player.x, dz = az - player.z;
+  const len2 = dx * dx + dz * dz;
+  a._losB = false;
+  if (len2 > 1) {
+    for (const list of [TREES, BUSHES]) {
+      for (const c of list) {
+        const t = ((c.x - player.x) * dx + (c.z - player.z) * dz) / len2;
+        if (t < 0.08 || t > 0.92) continue;
+        const px = player.x + dx * t, pz = player.z + dz * t;
+        if (Math.hypot(c.x - px, c.z - pz) < c.r + 0.55) { a._losB = true; break; }
+      }
+      if (a._losB) break;
+    }
+  }
+  return a._losB;
+}
+
+function spookRadius(a, dist) {
+  // hearing scales with your noise; sight needs a clear line.
+  // Sneak low behind cover and you can get close enough to whisper.
+  let r = a.cfg.flee;
+  r *= noiseLevel === 2 ? 1.35 : noiseLevel === 1 ? 0.85 : 0.5;
+  if (dist < 60 && losBlocked(a)) r *= 0.45;
+  return Math.max(r, noiseLevel === 2 ? 18 : 6);   // sprint is LOUD
+}
+
 function animalUpdate(a, dt) {
   window._auCalls = (window._auCalls || 0) + 1;
   a.mixer.update(dt);
@@ -905,10 +977,10 @@ function animalUpdate(a, dt) {
         player.lastAte = clock.elapsedTime;
         if (player.hp < 95) {
           player.hp = Math.min(100, player.hp + 40); renderHP();
-          toast('You eat. The wilds provide.');
+          toast('You open it and take the organs. You eat where it fell. Warm.');
         } else if (player.meat < 3) {
           player.meat++; renderNotes();
-          toast('Meat, packed for the dark hours.');
+          toast('Organs taken, meat packed. Nothing wasted.');
         } else toast('You are carrying all the meat one scout can carry.');
       }
     }
@@ -941,12 +1013,28 @@ function animalUpdate(a, dt) {
       stepAnimal(a, fast ? a.cfg.gallop : a.cfg.speed, dt);
     } else wander(a, dt);
   } else {                                    // ── prey brain
-    if (a.state === 'flee') {
+    if (a.state === 'waddle') {
+      // gut-shot: it limps away from you, bleeding. It will lie down.
+      a.bleedT -= dt;
+      a.dir = lerpAngle(a.dir, Math.atan2(-dx, -dz), dt * 1.5);
+      setAnim(a, 'Walk');
+      stepAnimal(a, 1.15, dt);
+      dropBlood(a);
+      if (a.bleedT <= 0) killAnimal(a, true);   // bleed-out
+    } else if (a.state === 'flee') {
       a.t -= dt;
       setAnim(a, 'Gallop');
       stepAnimal(a, a.cfg.gallop, dt);
+      if (a.bleeding) {
+        dropBlood(a);
+        a.bleeding -= dt;
+        if (a.bleeding <= 0) {
+          if (a.bleedFatal) { a.state = 'waddle'; a.bleedT = 6 + Math.random() * 8; }
+          else a.bleeding = 0;   // shallow wound — it clots, it remembers
+        }
+      }
       if (a.t <= 0 && dist > a.cfg.flee * 1.5) a.state = 'idle', a.t = 1 + Math.random() * 3;
-    } else if (dist < a.cfg.flee) {
+    } else if (dist < spookRadius(a, dist)) {
       a.state = 'flee'; a.t = 5 + Math.random() * 4;
       a.dir = Math.atan2(-dx, -dz) + (Math.random() - 0.5) * 0.7;
     } else wander(a, dt);
@@ -984,13 +1072,61 @@ function lerpAngle(a, b, t) {
   return a + d * t;
 }
 
-function killAnimal(a) {
-  a.dead = true; a.t = 9;
+// ── blood trail — track a wounded animal through the woods ────────
+const BLOOD_N = 140;
+const blood = new THREE.InstancedMesh(
+  new THREE.CircleGeometry(0.26, 7),
+  new THREE.MeshBasicMaterial({ color: 0x5e0c0c, transparent: true,
+    opacity: 0.85, depthWrite: false }), BLOOD_N);
+blood.frustumCulled = false;
+{
+  const Z = new THREE.Matrix4().makeScale(0, 0, 0);
+  for (let i = 0; i < BLOOD_N; i++) blood.setMatrixAt(i, Z);
+}
+scene.add(blood);
+let bloodCursor = 0;
+const _bM = new THREE.Matrix4(), _bQ = new THREE.Quaternion()
+  .setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0));
+
+function dropBlood(a) {
+  const p = a.obj.position;
+  if (a._lastBlood && Math.hypot(p.x - a._lastBlood.x, p.z - a._lastBlood.z) < 2.6) return;
+  a._lastBlood = { x: p.x, z: p.z };
+  const s = 0.7 + Math.random() * 0.9;
+  _bM.compose(
+    new THREE.Vector3(p.x + (Math.random() - 0.5) * 0.6,
+                      heightAt(p.x, p.z) + 0.04,
+                      p.z + (Math.random() - 0.5) * 0.6),
+    _bQ, new THREE.Vector3(s, s, s));
+  blood.setMatrixAt(bloodCursor % BLOOD_N, _bM);
+  blood.instanceMatrix.needsUpdate = true;
+  bloodCursor++;
+}
+
+const VOICE = {
+  peaceful: ['“Glad it went peaceful,” you say, to no one.',
+             '“Didn’t feel a thing,” you tell yourself. Probably true.',
+             'Clean. The forest barely noticed.'],
+  suffered: ['It waited for it, at the end. You don’t say anything.',
+             'You made that harder than it needed to be. You know it.',
+             'That one suffered. The woods will remember, even if you won’t.'],
+};
+
+function killAnimal(a, suffered = false) {
+  a.dead = true; a.t = 12;
+  a.suffered = suffered || !!a.bleeding || a.state === 'waddle';
   setAnim(a, 'Death', true);
   score[a.name] = (score[a.name] || 0) + 1;
-  toast(pick(LINES[a.name]), a.isCryptid ? 7000 : 2600);
-  if (a.isCryptid) { audio.stinger(); cryptid = null; a.t = 20; }
-  else audio.documented();
+  if (a.isCryptid) {
+    toast(pick(LINES[a.name]), 7000);
+    audio.stinger(); cryptid = null; a.t = 20;
+  } else if (a.cfg.hunts || a.cfg.territorial) {
+    toast(pick(LINES[a.name]));
+    audio.documented();
+  } else {
+    toast(pick(a.suffered ? VOICE.suffered : VOICE.peaceful), 3600);
+    audio.documented();
+  }
   renderNotes();
 }
 
@@ -1144,9 +1280,23 @@ function arrowUpdate(dt) {
         } else {
           setAnim(an, 'HitReact_Left', true);
           setTimeout(() => { if (!an.dead) an.cur = null; }, 500);
-          an.state = 'flee'; an.t = 8;
-          an.dir = Math.atan2(ap.x - player.x, ap.z - player.z);
-          toast(pick(LINES.wound));
+          // WHERE did it take the arrow? Rear hit = gut shot: it
+          // waddles off slowly and bleeds. You track it or you lose it.
+          const fx = Math.sin(an.obj.rotation.y), fz = Math.cos(an.obj.rotation.y);
+          const rx = a.m.position.x - ap.x, rz = a.m.position.z - ap.z;
+          const rear = (rx * fx + rz * fz) < -0.25;
+          an._lastBlood = null;
+          if (rear) {
+            an.state = 'waddle';
+            an.bleedT = 22 + Math.random() * 18;     // it will bleed out
+            toast('Gut shot. It’s moving off slow, leaving blood. Follow it — or let the forest have it.', 4200);
+          } else {
+            an.state = 'flee'; an.t = 9;
+            an.bleeding = 14 + Math.random() * 8;     // bleeds while running
+            an.bleedFatal = a.power > 0.7 && Math.random() < 0.5;
+            an.dir = Math.atan2(ap.x - player.x, ap.z - player.z);
+            toast('Hit. There’s blood in the grass.', 2800);
+          }
         }
         scene.remove(a.m); arrows.splice(i, 1); hit = true; break;
       }
@@ -1377,8 +1527,13 @@ function tickBody() {
       mz = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0);
       mx = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0);
     } else { mx = window.moveVec.x; mz = -window.moveVec.y; }
-    const sprint = keys.ShiftLeft ? 1.65 : 1;
-    const sp = 5.4 * sprint * (drawing ? 0.55 : 1);
+    // full stick / shift = sprint (LOUD). Half-stick = quiet stalk.
+    const stickMag = Math.min(1, Math.hypot(mx, mz));
+    const sprinting = (!IS_TOUCH && keys.ShiftLeft && stickMag > 0)
+      || (IS_TOUCH && stickMag > 0.92);
+    noiseLevel = stickMag > 0.02 ? (sprinting ? 2 : 1) : 0;
+    const sprint = sprinting ? 1.65 : 1;
+    const sp = 5.4 * sprint * (drawing ? 0.55 : 1) * (IS_TOUCH ? Math.max(stickMag, 0.25) : 1);
     const sin = Math.sin(player.yaw), cos = Math.cos(player.yaw);
     let nx = player.x + (-sin * mz + cos * mx) * sp * dt;
     let nz = player.z + (-cos * mz - sin * mx) * sp * dt;
@@ -1449,7 +1604,7 @@ function tickBody() {
         if (dd < wolfDist) wolfDist = dd;
       }
     audio.update(dt, {
-      moving: !!(mx || mz), sprint: !!keys.ShiftLeft,
+      moving: !!(mx || mz), sprint: sprinting,
       wolfDist, lakeDist: Math.hypot(player.x - 70, player.z + 90),
       night: window._night || 0, hp: player.hp,
     });
@@ -1529,8 +1684,8 @@ document.getElementById('play').addEventListener('click', () => {
   document.getElementById('hud').style.opacity = 1;
   try { audio.start(); } catch (e) { console.warn('audio unavailable:', e); }
   setTimeout(() => toast(IS_TOUCH
-    ? 'Left thumb walks · drag right side to look · hold the button and DRAG to aim, release to loose'
-    : 'WASD walks · mouse looks · hold click to draw, release to loose', 5800), 1200);
+    ? 'Half-stick = stalk quietly, full stick = sprint (loud) · hold the button + DRAG to aim'
+    : 'WASD walks, Shift sprints (loud) · stalk slow + stay behind cover · hold click to draw', 6200), 1200);
   document.getElementById('title').style.opacity = 0;
   setTimeout(() => document.getElementById('title').style.display = 'none', 650);
   if (!IS_TOUCH) canvas.requestPointerLock();
