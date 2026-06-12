@@ -1,6 +1,6 @@
 // FRONK WILDS — open-world scout-survey (hunting) game
 // Three.js r160, Quaternius CC0 animated animals, all procedural world.
-window._V = 10;
+window._V = 11;
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
@@ -490,6 +490,23 @@ const LANDMARKS = [
     },
   },
   {
+    id: 'monolith', name: 'The Door That Isn’t', x: -290, z: -290, r: 12,
+    journal: 'A black door, standing alone, going nowhere. It hums, very slightly, in a key the survey does not recognize. The survey recommends not knocking. The survey knocked. Nothing happened. Probably.',
+    build(g) {
+      const slab = new THREE.Mesh(new THREE.BoxGeometry(2.6, 9.5, 0.8),
+        new THREE.MeshStandardMaterial({ color: 0x07070a, roughness: 0.35,
+          metalness: 0.4 }));
+      slab.position.y = 4.75; slab.castShadow = true; g.add(slab);
+      const seam = new THREE.Mesh(new THREE.PlaneGeometry(0.07, 8.6),
+        new THREE.MeshStandardMaterial({ color: 0x9fe8ff, emissive: 0x6fd8ff,
+          emissiveIntensity: 2.4 }));
+      seam.position.set(0, 4.6, 0.41); g.add(seam);
+      const hum = new THREE.PointLight(0x7fd8ef, 3.5, 14, 2);
+      hum.position.set(0, 4.5, 1.2); g.add(hum);
+      g.userData.seam = seam;
+    },
+  },
+  {
     id: 'grotto', name: 'The Glowing Grotto', x: 150, z: 90, r: 13,
     journal: 'Mushrooms that produce their own light, free of charge. The forest installed night-lighting and told no one. Touching them is not part of the survey.',
     build(g) {
@@ -565,6 +582,7 @@ function landmarkUpdate(dt, t) {
   for (const lm of LANDMARKS) {
     const u = lm.group.userData;
     if (u.fireLight) u.fireLight.intensity = 11 + Math.sin(t * 11) * 2.5 + Math.sin(t * 23) * 1.5;
+    if (u.seam) u.seam.material.emissiveIntensity = 2 + Math.sin(t * 0.9) * 0.9;
     if (u.flame) u.flame.scale.y = 1 + Math.sin(t * 13) * 0.15;
     if (u.fall) u.fall.material.opacity = 0.55 + Math.sin(t * 6) * 0.12;
   }
@@ -599,6 +617,47 @@ function landmarkUpdate(dt, t) {
       const vol = Math.max(0.05, Math.min(0.3, 60 / nearestD * 0.1));
       audio.beacon(pan, vol);
     }
+  }
+}
+
+// ───────────────────────── horizon + mist (beauty & mystery) ──────────────
+// A vast fog-colored ground sheet beyond the playfield: every below-
+// horizon sightline ends in fogged geometry — no more void band.
+const farDisc = new THREE.Mesh(new THREE.CircleGeometry(2400, 40),
+  new THREE.MeshBasicMaterial({ color: 0xe8b07a }));
+farDisc.rotation.x = -Math.PI / 2;
+farDisc.position.y = WATER_Y - 0.55;
+scene.add(farDisc);
+
+// drifting ground mist — soft radial sprites, strongest at dusk/dawn/night
+const mists = [];
+{
+  const cv = document.createElement('canvas'); cv.width = cv.height = 128;
+  const cx = cv.getContext('2d');
+  const grad = cx.createRadialGradient(64, 64, 4, 64, 64, 62);
+  grad.addColorStop(0, 'rgba(255,245,230,0.55)');
+  grad.addColorStop(1, 'rgba(255,245,230,0)');
+  cx.fillStyle = grad; cx.fillRect(0, 0, 128, 128);
+  const tex = new THREE.CanvasTexture(cv);
+  for (let i = 0; i < 11; i++) {
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: tex, transparent: true, opacity: 0, depthWrite: false }));
+    sp.scale.set(34 + Math.random() * 26, 7 + Math.random() * 5, 1);
+    sp.userData = { a: Math.random() * Math.PI * 2, r: 14 + Math.random() * 60,
+                    v: 0.01 + Math.random() * 0.02, ph: Math.random() * 9 };
+    scene.add(sp); mists.push(sp);
+  }
+}
+function updateMist(t, night) {
+  // mist belongs to the edges of the day — fades in toward and out of night
+  const edge = Math.min(1, Math.abs(night - 0.5) < 0.45 ? 1 - Math.abs(night - 0.5) / 0.45 : 0)
+    * 0.55 + night * 0.25;
+  for (const sp of mists) {
+    const u = sp.userData;
+    u.a += u.v * 0.016;
+    const x = player.x + Math.cos(u.a) * u.r, z = player.z + Math.sin(u.a) * u.r;
+    sp.position.set(x, heightAt(x, z) + 1.6 + Math.sin(t * 0.2 + u.ph) * 0.4, z);
+    sp.material.opacity = edge * (0.16 + 0.1 * Math.sin(t * 0.13 + u.ph));
   }
 }
 
@@ -823,6 +882,7 @@ function loose() {
 }
 
 window._loose = p => { drawT = p; loose(); };   // debug hooks
+window._draw = v => { drawing = v; };
 window._dbg = () => ({ started, dead, arrows: arrows.length,
   sample: animals[0] && { name: animals[0].name, state: animals[0].state,
     dist: Math.round(Math.hypot(player.x - animals[0].obj.position.x,
@@ -865,25 +925,71 @@ function arrowUpdate(dt) {
   }
 }
 
-// bow viewmodel
+// bow viewmodel — a real recurve: curved limbs, leather grip, a
+// nocked arrow that appears as you draw, a string that pulls back
 const bow = new THREE.Group();
+let bowString1, bowString2, nockedArrow;
 {
-  // vertical arc, opening toward screen center — reads as a bow held
-  // at the right hand, mostly out of frame
-  const arc = new THREE.Mesh(
-    new THREE.TorusGeometry(0.115, 0.0075, 6, 28, Math.PI * 1.05),
-    new THREE.MeshStandardMaterial({ color: 0x4a3520, roughness: 0.9 }));
-  arc.rotation.z = Math.PI / 2 - Math.PI * 0.025;   // arc spans top→bottom on the left side
-  bow.add(arc);
-  const string = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.0012, 0.0012, 0.225, 4),
-    new THREE.MeshBasicMaterial({ color: 0xcfc4b2 }));
-  string.position.x = 0.018;
-  bow.add(string);
-  bow.position.set(0.34, -0.27, -0.6);
-  bow.rotation.set(0, -0.42, 0.1);
+  const woodM = new THREE.MeshStandardMaterial({ color: 0x7a5530, roughness: 0.7 });
+  const limbPts = [];
+  // recurve profile (y, z): grip → out → sweep back at the tip
+  const prof = [[0, 0], [0.05, -0.012], [0.1, -0.03], [0.145, -0.038],
+                [0.175, -0.026], [0.193, 0.004]];
+  for (const [y, z] of prof) limbPts.push(new THREE.Vector3(0, y, z));
+  const upCurve = new THREE.CatmullRomCurve3(limbPts);
+  const upper = new THREE.Mesh(new THREE.TubeGeometry(upCurve, 16, 0.0095, 6), woodM);
+  const lower = upper.clone(); lower.scale.y = -1;
+  bow.add(upper, lower);
+  const grip = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.0145, 0.0145, 0.085, 8),
+    new THREE.MeshStandardMaterial({ color: 0x2e1d10, roughness: 1 }));
+  bow.add(grip);
+  const strM = new THREE.MeshBasicMaterial({ color: 0xd8cdbb });
+  bowString1 = new THREE.Mesh(new THREE.CylinderGeometry(0.0011, 0.0011, 1, 3), strM);
+  bowString2 = bowString1.clone();
+  bow.add(bowString1, bowString2);
+  // nocked arrow — fades in while drawing
+  nockedArrow = new THREE.Group();
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.62, 5),
+    new THREE.MeshStandardMaterial({ color: 0xa8865a, roughness: 0.8 }));
+  shaft.rotation.x = Math.PI / 2; shaft.position.z = -0.31;
+  const head = new THREE.Mesh(new THREE.ConeGeometry(0.011, 0.05, 5),
+    new THREE.MeshStandardMaterial({ color: 0x707880, roughness: 0.4, metalness: 0.6 }));
+  head.rotation.x = -Math.PI / 2; head.position.z = -0.64;
+  const fM = new THREE.MeshStandardMaterial({ color: 0xc94f3a, roughness: 1,
+    side: THREE.DoubleSide });
+  for (let i = 0; i < 3; i++) {
+    const f = new THREE.Mesh(new THREE.PlaneGeometry(0.012, 0.03), fM);
+    f.position.z = -0.03; f.rotation.z = i * Math.PI * 2 / 3;
+    f.rotation.x = 0.12; f.position.y = Math.cos(i * Math.PI * 2 / 3) * 0.012;
+    f.position.x = -Math.sin(i * Math.PI * 2 / 3) * 0.012;
+    nockedArrow.add(f);
+  }
+  nockedArrow.add(shaft, head);
+  nockedArrow.visible = false;
+  bow.add(nockedArrow);
+  bow.scale.setScalar(0.62);
+  bow.position.set(0.27, -0.21, -0.5);
+  bow.rotation.set(0.05, -0.5, 0.16);
+  bow.visible = false;            // hidden on the title screen
   camera.add(bow);
   scene.add(camera);
+}
+
+function updateBowString(draw) {
+  // string runs tip→nock→tip; nock pulls toward the camera with draw
+  const tipY = 0.193, tipZ = 0.004;
+  const nock = new THREE.Vector3(0, 0, tipZ + 0.02 + draw * 0.16);
+  const tip1 = new THREE.Vector3(0, tipY, tipZ);
+  const tip2 = new THREE.Vector3(0, -tipY, tipZ);
+  const UP = new THREE.Vector3(0, 1, 0);
+  for (const [str, a, b] of [[bowString1, tip1, nock], [bowString2, tip2, nock]]) {
+    str.position.copy(a).add(b).multiplyScalar(0.5);
+    str.scale.y = a.distanceTo(b);
+    str.quaternion.setFromUnitVectors(UP, b.clone().sub(a).normalize());
+  }
+  nockedArrow.visible = draw > 0.03;
+  nockedArrow.position.set(0, 0, nock.z);
 }
 
 // ───────────────────────── input ─────────────────────────
@@ -999,6 +1105,9 @@ function tickBody() {
   scene.fog.color.copy(FOG_DAY).lerp(FOG_NIGHT, night);
   scene.background.copy(scene.fog.color);
   updateFireflies(t, night);
+  updateMist(t, night);
+  farDisc.material.color.copy(scene.fog.color);
+  farDisc.position.x = player.x; farDisc.position.z = player.z;
   landmarkUpdate(dt, t);
   if (window._cloudMat) {
     window._cloudMat.color.setHex(0xfff1de).lerp(new THREE.Color(0x2a3245), night);
@@ -1034,7 +1143,10 @@ function tickBody() {
     // bow
     if (drawing) drawT = Math.min(1, drawT + dt / 0.85);
     document.getElementById('crosshair').classList.toggle('drawn', drawT > 0.5);
-    bow.position.z = -0.9 + drawT * 0.18;
+    bow.position.z = -0.5 + drawT * 0.05;
+    bow.rotation.y = -0.5 + drawT * 0.22;     // rotates toward center as you draw
+    bow.position.x = 0.27 - drawT * 0.07;
+    updateBowString(drawT);
 
     // slow regen
     if (t - player.lastHit > 8 && player.hp < 100) { player.hp = Math.min(100, player.hp + dt * 6); renderHP(); }
@@ -1053,10 +1165,20 @@ function tickBody() {
     });
   }
 
-  camera.position.set(player.x, player.y + EYE, player.z);
-  camera.rotation.order = 'YXZ';
-  camera.rotation.y = player.yaw;
-  camera.rotation.x = player.pitch;
+  if (!started) {
+    // title screen: slow drift over the meadow toward the lake, the
+    // world breathing behind the wordmark
+    const a = t * 0.021;
+    const cx = -20 + Math.cos(a) * 26, cz = 0 + Math.sin(a) * 26;
+    camera.position.set(cx, Math.max(heightAt(cx, cz), WATER_Y) + 7.5, cz);
+    camera.lookAt(70, heightAt(70, -90) + 14, -90);
+    camera.rotation.order = 'YXZ';
+  } else {
+    camera.position.set(player.x, player.y + EYE, player.z);
+    camera.rotation.order = 'YXZ';
+    camera.rotation.y = player.yaw;
+    camera.rotation.x = player.pitch;
+  }
   sun.target.position.set(player.x, player.y, player.z);
   sun.position.set(player.x - 180, player.y + 95, player.z - 60);
 
@@ -1088,6 +1210,9 @@ loadAnimals().then(() => {
     const boot = () => {
       if (!Object.keys(prefabs).length) { setTimeout(boot, 400); return; }
       started = true;
+      bow.visible = true;
+      updateBowString(0);
+      document.getElementById('hud').style.opacity = 1;
       document.getElementById('title').style.display = 'none';
       if (q.get('t')) clock.elapsedTime = parseFloat(q.get('t'));
       if (q.get('pos')) { const [x, z] = q.get('pos').split(',').map(Number);
@@ -1101,7 +1226,13 @@ loadAnimals().then(() => {
 
 document.getElementById('play').addEventListener('click', () => {
   started = true;
+  bow.visible = true;
+  updateBowString(0);
+  document.getElementById('hud').style.opacity = 1;
   try { audio.start(); } catch (e) { console.warn('audio unavailable:', e); }
+  setTimeout(() => toast(IS_TOUCH
+    ? 'Left thumb walks · right thumb looks · hold the button to draw'
+    : 'WASD walks · mouse looks · hold click to draw, release to loose', 5200), 1200);
   document.getElementById('title').style.opacity = 0;
   setTimeout(() => document.getElementById('title').style.display = 'none', 650);
   if (!IS_TOUCH) canvas.requestPointerLock();
