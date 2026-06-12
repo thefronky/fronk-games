@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>FRONK WILDS</title>
+<meta name="theme-color" content="#1a0f08">
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%;overflow:hidden;background:#1a0f08;font-family:-apple-system,system-ui,sans-serif;
+    user-select:none;-webkit-user-select:none;touch-action:none}
+  #c{position:fixed;inset:0;width:100%;height:100%}
+
+  /* ── HUD ── */
+  #hud{position:fixed;inset:0;pointer-events:none;color:#f5ead8}
+  #crosshair{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+    width:6px;height:6px;border-radius:50%;background:rgba(245,234,216,.9);
+    box-shadow:0 0 8px rgba(0,0,0,.6);transition:transform .15s}
+  #crosshair.drawn{transform:translate(-50%,-50%) scale(2.2);background:#ffd27d}
+  #notes{position:absolute;top:max(14px,env(safe-area-inset-top));left:16px;
+    font-size:13px;line-height:1.7;text-shadow:0 1px 4px rgba(0,0,0,.8);opacity:.95}
+  #notes b{color:#ffd27d;font-weight:600}
+  #toast{position:absolute;top:22%;left:50%;transform:translateX(-50%);
+    font-size:17px;font-weight:600;letter-spacing:.04em;text-align:center;
+    text-shadow:0 2px 10px rgba(0,0,0,.9);opacity:0;transition:opacity .4s;max-width:88%}
+  #hp{position:absolute;top:max(14px,env(safe-area-inset-top));right:16px;width:120px;height:10px;
+    border:1px solid rgba(245,234,216,.5);border-radius:6px;overflow:hidden}
+  #hpfill{height:100%;width:100%;background:#c9543a;transition:width .3s}
+  #hurt{position:fixed;inset:0;background:radial-gradient(ellipse at center,transparent 40%,rgba(160,20,10,.55));
+    opacity:0;transition:opacity .25s;pointer-events:none}
+
+  /* ── title screen ── */
+  #title{position:fixed;inset:0;background:linear-gradient(180deg,#120a05 0%,#2c1408 55%,#54290e 100%);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;
+    color:#f5ead8;text-align:center;z-index:10;padding:24px;transition:opacity .6s}
+  #title h1{font-size:clamp(42px,11vw,84px);letter-spacing:.06em;font-weight:800;
+    text-shadow:0 4px 0 #54290e,0 8px 30px rgba(0,0,0,.6)}
+  #title h1 span{color:#ffd27d}
+  #title p{font-size:15px;opacity:.85;max-width:420px;line-height:1.6}
+  #title .fine{font-size:12px;opacity:.55}
+  #play{pointer-events:auto;padding:16px 44px;font-size:18px;font-weight:700;letter-spacing:.05em;
+    background:#c9543a;color:#fff;border:none;border-radius:12px;cursor:pointer;
+    box-shadow:0 6px 24px rgba(201,84,58,.5)}
+  #play:active{transform:scale(.97)}
+  #loadmsg{font-size:12px;opacity:.6}
+
+  /* ── touch controls ── */
+  .stick{position:fixed;bottom:max(26px,env(safe-area-inset-bottom));width:118px;height:118px;
+    border-radius:50%;border:2px solid rgba(245,234,216,.35);background:rgba(0,0,0,.18);
+    display:none;pointer-events:none}
+  #stickL{left:22px}
+  .knob{position:absolute;left:50%;top:50%;width:48px;height:48px;border-radius:50%;
+    background:rgba(245,234,216,.55);transform:translate(-50%,-50%)}
+  #shootBtn{position:fixed;right:26px;bottom:max(40px,calc(env(safe-area-inset-bottom) + 14px));
+    width:84px;height:84px;border-radius:50%;display:none;align-items:center;justify-content:center;
+    background:rgba(201,84,58,.85);border:3px solid rgba(245,234,216,.5);color:#fff;
+    font-size:13px;font-weight:800;letter-spacing:.04em;pointer-events:auto}
+  .touch #stickL,.touch #shootBtn{display:flex}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="hud">
+  <div id="crosshair"></div>
+  <div id="notes"></div>
+  <div id="toast"></div>
+  <div id="hp"><div id="hpfill"></div></div>
+</div>
+<div id="hurt"></div>
+
+<div id="stickL" class="stick"><div class="knob" id="knobL"></div></div>
+<div id="shootBtn">HOLD<br>→ LOOSE</div>
+
+<div id="title">
+  <h1>FRONK <span>WILDS</span></h1>
+  <p>You are a Scout. The wilderness is large and does not know you're
+     in charge of it. Document the wildlife with your bow.
+     The wolves have their own project.</p>
+  <p class="fine">Hold to draw · release to loose · deer flee, wolves don't.<br>
+     Desktop: WASD + mouse, hold click to draw. Phone: left stick walks, drag right side looks.</p>
+  <button id="play">BEGIN THE SURVEY</button>
+  <div id="loadmsg">loading the wilderness…</div>
+</div>
+
+<script type="importmap">
+{"imports":{
+  "three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
+<script type="module" src="game.js?v=7"></script>
+</body>
+</html>

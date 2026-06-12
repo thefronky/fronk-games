@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 400">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2e3a63"/>
+      <stop offset=".55" stop-color="#e88a4e"/>
+      <stop offset="1" stop-color="#f7b266"/>
+    </linearGradient>
+  </defs>
+  <rect width="600" height="400" fill="url(#sky)"/>
+  <circle cx="430" cy="240" r="52" fill="#ffd9a0" opacity=".95"/>
+  <path d="M0 290 Q150 240 300 280 T600 270 V400 H0 Z" fill="#5d7a35"/>
+  <path d="M0 330 Q200 300 400 330 T600 320 V400 H0 Z" fill="#48622a"/>
+  <g fill="#2f4520">
+    <path d="M80 300 l26 -64 26 64 z"/><rect x="101" y="296" width="10" height="22"/>
+    <path d="M150 310 l20 -50 20 50 z"/><rect x="166" y="306" width="8" height="18"/>
+    <path d="M480 305 l24 -58 24 58 z"/><rect x="499" y="301" width="9" height="20"/>
+  </g>
+  <g fill="#3a2a18" transform="translate(300,290) scale(1.15)">
+    <path d="M0 0 l14 -34 8 2 -12 32 12 10 -8 6 z"/>
+    <path d="M14 -34 q14 -16 2 -30 l6 -3 q14 18 -2 36 z"/>
+    <path d="M22 -32 q10 -12 4 -22 l5 -2 q8 13 -4 26 z"/>
+  </g>
+  <text x="300" y="86" text-anchor="middle" font-family="Arial Black,Arial" font-size="52" font-weight="900" fill="#fff6e8" stroke="#54290e" stroke-width="2">FRONK WILDS</text>
+  <text x="300" y="120" text-anchor="middle" font-family="Arial" font-size="17" fill="#fff6e8" opacity=".85">the wilderness is ready. it was always ready.</text>
+</svg>
