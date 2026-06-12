@@ -103,6 +103,20 @@
   "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
 }}
 </script>
-<script type="module" src="game.js?v=15"></script>
+<script>
+  // any startup crash prints HERE instead of an eternal loading screen
+  const showErr = (m) => { const el = document.getElementById('loadmsg');
+    if (el) { el.textContent = '⚠ ' + m; el.style.opacity = 1; el.style.color = '#ff9d8a'; } };
+  window.addEventListener('error', e => showErr(e.message || 'script error'));
+  window.addEventListener('unhandledrejection', e => showErr(e.reason?.message || e.reason || 'load failed'));
+</script>
+<script type="module">
+  // cache-proof: the game code is always fetched fresh (it's ~40KB);
+  // the heavy CDN/three + GLB assets stay cached as normal
+  import('./game.js?ts=' + Date.now()).catch(e => {
+    const el = document.getElementById('loadmsg');
+    if (el) { el.textContent = '⚠ ' + (e.message || e); el.style.color = '#ff9d8a'; }
+  });
+</script>
 </body>
 </html>
