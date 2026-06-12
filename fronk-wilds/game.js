@@ -29,14 +29,18 @@ const SPECIES = {
   Stag: { n: 3,  speed: 2.7, gallop: 10.0, hp: 2, flee: 26, r: 1.7 },
   Fox:  { n: 4,  speed: 3.4, gallop: 11.5, hp: 1, flee: 22, r: 1.0 },
   Wolf: { n: 3,  speed: 3.2, gallop: 8.8,  hp: 2, flee: 0,  r: 1.2,
-          hunts: true, aggroR: 38, dmg: 22 },
+          hunts: true, aggroR: 38, dmg: 22, packR: 70 },
+          // circles before committing; after dark it calls a partner
   Bull: { n: 3,  speed: 2.2, gallop: 9.6,  hp: 3, flee: 0,  r: 1.7,
-          territorial: 16, dmg: 30 },   // wanders calm — until you're close
+          territorial: 16, dmg: 30 },
+          // wanders calm — gives ONE warning stomp, then it's a freight train
 };
 
 // the rare one. Night only, hunts YOU, glows in the dark.
+// stareNear/stareFar: the band where it sometimes stops dead and just looks.
 const CRYPTID_CFG = { speed: 3.6, gallop: 11.8, hp: 5, flee: 0, r: 1.7,
-                      hunts: true, aggroR: 64, dmg: 40 };
+                      hunts: true, aggroR: 64, dmg: 40,
+                      stareNear: 25, stareFar: 40 };
 const CRYPTID_CHANCE = 0.45;     // per night
 
 const LINES = {
@@ -1070,8 +1074,14 @@ function animalUpdate(a, dt) {
 
   if (a.cfg.hunts || a.cfg.territorial) {     // ── predator / territorial brain
     a.attackCd -= dt;
-    const trigger = a.cfg.aggroR || a.cfg.territorial;
-    if (a.aggro && dist > trigger * 2.2) a.aggro = false;   // lost you
+    // wolves grow bolder after dark — wider trigger, and they don't come alone
+    const night = window._night || 0;
+    const trigger = (a.cfg.aggroR || a.cfg.territorial)
+      * (a.cfg.hunts && !a.isCryptid && night > 0.4 ? 1.25 : 1);
+    if (a.aggro && dist > trigger * 2.2) {    // lost you
+      a.aggro = false; a.warned = false; a.circleT = 0;
+      if (a.state === 'warn' || a.state === 'stare') { a.state = 'idle'; a.t = 1; }
+    }
     if (dist < 2.8) {
       a.state = 'attack'; a.aggro = true;
       if (a.attackCd <= 0) {
@@ -1080,14 +1090,54 @@ function animalUpdate(a, dt) {
         setTimeout(() => { if (!a.dead) a.cur = null; }, 700);
       }
     } else if (a.aggro || dist < trigger) {
-      a.aggro = true;
-      a.state = 'stalk';
-      // the cryptid circles as it closes — unsettling, hard to hit
-      const drift = a.isCryptid ? Math.sin(clock.elapsedTime * 0.9) * 0.55 : 0;
-      a.dir = Math.atan2(dx, dz) + drift;
-      const fast = dist < (a.isCryptid ? 30 : 17);
-      setAnim(a, fast ? 'Gallop' : 'Walk');
-      stepAnimal(a, fast ? a.cfg.gallop : a.cfg.speed, dt);
+      if (!a.aggro) {                         // first contact — how it opens
+        a.aggro = true;
+        if (a.cfg.hunts && !a.isCryptid) {
+          // it doesn't beeline. It circles first, deciding things about you.
+          a.circleT = 2.2 + Math.random() * 2.6;
+          a.circleDir = Math.random() < 0.5 ? -1 : 1;
+          if (night > 0.4) packCall(a);       // a second wolf answers the hunt
+        }
+        if (a.cfg.territorial && !a.warned) {
+          // ONE warning. The bull squares up and stomps. That's all you get.
+          a.warned = true; a.state = 'warn'; a.warnT = 1.15;
+          setAnim(a, 'HitReact_Left', true);
+          // THUD CUE: warning stomp — front hoof hits dirt (foley hook)
+        }
+      }
+      if (a.state === 'warn') {
+        a.warnT -= dt;
+        a.dir = Math.atan2(dx, dz);           // it tracks you while it stomps
+        if (a.warnT <= 0) {
+          if (dist < trigger * 1.6) a.state = 'stalk';  // you stayed. Bad call.
+          else { a.aggro = false; a.state = 'idle'; a.t = 0.5; }
+        }
+      } else if (a.isCryptid && cryptidStare(a, dx, dz, dist, dt)) {
+        // frozen mid-field, eyes locked on you. It resumes when IT decides.
+      } else {
+        a.state = 'stalk';
+        // the cryptid circles as it closes — unsettling, hard to hit
+        const drift = a.isCryptid ? Math.sin(clock.elapsedTime * 0.9) * 0.55 : 0;
+        if (a.circleT > 0 && dist > 8 && dist < trigger * 1.5) {
+          // the circling pass — flank-walk, spiraling slowly inward
+          a.circleT -= dt;
+          a.dir = Math.atan2(dx, dz) + a.circleDir * 1.25;
+          setAnim(a, 'Walk');
+          stepAnimal(a, a.cfg.speed * 1.3, dt);
+        } else {
+          // committed. Wolves prefer the side you AREN'T looking at —
+          // if you can see it coming, it angles for your back instead.
+          let ax = dx, az = dz;
+          if (a.cfg.hunts && !a.isCryptid && dist > 7 && dist < 36
+              && Math.sin(player.yaw) * dx + Math.cos(player.yaw) * dz > 0) {
+            ax += Math.sin(player.yaw) * 6; az += Math.cos(player.yaw) * 6;
+          }
+          a.dir = Math.atan2(ax, az) + drift;
+          const fast = dist < (a.isCryptid ? 30 : 17);
+          setAnim(a, fast ? 'Gallop' : 'Walk');
+          stepAnimal(a, fast ? a.cfg.gallop : a.cfg.speed, dt);
+        }
+      }
     } else wander(a, dt);
   } else {                                    // ── prey brain
     if (a.state === 'waddle') {
@@ -1119,13 +1169,42 @@ function animalUpdate(a, dt) {
   a.obj.rotation.y = lerpAngle(a.obj.rotation.y, a.dir, Math.min(1, dt * 6));
 }
 
+// a wolf that commits to a hunt calls the nearest calm wolf to join —
+// loose pairs after dark. Runs once per aggro transition, scalars only.
+function packCall(w) {
+  const pr = (w.cfg.packR || 70); const pr2 = pr * pr;
+  let best = null, bd = pr2;
+  for (const o of animals) {
+    if (o === w || o.name !== 'Wolf' || o.dead || o.aggro) continue;
+    const ddx = o.obj.position.x - w.obj.position.x,
+          ddz = o.obj.position.z - w.obj.position.z;
+    const d2 = ddx * ddx + ddz * ddz;
+    if (d2 < bd) { bd = d2; best = o; }
+  }
+  if (best) {
+    best.aggro = true;
+    best.state = 'stalk';
+    best.circleT = 3 + Math.random() * 2;
+    best.circleDir = -(w.circleDir || 1);   // it takes the OTHER side
+  }
+}
+
 function wander(a, dt) {
   a.t -= dt;
   if (a.t <= 0) {
     const roll = Math.random();
     a.state = roll < 0.38 ? 'idle' : roll < 0.66 ? 'eat' : 'walk';
     a.t = 2.5 + Math.random() * 5;
-    if (a.state === 'walk') a.dir += (Math.random() - 0.5) * 2.4;
+    if (a.state === 'walk') {
+      a.dir += (Math.random() - 0.5) * 2.4;
+      // after dark, wandering wolves drift loosely toward the smell of you
+      if (a.cfg.hunts && !a.isCryptid && (window._night || 0) > 0.5
+          && Math.random() < 0.5) {
+        const p = a.obj.position;
+        a.dir = Math.atan2(player.x - p.x, player.z - p.z)
+          + (Math.random() - 0.5) * 1.2;
+      }
+    }
   }
   if (a.state === 'walk') { setAnim(a, 'Walk'); stepAnimal(a, a.cfg.speed, dt); }
   else setAnim(a, a.state === 'eat' ? 'Eating' : 'Idle');
@@ -1255,11 +1334,32 @@ function spawnCryptid() {
   }
   const a = { name: '???', cfg: CRYPTID_CFG, obj, mixer, acts, cur: null,
               state: 'stalk', t: 0, dir: 0, hp: CRYPTID_CFG.hp, dead: false,
-              attackCd: 2, aggro: true, isCryptid: true };
+              attackCd: 2, aggro: true, isCryptid: true,
+              stareT: 0, stareCd: 3 };   // it stops to look at you, early
   setAnim(a, 'Walk');
   animals.push(a);
   cryptid = a;
   setTimeout(() => toast('Something is out there. It has already seen you.', 5000), 2500);
+}
+
+// the staring contest — sometimes it stops DEAD at 25–40m, body frozen,
+// eyes on you, and just… waits. Returns true while it holds the freeze.
+function cryptidStare(a, dx, dz, dist, dt) {
+  a.stareCd -= dt;
+  if (a.state !== 'stare') {
+    if (a.stareCd <= 0 && dist > a.cfg.stareNear && dist < a.cfg.stareFar
+        && Math.random() < dt * 0.45) {
+      a.state = 'stare'; a.stareT = 2.6 + Math.random() * 3.4;
+    } else return false;
+  }
+  a.stareT -= dt;
+  a.dir = Math.atan2(dx, dz);               // frozen body, eyes locked
+  setAnim(a, 'Idle');
+  if (a.stareT <= 0 || dist < a.cfg.stareNear * 0.6) {
+    a.state = 'stalk';                      // it has decided about you
+    a.stareCd = 13 + Math.random() * 11;
+  }
+  return true;
 }
 
 function cryptidUpdate(night) {
