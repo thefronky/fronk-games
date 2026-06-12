@@ -15,7 +15,9 @@
 // Usage:
 //   const audio = new AudioEngine(); audio.start();   // user gesture
 //   audio.update(dt, {moving, sprint, wolfDist, lakeDist});
-//   audio.stinger() / audio.documented() / audio.thud() / audio.twang()
+//   audio.stinger() / audio.documented() / audio.thud() / audio.twang(power)
+//   audio.drawCreak(t01)        — call every frame while drawing the bow
+//   audio.impact(kind, dist01)  — 'flesh' | 'ground' | 'wood', 0=close 1=far
 
 const PENT = [0, 2, 4, 7, 9];          // major pentatonic degrees
 const ROOTS = [146.83, 164.81, 110.0, 130.81];   // D3 E3 A2 C3 — drift between
@@ -75,6 +77,17 @@ export class AudioEngine {
     this.musicLp.connect(this.master); this.musicLp.connect(this.verb);
     this.foleyBus = C.createGain(); this.foleyBus.gain.value = 0.85;
     this.foleyBus.connect(this.master);
+    this._musicLevel = this.musicBus.gain.value;   // for sidechain restore
+
+    // ── shared one-shot noise buffer (1s white) — every burst-style
+    // sound (snap, whoosh, impacts, footsteps) reads from this with a
+    // random offset instead of allocating a fresh buffer per shot.
+    {
+      const nl = C.sampleRate;
+      this._shotNoise = C.createBuffer(1, nl, C.sampleRate);
+      const nd = this._shotNoise.getChannelData(0);
+      for (let i = 0; i < nl; i++) nd[i] = Math.random() * 2 - 1;
+    }
 
     // ── wind bed
     this.windGain = C.createGain(); this.windGain.gain.value = 0.0;
@@ -216,16 +229,172 @@ export class AudioEngine {
     this._pluck(noteHz(root, 4, 0), 0.5, 0);
     this._pluck(noteHz(root, 7, 0), 0.4, 0.16);
   }
-  twang() {                         // arrow loose
+  // bow RELEASE — four simultaneous layers, like real foley:
+  //   snap (string crack) + thwack (limb body) + string ring + arrow whoosh.
+  // power 0..1 scales level and brightness. twang() still works (power=1).
+  twang(power = 1) {
     if (!this.started) return;
     const C = this.ctx, t = C.currentTime;
-    const o = C.createOscillator(); o.type = 'square'; o.frequency.value = 130;
-    o.frequency.exponentialRampToValueAtTime(60, t + 0.09);
-    const g = C.createGain();
-    g.gain.setValueAtTime(0.16, t);
-    g.gain.exponentialRampToValueAtTime(0.001, t + 0.14);
-    o.connect(g).connect(this.foleyBus);
-    o.start(t); o.stop(t + 0.16);
+    const p = Math.max(0.15, Math.min(1, power));
+    const lvl = 0.45 + 0.55 * p;
+    const out = this.foleyBus;
+    this._creakOn = false; this._silenceCreak(t);   // draw is over
+
+    // (a) string snap — ~3ms highpassed noise crack, the "crack" transient
+    {
+      const src = C.createBufferSource(); src.buffer = this._shotNoise;
+      const hp = C.createBiquadFilter(); hp.type = 'highpass';
+      hp.frequency.value = 1800 + 1100 * p; hp.Q.value = 0.7;
+      const g = C.createGain();
+      g.gain.setValueAtTime(0.55 * lvl, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.014);
+      src.connect(hp).connect(g).connect(out);
+      src.start(t, Math.random() * 0.6, 0.03);
+    }
+
+    // (b) limb thwack — damped low sine pair, the bow's wooden body
+    for (const [hz, v, dur] of [[97, 0.5, 0.085], [152, 0.28, 0.06]]) {
+      const o = C.createOscillator(); o.type = 'sine';
+      o.frequency.setValueAtTime(hz * (0.97 + 0.06 * Math.random()), t);
+      o.frequency.exponentialRampToValueAtTime(hz * 0.78, t + dur);
+      const g = C.createGain();
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(v * lvl, t + 0.004);
+      g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+      o.connect(g).connect(out);
+      o.start(t); o.stop(t + dur + 0.02);
+    }
+
+    // (c) string vibration — fast-decaying triangle, pitch sags as the
+    // string sheds tension
+    {
+      const o = C.createOscillator(); o.type = 'triangle';
+      o.frequency.setValueAtTime(232 + 52 * p, t);
+      o.frequency.exponentialRampToValueAtTime(164, t + 0.12);
+      const lp = C.createBiquadFilter(); lp.type = 'lowpass';
+      lp.frequency.value = 1800 + 2200 * p; lp.Q.value = 0.6;
+      const g = C.createGain();
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(0.2 * lvl, t + 0.003);
+      g.gain.exponentialRampToValueAtTime(0.0008, t + 0.15);
+      o.connect(lp).connect(g).connect(out);
+      o.start(t); o.stop(t + 0.17);
+    }
+
+    // (d) arrow whoosh — bandpassed noise, center sweeps 900→350Hz as
+    // the shaft leaves; swells in then fades (it's GOING somewhere)
+    {
+      const src = C.createBufferSource(); src.buffer = this._shotNoise;
+      const bp = C.createBiquadFilter(); bp.type = 'bandpass';
+      bp.Q.value = 1.4;
+      bp.frequency.setValueAtTime(820 + 380 * p, t);
+      bp.frequency.exponentialRampToValueAtTime(350, t + 0.3);
+      const g = C.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.26 * lvl, t + 0.05);
+      g.gain.exponentialRampToValueAtTime(0.0008, t + 0.32);
+      src.connect(bp).connect(g).connect(out);
+      src.start(t, Math.random() * 0.6, 0.36);
+    }
+
+    // sidechain: duck the music ~250ms so the release CUTS through
+    const mg = this.musicBus.gain;
+    mg.cancelScheduledValues(t);
+    mg.setValueAtTime(mg.value, t);
+    mg.linearRampToValueAtTime(this._musicLevel * 0.35, t + 0.018);
+    mg.setTargetAtTime(this._musicLevel, t + 0.12, 0.11);
+  }
+
+  // continuous bow-draw creak — safe to call EVERY frame while drawing.
+  // Managed nodes are built once, then only AudioParams are modulated.
+  // t01: 0 = string at rest (silent), 1 = full draw.
+  drawCreak(t01) {
+    if (!this.started) return;
+    const C = this.ctx, t = C.currentTime;
+    const k = Math.max(0, Math.min(1, t01 || 0));
+    if (!this._creak) {
+      const src = this._noiseLoop();
+      const lp = C.createBiquadFilter(); lp.type = 'lowpass';
+      lp.frequency.value = 900; lp.Q.value = 0.5;
+      const bp = C.createBiquadFilter(); bp.type = 'bandpass';
+      bp.frequency.value = 140; bp.Q.value = 2.4;
+      const g = C.createGain(); g.gain.value = 0;
+      src.connect(lp).connect(bp).connect(g).connect(this.foleyBus);
+      // stutter LFO on the gain — wood grinding, not hissing
+      const lfo = C.createOscillator(); lfo.type = 'sine';
+      lfo.frequency.value = 6.3;
+      const lfoG = C.createGain(); lfoG.gain.value = 0;
+      lfo.connect(lfoG); lfoG.connect(g.gain); lfo.start();
+      // faint string-tension tone, rises with the draw
+      const o = C.createOscillator(); o.type = 'triangle';
+      o.frequency.value = 64;
+      const og = C.createGain(); og.gain.value = 0;
+      o.connect(og).connect(this.foleyBus); o.start();
+      this._creak = { g, bp, lfo, lfoG, o, og };
+    }
+    const cr = this._creak;
+    cr.g.gain.setTargetAtTime(k * 0.05, t, 0.06);
+    cr.lfoG.gain.setTargetAtTime(k * 0.024, t, 0.06);
+    cr.lfo.frequency.setTargetAtTime(4.5 + k * 5.5, t, 0.1);
+    cr.bp.frequency.setTargetAtTime(130 + k * 430, t, 0.08);
+    cr.o.frequency.setTargetAtTime(64 + k * 150, t, 0.07);
+    cr.og.gain.setTargetAtTime(k * k * 0.028, t, 0.06);
+    this._creakOn = true; this._creakT = 0.15;   // watchdog (see update)
+  }
+
+  _silenceCreak(t) {
+    const cr = this._creak;
+    if (!cr) return;
+    cr.g.gain.setTargetAtTime(0, t, 0.03);
+    cr.lfoG.gain.setTargetAtTime(0, t, 0.03);
+    cr.og.gain.setTargetAtTime(0, t, 0.03);
+  }
+
+  // arrow IMPACT. kind: 'flesh' | 'ground' | 'wood'.
+  // dist01: 0 = point blank, 1 = far away (quieter + duller).
+  impact(kind = 'ground', dist01 = 0) {
+    if (!this.started) return;
+    const C = this.ctx, t = C.currentTime;
+    const d = Math.max(0, Math.min(1, dist01 || 0));
+    const lp = C.createBiquadFilter(); lp.type = 'lowpass';
+    lp.frequency.value = 340 + 5000 * (1 - d * 0.85);    // distance dulls
+    const out = C.createGain(); out.gain.value = 1 - d * 0.72;
+    lp.connect(out).connect(this.foleyBus);
+
+    const hit = (hz0, hz1, v, dur, type = 'sine') => {
+      const o = C.createOscillator(); o.type = type;
+      o.frequency.setValueAtTime(hz0, t);
+      o.frequency.exponentialRampToValueAtTime(hz1, t + dur);
+      const g = C.createGain();
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(v, t + 0.006);
+      g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+      o.connect(g).connect(lp);
+      o.start(t); o.stop(t + dur + 0.02);
+    };
+    const burst = (v, dur, fHz, type = 'lowpass', q = 0.7, when = 0) => {
+      const src = C.createBufferSource(); src.buffer = this._shotNoise;
+      const f = C.createBiquadFilter(); f.type = type;
+      f.frequency.value = fHz; f.Q.value = q;
+      const g = C.createGain();
+      g.gain.setValueAtTime(v, t + when);
+      g.gain.exponentialRampToValueAtTime(0.001, t + when + dur);
+      src.connect(f).connect(g).connect(lp);
+      src.start(t + when, Math.random() * 0.6, dur + 0.02);
+    };
+
+    if (kind === 'flesh') {          // dull wet thump
+      hit(74, 42, 0.55, 0.13);
+      burst(0.3, 0.07, 480);
+    } else if (kind === 'wood') {    // bright knock + short ring
+      hit(195, 150, 0.4, 0.06, 'triangle');
+      hit(720, 695, 0.15, 0.14);
+      burst(0.22, 0.025, 2400, 'bandpass', 1.5);
+    } else {                          // ground: soft thud + grass tick
+      hit(88, 50, 0.4, 0.1);
+      burst(0.2, 0.06, 380);
+      burst(0.07, 0.03, 3200, 'bandpass', 2, 0.012);
+    }
   }
   thud() {                          // player hurt
     if (!this.started) return;
@@ -238,20 +407,17 @@ export class AudioEngine {
     o.connect(g).connect(this.foleyBus);
     o.start(t); o.stop(t + 0.32);
   }
-  _step(sprint) {                   // footstep tap
+  _step(sprint) {                   // footstep tap (shared noise, no alloc)
     const C = this.ctx, t = C.currentTime;
     const src = C.createBufferSource();
-    const len = C.sampleRate * 0.07;
-    const buf = C.createBuffer(1, len, C.sampleRate);
-    const d = buf.getChannelData(0);
-    for (let i = 0; i < len; i++)
-      d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3);
-    src.buffer = buf;
+    src.buffer = this._shotNoise;
     const f = C.createBiquadFilter(); f.type = 'lowpass';
     f.frequency.value = 300 + Math.random() * 160;
-    const g = C.createGain(); g.gain.value = sprint ? 0.34 : 0.2;
+    const g = C.createGain();
+    g.gain.setValueAtTime(sprint ? 0.34 : 0.2, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.07);
     src.connect(f).connect(g).connect(this.foleyBus);
-    src.start(t);
+    src.start(t, Math.random() * 0.6, 0.09);
   }
   _cricket() {
     const C = this.ctx, t = C.currentTime;
@@ -333,6 +499,13 @@ export class AudioEngine {
       return;
     }
     const t = C.currentTime;
+
+    // creak watchdog: if the game stops calling drawCreak (draw was
+    // cancelled), fade the managed creak nodes out instead of droning.
+    if (this._creakOn) {
+      this._creakT -= dt;
+      if (this._creakT <= 0) { this._creakOn = false; this._silenceCreak(t); }
+    }
 
     // wind breathes
     const breathe = 0.10 + 0.05 * Math.sin(t * 0.23) + 0.02 * Math.sin(t * 0.71);
