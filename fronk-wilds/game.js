@@ -1374,7 +1374,6 @@ const ARROW_GRAVITY = 9.81;
 const ARROW_LIFE = 9, ARROW_STUCK_LIFE = 12;
 
 const arrows = [];
-const _arrowAim = new THREE.Vector3();   // scratch for per-frame lookAt
 // Real arrow template — built ONCE, cloned per shot (clones share
 // geometry + material, so this is cheap). Tip points +z so the
 // existing lookAt-along-velocity orientation just works.
