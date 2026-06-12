@@ -108,8 +108,8 @@ if (USE_POST) {
 // on top of it: golden hour is "home base", night brings stars and
 // fireflies, then dawn returns. One cycle every DAY_LEN seconds.
 const DAY_LEN = 480;
-const SUN_WARM = new THREE.Color(0xffc46a), SUN_NIGHT = new THREE.Color(0x4d5f96);
-const FOG_DAY = new THREE.Color(0xd89a55), FOG_NIGHT = new THREE.Color(0x080b12);
+const SUN_WARM = new THREE.Color(0xffc46a), SUN_NIGHT = new THREE.Color(0x8a7fb0);
+const FOG_DAY = new THREE.Color(0xd89a55), FOG_NIGHT = new THREE.Color(0x2a1a1a);
 const SUN_DAWN = new THREE.Color(0xe8dcc8), FOG_DAWN = new THREE.Color(0xc9bfae);
 const sun = new THREE.DirectionalLight(0xffc46a, 2.6);
 sun.position.set(-180, 95, -60);
@@ -142,8 +142,8 @@ const sky = new THREE.Mesh(
       void main(){
         vec3 dir = normalize(vDir);
         float h = clamp(dir.y, -0.05, 1.0);
-        vec3 horizon = mix(vec3(0.95, 0.48, 0.23), vec3(0.031, 0.043, 0.078), night);
-        vec3 zenith  = mix(vec3(0.11, 0.20, 0.40), vec3(0.008, 0.012, 0.030), night);
+        vec3 horizon = mix(vec3(0.95, 0.48, 0.23), vec3(0.24, 0.12, 0.085), night);
+        vec3 zenith  = mix(vec3(0.11, 0.20, 0.40), vec3(0.045, 0.055, 0.115), night);
         vec3 col = mix(horizon, zenith, pow(h, 0.62));
         float s = max(dot(dir, sunDir), 0.0);
         float dayGlow = 1.0 - night;
@@ -2009,19 +2009,19 @@ function tickBody() {
   _sunDir.set(_sunAz.x * azS, Math.max(-0.5, elev), _sunAz.z * azS).normalize();
   skyUniforms.sunDir.value.copy(_sunDir);
   skyUniforms.night.value = night;
-  sun.intensity = 0.12 + 2.5 * Math.max(0, Math.min(1, (elev + 0.1) * 3.2)) * (1 - night * 0.96);
+  sun.intensity = 0.12 + 2.5 * Math.max(0, Math.min(1, (elev + 0.1) * 3.2)) * (1 - night * 0.86);
   // dawn is pale and anemic — color drains, then golden hour curdles back in
   const dawn = (phase > 0.7 ? Math.max(0, 1 - Math.abs(phase - 0.88) / 0.12) : 0) * (1 - night);
   sun.color.copy(SUN_WARM).lerp(SUN_NIGHT, night);
   if (dawn > 0) sun.color.lerp(SUN_DAWN, dawn * 0.7);
-  hemi.intensity = (0.72 - night * 0.62) * (1 - dawn * 0.18);
+  hemi.intensity = (0.72 - night * 0.44) * (1 - dawn * 0.18);
   scene.fog.color.copy(FOG_DAY).lerp(FOG_NIGHT, night);
   if (dawn > 0) scene.fog.color.lerp(FOG_DAWN, dawn * 0.65);
   scene.background.copy(scene.fog.color);
   // fog closes in after dark — dusk stays open, true night clamps the world to ~60m
   const fogClose = night * Math.sqrt(night);
-  scene.fog.near = 60 - 44 * fogClose;
-  scene.fog.far = 340 - 270 * fogClose;
+  scene.fog.near = 60 - 26 * fogClose;
+  scene.fog.far = 340 - 170 * fogClose;
   // moon rides opposite the sun — only shows once it clears the horizon
   _moonDir.copy(_sunDir).multiplyScalar(-1);
   moon.position.set(player.x + _moonDir.x * 820, _moonDir.y * 820, player.z + _moonDir.z * 820);
