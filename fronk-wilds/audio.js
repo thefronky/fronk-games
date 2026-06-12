@@ -66,9 +66,13 @@ export class AudioEngine {
     this.echo.connect(this.echoOut).connect(this.master);
     this.echoOut.connect(this.verb);
 
-    // ── buses
+    // ── buses (music runs through a warm lowpass — no glassy edges)
     this.musicBus = C.createGain(); this.musicBus.gain.value = 0.8;
-    this.musicBus.connect(this.master); this.musicBus.connect(this.verb);
+    this.musicLp = C.createBiquadFilter();
+    this.musicLp.type = 'lowpass'; this.musicLp.frequency.value = 2600;
+    this.musicLp.Q.value = 0.5;
+    this.musicBus.connect(this.musicLp);
+    this.musicLp.connect(this.master); this.musicLp.connect(this.verb);
     this.foleyBus = C.createGain(); this.foleyBus.gain.value = 0.85;
     this.foleyBus.connect(this.master);
 
@@ -139,9 +143,42 @@ export class AudioEngine {
       const ramp = instant ? 0.01 : 6;
       v.o1.frequency.setTargetAtTime(hz, t, ramp);
       v.o2.frequency.setTargetAtTime(hz * 2.003, t, ramp);
-      v.g.gain.setTargetAtTime(0.05 + 0.012 * i, t, instant ? 0.5 : 4);
+      const base = 0.05 + 0.012 * i;
+      if (!instant) {        // swell into the new chord, settle back
+        v.g.gain.setTargetAtTime(base * 1.7, t, 2.5);
+        v.g.gain.setTargetAtTime(base, t + 7, 5);
+      } else v.g.gain.setTargetAtTime(base, t, 0.5);
     });
     this._chordDegrees = stack;
+    if (!instant) this._bass(noteHz(root, stack[0], -2));
+  }
+
+  _bass(hz) {                 // soft felt-piano root under chord changes
+    const C = this.ctx, t = C.currentTime;
+    const o = C.createOscillator(); o.type = 'sine'; o.frequency.value = hz;
+    const o2 = C.createOscillator(); o2.type = 'triangle';
+    o2.frequency.value = hz * 1.001;
+    const g = C.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.16, t + 1.4);
+    g.gain.exponentialRampToValueAtTime(0.0006, t + 9);
+    o.connect(g); o2.connect(g);
+    g.connect(this.musicBus);
+    o.start(t); o2.start(t); o.stop(t + 9.2); o2.stop(t + 9.2);
+  }
+
+  // the recurring theme — a real motif, so the score has an identity.
+  // Same bones every time, small variations, like someone remembering
+  // a song rather than playing one.
+  _motif() {
+    const root = ROOTS[this._rootIx];
+    const oct = Math.random() < 0.3 ? 1 : 0;
+    const notes = [[4, 0, .5], [7, .42, .42], [9, .84, .5], [7, 1.5, .38],
+                   [4, 1.92, .42], [Math.random() < 0.5 ? 2 : 5, 2.62, .5]];
+    for (const [deg, when, vel] of notes)
+      this._pluck(noteHz(root, deg, oct), vel, when);
+    // answering low note, like an exhale
+    this._pluck(noteHz(root, 0, oct - 1), 0.3, 3.4);
   }
 
   // kalimba pluck — the melodic voice
@@ -306,6 +343,13 @@ export class AudioEngine {
       this._chordIx++;
       if (Math.random() < 0.22) this._rootIx = (this._rootIx + 1) % ROOTS.length;
       this._setChord(this._chordIx);
+    }
+
+    // the motif returns every 40-75s — the score's identity
+    this._motifT = (this._motifT ?? 14) - dt;
+    if (this._motifT <= 0 && dz < 0.3) {
+      this._motifT = 40 + Math.random() * 35;
+      this._motif();
     }
 
     // sparse melody — random walk on the current chord's scale

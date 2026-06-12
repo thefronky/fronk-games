@@ -1,10 +1,14 @@
 // FRONK WILDS — open-world scout-survey (hunting) game
 // Three.js r160, Quaternius CC0 animated animals, all procedural world.
-window._V = 11;
+window._V = 12;
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { AudioEngine } from './audio.js';
 
 const audio = new AudioEngine();
@@ -16,8 +20,8 @@ const WORLD = 860;            // square world size
 const WATER_Y = 2.1;          // lake level
 const EYE = 1.7;
 const CFG = IS_TOUCH
-  ? { grass: 7000, trees: 210, rocks: 60, px: 1.6, shadow: 1024 }
-  : { grass: 15000, trees: 320, rocks: 90, px: 2, shadow: 2048 };
+  ? { grass: 15000, trees: 210, rocks: 60, px: 1.6, shadow: 1024, segs: 180 }
+  : { grass: 34000, trees: 320, rocks: 90, px: 2, shadow: 2048, segs: 260 };
 
 const SPECIES = {
   Deer: { n: 6,  speed: 3.0, gallop: 10.5, hp: 1, flee: 30, r: 1.5 },
@@ -51,13 +55,26 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.12;
+renderer.toneMappingExposure = 1.22;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xe8b07a);
+
+// post-processing — the single biggest "rendered" multiplier: bloom
+// makes the sun, fire, fireflies, mushrooms and the Door GLOW
+const composer = new EffectComposer(renderer);
+let bloomPass;
 scene.fog = new THREE.Fog(0xe8b07a, 80, 400);
 
 const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.1, 1200);
+composer.addPass(new RenderPass(scene, camera));
+bloomPass = new UnrealBloomPass(
+  new THREE.Vector2(innerWidth, innerHeight),
+  0.45,   // strength — glow without soup
+  0.65,   // radius
+  0.82);  // threshold — only genuinely bright things bloom
+composer.addPass(bloomPass);
+composer.addPass(new OutputPass());
 
 // golden hour — Fronk's signature light. A full day/night cycle runs
 // on top of it: golden hour is "home base", night brings stars and
@@ -144,7 +161,7 @@ function heightAt(x, z) {
 }
 
 {
-  const segs = IS_TOUCH ? 150 : 200;
+  const segs = CFG.segs;
   const g = new THREE.PlaneGeometry(WORLD, WORLD, segs, segs);
   g.rotateX(-Math.PI / 2);
   const pos = g.attributes.position;
@@ -161,6 +178,8 @@ function heightAt(x, z) {
     else if (y > 21) c = rockC.clone();
     else if (y > 15) c = c.lerp(rockC, (y - 15) / 6);
     else if (t > 0.86) c = c.lerp(dirtC, 0.3);
+    // micro variation — kills the flat "planes" look up close
+    c.offsetHSL(0, 0, (vnoise(x * 0.31 + 7, z * 0.31 + 3) - 0.5) * 0.07);
     colors[i * 3] = c.r; colors[i * 3 + 1] = c.g; colors[i * 3 + 2] = c.b;
   }
   g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
@@ -200,6 +219,22 @@ const waterUniforms = { uTime: { value: 0 } };
   sh.rotation.x = -Math.PI / 2;
   sh.position.set(70, WATER_Y - 0.4, -90);
   scene.add(sh);
+  // sun glitter — additive sparkle points on the surface (bloom feeds
+  // on these at sunset)
+  const GN = 240, gp = new Float32Array(GN * 3);
+  for (let i = 0; i < GN; i++) {
+    gp[i * 3] = 70 + (Math.random() - 0.5) * 300;
+    gp[i * 3 + 1] = WATER_Y + 0.06;
+    gp[i * 3 + 2] = -90 + (Math.random() - 0.5) * 300;
+  }
+  const gg = new THREE.BufferGeometry();
+  gg.setAttribute('position', new THREE.BufferAttribute(gp, 3));
+  const glitter = new THREE.Points(gg, new THREE.PointsMaterial({
+    color: 0xffe9c4, size: 0.14, transparent: true, opacity: 0.5,
+    blending: THREE.AdditiveBlending, depthWrite: false }));
+  glitter.frustumCulled = false;
+  scene.add(glitter);
+  window._glitter = glitter;
 }
 
 // ───────────────────────── wind-blown grass ─────────────────────────
@@ -385,15 +420,19 @@ const clouds = [];
   const geo = new THREE.IcosahedronGeometry(1, 0);
   const mat = new THREE.MeshLambertMaterial({ color: 0xfff1de, transparent: true, opacity: 0.92 });
   window._cloudMat = mat;
-  for (let i = 0; i < 9; i++) {
+  for (let i = 0; i < 10; i++) {
     const grp = new THREE.Group();
-    for (let p = 0; p < 4 + (Math.random() * 3 | 0); p++) {
+    const puffs = 6 + (Math.random() * 4 | 0);
+    for (let p = 0; p < puffs; p++) {
       const m = new THREE.Mesh(geo, mat);
-      m.position.set((Math.random() - 0.5) * 26, (Math.random() - 0.5) * 4, (Math.random() - 0.5) * 12);
-      m.scale.setScalar(5 + Math.random() * 9);
+      // flat-bottomed cumulus: puffs sit ON a base line, squashed
+      const s = 6 + Math.random() * 11;
+      m.position.set((Math.random() - 0.5) * 40, s * 0.28 + Math.random() * 3,
+                     (Math.random() - 0.5) * 16);
+      m.scale.set(s, s * 0.55, s * 0.8);
       grp.add(m);
     }
-    grp.position.set((Math.random() - 0.5) * 1400, 120 + Math.random() * 60, (Math.random() - 0.5) * 1400);
+    grp.position.set((Math.random() - 0.5) * 1400, 110 + Math.random() * 70, (Math.random() - 0.5) * 1400);
     grp.userData.v = 0.8 + Math.random() * 1.2;
     scene.add(grp);
     clouds.push(grp);
@@ -970,7 +1009,7 @@ let bowString1, bowString2, nockedArrow;
   bow.add(nockedArrow);
   bow.scale.setScalar(0.62);
   bow.position.set(0.27, -0.21, -0.5);
-  bow.rotation.set(0.05, -0.5, 0.16);
+  bow.rotation.set(0.05, -0.85, 0.14);   // angled so the recurve profile reads
   bow.visible = false;            // hidden on the title screen
   camera.add(bow);
   scene.add(camera);
@@ -1009,6 +1048,7 @@ if (!IS_TOUCH) {
   // left stick
   const stick = document.getElementById('stickL'), knob = document.getElementById('knobL');
   let moveVec = { x: 0, y: 0 }, stickId = null, lookId = null, lastLook = null;
+  let shootId = null, lastShoot = null;
   window.moveVec = moveVec;
   addEventListener('touchstart', e => {
     for (const t of e.changedTouches) {
@@ -1035,6 +1075,12 @@ if (!IS_TOUCH) {
         player.yaw -= (t.clientX - lastLook.x) * 0.0042;
         player.pitch = Math.max(-1.45, Math.min(1.45, player.pitch - (t.clientY - lastLook.y) * 0.0042));
         lastLook = { x: t.clientX, y: t.clientY };
+      } else if (t.identifier === shootId) {
+        // drag while holding the draw button = aim. Slightly slower
+        // than free-look: you're at full draw, breathing.
+        player.yaw -= (t.clientX - lastShoot.x) * 0.0034;
+        player.pitch = Math.max(-1.45, Math.min(1.45, player.pitch - (t.clientY - lastShoot.y) * 0.0034));
+        lastShoot = { x: t.clientX, y: t.clientY };
       }
     }
   }, { passive: false });
@@ -1043,11 +1089,16 @@ if (!IS_TOUCH) {
       if (t.identifier === stickId) { stickId = null; moveVec.x = moveVec.y = 0;
         knob.style.left = '50%'; knob.style.top = '50%'; }
       if (t.identifier === lookId) lookId = null;
+      if (t.identifier === shootId) { shootId = null; drawing = false; loose(); }
     }
   });
   const btn = document.getElementById('shootBtn');
-  btn.addEventListener('touchstart', e => { e.preventDefault(); drawing = true; }, { passive: false });
-  btn.addEventListener('touchend', e => { e.preventDefault(); drawing = false; loose(); }, { passive: false });
+  btn.addEventListener('touchstart', e => {
+    e.preventDefault();
+    const t = e.changedTouches[0];
+    shootId = t.identifier; lastShoot = { x: t.clientX, y: t.clientY };
+    drawing = true;
+  }, { passive: false });
 }
 
 // ───────────────────────── HUD ─────────────────────────
@@ -1113,6 +1164,11 @@ function tickBody() {
     window._cloudMat.color.setHex(0xfff1de).lerp(new THREE.Color(0x2a3245), night);
     window._cloudMat.opacity = 0.92 - night * 0.45;
   }
+  if (window._glitter) {
+    const g = window._glitter;
+    g.material.opacity = (1 - night) * (0.3 + 0.25 * Math.sin(t * 2.3));
+    g.position.x = Math.sin(t * 0.4) * 0.8;   // shimmer drift
+  }
   window._night = night;
 
   if (started && !dead) {
@@ -1144,7 +1200,7 @@ function tickBody() {
     if (drawing) drawT = Math.min(1, drawT + dt / 0.85);
     document.getElementById('crosshair').classList.toggle('drawn', drawT > 0.5);
     bow.position.z = -0.5 + drawT * 0.05;
-    bow.rotation.y = -0.5 + drawT * 0.22;     // rotates toward center as you draw
+    bow.rotation.y = -0.85 + drawT * 0.45;    // swings toward center as you draw
     bow.position.x = 0.27 - drawT * 0.07;
     updateBowString(drawT);
 
@@ -1186,13 +1242,17 @@ function tickBody() {
                        px: Math.round(player.x), pz: Math.round(player.z) };
   for (const a of animals) animalUpdate(a, dt);
   arrowUpdate(dt);
-  renderer.render(scene, camera);
+  // night needs a softer bloom threshold so fireflies/stars breathe
+  bloomPass.threshold = 0.82 - (window._night || 0) * 0.32;
+  bloomPass.strength = 0.45 + (window._night || 0) * 0.25;
+  composer.render();
 }
 
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
+  composer.setSize(innerWidth, innerHeight);
 });
 
 // ───────────────────────── boot ─────────────────────────
@@ -1231,8 +1291,8 @@ document.getElementById('play').addEventListener('click', () => {
   document.getElementById('hud').style.opacity = 1;
   try { audio.start(); } catch (e) { console.warn('audio unavailable:', e); }
   setTimeout(() => toast(IS_TOUCH
-    ? 'Left thumb walks · right thumb looks · hold the button to draw'
-    : 'WASD walks · mouse looks · hold click to draw, release to loose', 5200), 1200);
+    ? 'Left thumb walks · drag right side to look · hold the button and DRAG to aim, release to loose'
+    : 'WASD walks · mouse looks · hold click to draw, release to loose', 5800), 1200);
   document.getElementById('title').style.opacity = 0;
   setTimeout(() => document.getElementById('title').style.display = 'none', 650);
   if (!IS_TOUCH) canvas.requestPointerLock();
