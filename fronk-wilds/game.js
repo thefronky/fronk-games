@@ -1092,15 +1092,10 @@ function animalUpdate(a, dt) {
     a.attackCd -= dt;
     // wolves grow bolder after dark — wider trigger, and they don't come alone
     const night = window._night || 0;
-<<<<<<< ours
-    const trigger = (a.cfg.aggroR || a.cfg.territorial)
-      * (a.cfg.hunts && !a.isCryptid && night > 0.4 ? 1.3 : 1);
-=======
     let trigger = (a.cfg.aggroR || a.cfg.territorial)
-      * (a.cfg.hunts && !a.isCryptid && night > 0.4 ? 1.25 : 1);
+      * (a.cfg.hunts && !a.isCryptid && night > 0.4 ? 1.3 : 1);
     if (a.cfg.hunts) trigger += scentM;   // what you carry, carries
     if (fireNear) trigger *= 0.5;         // the fire disagrees
->>>>>>> theirs
     if (a.aggro && dist > trigger * 2.2) {    // lost you
       a.aggro = false; a.warned = false; a.circleT = 0; a.packBias = 0;
       if (a.state === 'warn' || a.state === 'stare') { a.state = 'idle'; a.t = 1; }
@@ -2182,7 +2177,10 @@ function tickBody() {
 
   window._tickInfo = { f: (window._tickInfo?.f || 0) + 1, n: animals.length,
                        px: Math.round(player.x), pz: Math.round(player.z) };
-<<<<<<< ours
+  // scent + sanctuary — once per frame, every brain reads the same air
+  scentM = started ? player.meat * 6 + (t < bloodedUntil ? 6 : 0) : 0;
+  fireNear = started
+    && Math.hypot(player.x - CAMP_X, player.z - CAMP_Z) < CAMP_SAFE;
   // kill-feel hitstop: a connected arrow holds the world at 5% speed
   // for a few real frames (0.04s flesh / 0.09s lethal). No setTimeout —
   // juiceT burns down on real dt, world dt gets scaled while it lasts.
@@ -2190,14 +2188,6 @@ function tickBody() {
   if (juiceT > 0) { juiceT -= dt; wdt = dt * 0.05; }
   for (const a of animals) animalUpdate(a, wdt);
   arrowUpdate(wdt);
-=======
-  // scent + sanctuary — once per frame, every brain reads the same air
-  scentM = started ? player.meat * 6 + (t < bloodedUntil ? 6 : 0) : 0;
-  fireNear = started
-    && Math.hypot(player.x - CAMP_X, player.z - CAMP_Z) < CAMP_SAFE;
-  for (const a of animals) animalUpdate(a, dt);
-  arrowUpdate(dt);
->>>>>>> theirs
   if (USE_POST) {
     // night needs a softer bloom threshold so fireflies/stars breathe
     bloomPass.threshold = 0.85 - (window._night || 0) * 0.38;
