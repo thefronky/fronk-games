@@ -216,6 +216,22 @@ export class AudioEngine {
     src.connect(f).connect(g).connect(this.foleyBus);
     src.start(t);
   }
+  _cricket() {
+    const C = this.ctx, t = C.currentTime;
+    const n = 5 + (Math.random() * 5 | 0);
+    const base = 4200 + Math.random() * 800;
+    for (let i = 0; i < n; i++) {
+      const o = C.createOscillator(); o.type = 'sine';
+      const t0 = t + i * 0.055;
+      o.frequency.value = base;
+      const g = C.createGain();
+      g.gain.setValueAtTime(0, t0);
+      g.gain.linearRampToValueAtTime(0.016, t0 + 0.008);
+      g.gain.exponentialRampToValueAtTime(0.0006, t0 + 0.04);
+      o.connect(g).connect(this.master);
+      o.start(t0); o.stop(t0 + 0.05);
+    }
+  }
   _bird() {
     const C = this.ctx, t = C.currentTime;
     const n = 2 + (Math.random() * 3 | 0);
@@ -284,11 +300,13 @@ export class AudioEngine {
       }
     }
 
-    // birds
+    // birds — daytime creatures; crickets take over at night
     this._birdT -= dt;
     if (this._birdT <= 0) {
       this._birdT = 3 + Math.random() * 9;
-      if (Math.random() < 0.65) this._bird();
+      const night = s.night || 0;
+      if (night < 0.5 && Math.random() < 0.65 * (1 - night)) this._bird();
+      else if (night > 0.5 && Math.random() < 0.8) this._cricket();
     }
 
     // footsteps

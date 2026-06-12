@@ -1,6 +1,6 @@
 // FRONK WILDS — open-world scout-survey (hunting) game
 // Three.js r160, Quaternius CC0 animated animals, all procedural world.
-window._V = 8;
+window._V = 9;
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
@@ -16,8 +16,8 @@ const WORLD = 860;            // square world size
 const WATER_Y = 2.1;          // lake level
 const EYE = 1.7;
 const CFG = IS_TOUCH
-  ? { grass: 5200, trees: 200, rocks: 60, px: 1.6, shadow: 1024 }
-  : { grass: 11000, trees: 300, rocks: 90, px: 2, shadow: 2048 };
+  ? { grass: 7000, trees: 210, rocks: 60, px: 1.6, shadow: 1024 }
+  : { grass: 15000, trees: 320, rocks: 90, px: 2, shadow: 2048 };
 
 const SPECIES = {
   Deer: { n: 6,  speed: 3.0, gallop: 10.5, hp: 1, flee: 30, r: 1.5 },
@@ -55,11 +55,16 @@ renderer.toneMappingExposure = 1.12;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xe8b07a);
-scene.fog = new THREE.Fog(0xe8b07a, 90, 460);
+scene.fog = new THREE.Fog(0xe8b07a, 80, 400);
 
 const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.1, 1200);
 
-// golden hour — Fronk's signature light
+// golden hour — Fronk's signature light. A full day/night cycle runs
+// on top of it: golden hour is "home base", night brings stars and
+// fireflies, then dawn returns. One cycle every DAY_LEN seconds.
+const DAY_LEN = 480;
+const SUN_WARM = new THREE.Color(0xffd9a0), SUN_NIGHT = new THREE.Color(0x6f88c8);
+const FOG_DAY = new THREE.Color(0xe8b07a), FOG_NIGHT = new THREE.Color(0x10141f);
 const sun = new THREE.DirectionalLight(0xffd9a0, 2.6);
 sun.position.set(-180, 95, -60);
 sun.castShadow = true;
@@ -69,25 +74,46 @@ sun.shadow.camera.right = sun.shadow.camera.top = 90;
 sun.shadow.camera.far = 600;
 sun.shadow.bias = -0.0008;
 scene.add(sun, sun.target);
-scene.add(new THREE.HemisphereLight(0xffc890, 0x3a4a2a, 0.85));
+const hemi = new THREE.HemisphereLight(0xffc890, 0x3a4a2a, 0.85);
+scene.add(hemi);
 
 // sky dome — sunset gradient + sun glow
+const skyUniforms = {
+  sunDir: { value: new THREE.Vector3(-0.86, 0.42, -0.28).normalize() },
+  night: { value: 0 },
+  uT: { value: 0 },
+};
 const sky = new THREE.Mesh(
   new THREE.SphereGeometry(1000, 24, 16),
   new THREE.ShaderMaterial({
     side: THREE.BackSide, depthWrite: false, fog: false,
-    uniforms: { sunDir: { value: new THREE.Vector3(-0.86, 0.42, -0.28).normalize() } },
+    uniforms: skyUniforms,
     vertexShader: `varying vec3 vDir; void main(){ vDir = normalize(position);
       gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
     fragmentShader: `varying vec3 vDir; uniform vec3 sunDir;
+      uniform float night; uniform float uT;
       void main(){
-        float h = clamp(vDir.y, -0.05, 1.0);
-        vec3 horizon = vec3(0.99, 0.62, 0.34);
-        vec3 zenith  = vec3(0.18, 0.26, 0.45);
+        vec3 dir = normalize(vDir);
+        float h = clamp(dir.y, -0.05, 1.0);
+        vec3 horizon = mix(vec3(0.99, 0.62, 0.34), vec3(0.07, 0.10, 0.18), night);
+        vec3 zenith  = mix(vec3(0.18, 0.26, 0.45), vec3(0.015, 0.02, 0.05), night);
         vec3 col = mix(horizon, zenith, pow(h, 0.62));
-        float s = max(dot(vDir, sunDir), 0.0);
-        col += vec3(1.0, 0.78, 0.45) * pow(s, 220.0) * 1.6;  // disc
-        col += vec3(1.0, 0.6, 0.3) * pow(s, 6.0) * 0.32;     // haze
+        float s = max(dot(dir, sunDir), 0.0);
+        float dayGlow = 1.0 - night;
+        col += vec3(1.0, 0.78, 0.45) * pow(s, 220.0) * 1.6 * dayGlow;
+        col += vec3(1.0, 0.6, 0.3) * pow(s, 6.0) * 0.32 * dayGlow;
+        // procedural stars, twinkling, night only
+        if (night > 0.02 && dir.y > -0.02) {
+          vec3 cell = floor(dir * 160.0);
+          float hsh = fract(sin(dot(cell, vec3(127.1, 311.7, 74.7))) * 43758.5453);
+          if (hsh > 0.9962) {
+            float tw = 0.55 + 0.45 * sin(uT * (1.5 + fract(hsh * 91.0) * 3.0) + hsh * 40.0);
+            col += vec3(0.9, 0.93, 1.0) * tw * night * pow(fract(hsh * 137.0), 0.6);
+          }
+          // soft milky band for depth
+          float band = pow(max(0.0, 1.0 - abs(dot(dir, normalize(vec3(0.5, 0.22, -0.8)))) * 1.6), 3.0);
+          col += vec3(0.10, 0.11, 0.16) * band * night;
+        }
         gl_FragColor = vec4(col, 1.0);
       }`,
   })
@@ -162,30 +188,62 @@ const waterUniforms = { uTime: { value: 0 } };
   };
   // lake-local plane (a world-sized sheet pokes out past the terrain
   // rim and reads as a black band on the horizon)
-  const w = new THREE.Mesh(new THREE.PlaneGeometry(420, 420, 48, 48), m);
+  const w = new THREE.Mesh(new THREE.PlaneGeometry(620, 620, 56, 56), m);
   w.rotation.x = -Math.PI / 2;
   w.position.set(70, WATER_Y, -90);
   scene.add(w);
+  // shallows tint — a paler sheet just under the surface reads as
+  // shore depth-gradient without a real depth shader
+  const sh = new THREE.Mesh(new THREE.PlaneGeometry(440, 440),
+    new THREE.MeshStandardMaterial({ color: 0x7ec2bb, transparent: true,
+      opacity: 0.35, roughness: 0.6, metalness: 0 }));
+  sh.rotation.x = -Math.PI / 2;
+  sh.position.set(70, WATER_Y - 0.4, -90);
+  scene.add(sh);
 }
 
 // ───────────────────────── wind-blown grass ─────────────────────────
 const windUniforms = { uTime: { value: 0 } };
 {
-  const blade = new THREE.PlaneGeometry(0.3, 0.95, 1, 2);
-  blade.translate(0, 0.47, 0);
-  const cross = new THREE.PlaneGeometry(0.3, 0.95, 1, 2);
-  cross.translate(0, 0.47, 0); cross.rotateY(Math.PI / 2);
-  const geo = mergeGeoms([blade, cross]);
+  // curved, tapered blade — three of them in a tuft, color gradient
+  // dark base → bright tip, tips bend hardest in the wind
+  const mkBlade = (rotY) => {
+    const g = new THREE.PlaneGeometry(0.17, 1.1, 1, 4);
+    g.translate(0, 0.55, 0);
+    const p = g.attributes.position;
+    for (let i = 0; i < p.count; i++) {
+      const vy = p.getY(i) / 1.1;
+      p.setX(i, p.getX(i) * (1 - Math.pow(vy, 1.3) * 0.85));   // taper
+      p.setZ(i, p.getZ(i) + vy * vy * 0.4);                     // curve
+    }
+    g.computeVertexNormals();
+    g.rotateY(rotY);
+    return g;
+  };
+  const geo = mergeGeoms([mkBlade(0), mkBlade(2.1), mkBlade(4.2)]);
+  {
+    const p = geo.attributes.position, col = new Float32Array(p.count * 3);
+    const base = new THREE.Color(0x37551e), tip = new THREE.Color(0xa9c95f);
+    for (let i = 0; i < p.count; i++) {
+      const vy = Math.max(0, Math.min(1, p.getY(i) / 1.1));
+      const c = base.clone().lerp(tip, vy * vy);
+      col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
+    }
+    geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  }
   const mat = new THREE.MeshLambertMaterial({
-    color: 0x7da14a, side: THREE.DoubleSide, alphaTest: 0.05 });
+    vertexColors: true, side: THREE.DoubleSide,
+    emissive: 0x2a4214, emissiveIntensity: 0.5 });  // lifts shadow-side
+                                                    // blades off pure black
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.uTime = windUniforms.uTime;
     sh.vertexShader = 'uniform float uTime;\n' + sh.vertexShader.replace(
       '#include <begin_vertex>',
       `#include <begin_vertex>
-       float wsway = sin(uTime*1.9 + instanceMatrix[3][0]*0.21 + instanceMatrix[3][2]*0.17);
-       transformed.x += wsway * position.y * 0.34;
-       transformed.z += cos(uTime*1.4 + instanceMatrix[3][0]*0.13) * position.y * 0.22;`);
+       float bendY = position.y * position.y * 0.62;
+       float ph = instanceMatrix[3][0]*0.21 + instanceMatrix[3][2]*0.17;
+       transformed.x += (sin(uTime*1.9 + ph) + 0.4*sin(uTime*3.7 + ph*1.7)) * bendY * 0.55;
+       transformed.z += cos(uTime*1.4 + ph) * bendY * 0.38;`);
   };
   const inst = new THREE.InstancedMesh(geo, mat, CFG.grass);
   const M = new THREE.Matrix4(), Q = new THREE.Quaternion(),
@@ -231,26 +289,53 @@ function mergeGeoms(list) {
 
 // ───────────────────────── trees + rocks (instanced) ─────────────────────────
 {
-  const trunk = new THREE.CylinderGeometry(0.32, 0.5, 3.2, 6);
-  trunk.translate(0, 1.6, 0);
-  const c1 = new THREE.ConeGeometry(2.6, 4.4, 7);  c1.translate(0, 5.0, 0);
-  const c2 = new THREE.ConeGeometry(1.9, 3.4, 7);  c2.translate(0, 7.4, 0);
-  const c3 = new THREE.ConeGeometry(1.15, 2.3, 7); c3.translate(0, 9.4, 0);
-  const geo = mergeGeoms([trunk, c1, c2, c3]);
-  // two-tone via vertex colors: trunk brown, canopy greens
-  const n = geo.attributes.position.count, col = new Float32Array(n * 3);
-  const trunkN = trunk.toNonIndexed().attributes.position.count;
-  const brown = new THREE.Color(0x6b4a2a);
-  for (let i = 0; i < n; i++) {
-    const green = new THREE.Color().setHSL(0.27 + Math.random() * 0.03, 0.45, 0.30 + Math.random() * 0.06);
-    const c = i < trunkN ? brown : green;
-    col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
-  }
-  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
-  const inst = new THREE.InstancedMesh(geo,
-    new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1,
-      emissive: 0x16240e, emissiveIntensity: 0.55 }), CFG.trees);
-  inst.castShadow = true;
+  // three species, altitude-distributed: broadleaf low, pines mid,
+  // hardy pines high, birches scattered through the lowlands
+  const paintTwoTone = (geo, trunkGeo, trunkColor, leafFn) => {
+    const n = geo.attributes.position.count, col = new Float32Array(n * 3);
+    const trunkN = trunkGeo.toNonIndexed().attributes.position.count;
+    const brown = new THREE.Color(trunkColor);
+    for (let i = 0; i < n; i++) {
+      const c = i < trunkN ? brown : leafFn();
+      col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
+    }
+    geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    return geo;
+  };
+  const pineTrunk = new THREE.CylinderGeometry(0.32, 0.5, 3.2, 6);
+  pineTrunk.translate(0, 1.6, 0);
+  const p1 = new THREE.ConeGeometry(2.6, 4.4, 7);  p1.translate(0, 5.0, 0);
+  const p2 = new THREE.ConeGeometry(1.9, 3.4, 7);  p2.translate(0, 7.4, 0);
+  const p3 = new THREE.ConeGeometry(1.15, 2.3, 7); p3.translate(0, 9.4, 0);
+  const pineGeo = paintTwoTone(mergeGeoms([pineTrunk, p1, p2, p3]), pineTrunk,
+    0x6b4a2a, () => new THREE.Color().setHSL(0.27 + Math.random() * 0.03, 0.45,
+                                             0.30 + Math.random() * 0.06));
+
+  const blTrunk = new THREE.CylinderGeometry(0.4, 0.58, 4.4, 6);
+  blTrunk.translate(0, 2.2, 0);
+  const b1 = new THREE.IcosahedronGeometry(2.5, 0); b1.translate(0, 6.0, 0);
+  const b2 = new THREE.IcosahedronGeometry(1.9, 0); b2.translate(1.5, 5.0, 0.5);
+  const b3 = new THREE.IcosahedronGeometry(1.7, 0); b3.translate(-1.4, 5.2, -0.4);
+  const broadGeo = paintTwoTone(mergeGeoms([blTrunk, b1, b2, b3]), blTrunk,
+    0x5d452c, () => new THREE.Color().setHSL(0.23 + Math.random() * 0.05, 0.5,
+                                             0.32 + Math.random() * 0.08));
+
+  const biTrunk = new THREE.CylinderGeometry(0.16, 0.22, 5.2, 6);
+  biTrunk.translate(0, 2.6, 0);
+  const bi1 = new THREE.IcosahedronGeometry(1.6, 0); bi1.translate(0, 6.0, 0);
+  const birchGeo = paintTwoTone(mergeGeoms([biTrunk, bi1]), biTrunk,
+    0xd9d4c4, () => new THREE.Color().setHSL(0.21 + Math.random() * 0.04, 0.55,
+                                             0.42 + Math.random() * 0.08));
+
+  const treeMat = new THREE.MeshStandardMaterial({ vertexColors: true,
+    roughness: 1, emissive: 0x16240e, emissiveIntensity: 0.55 });
+  const species = [
+    { geo: pineGeo,  inst: new THREE.InstancedMesh(pineGeo, treeMat, CFG.trees), n: 0, r: 1.1 },
+    { geo: broadGeo, inst: new THREE.InstancedMesh(broadGeo, treeMat, CFG.trees), n: 0, r: 1.2 },
+    { geo: birchGeo, inst: new THREE.InstancedMesh(birchGeo, treeMat, CFG.trees), n: 0, r: 0.6 },
+  ];
+  species.forEach(s => { s.inst.castShadow = true; scene.add(s.inst); });
+
   const M = new THREE.Matrix4(), Q = new THREE.Quaternion(),
         S = new THREE.Vector3(), P = new THREE.Vector3(), E = new THREE.Euler();
   let placed = 0, guard = 0;
@@ -261,14 +346,19 @@ function mergeGeoms(list) {
           y = heightAt(x, z);
     if (y < WATER_Y + 1.5 || y > 17) continue;
     if (Math.hypot(x, z) < 18) continue;            // spawn clearing
+    const roll = Math.random();
+    let sp;
+    if (y < 8)       sp = roll < 0.45 ? species[1] : roll < 0.75 ? species[0] : species[2];
+    else if (y < 13) sp = roll < 0.65 ? species[0] : roll < 0.9 ? species[1] : species[2];
+    else             sp = species[0];
     P.set(x, y - 0.15, z);
     E.set(0, Math.random() * Math.PI * 2, 0); Q.setFromEuler(E);
     const s = 0.8 + Math.random() * 1.1; S.set(s, s, s);
-    inst.setMatrixAt(placed++, M.compose(P, Q, S));
-    TREES.push({ x, z, r: 1.1 * s });
+    sp.inst.setMatrixAt(sp.n++, M.compose(P, Q, S));
+    TREES.push({ x, z, r: sp.r * s });
+    placed++;
   }
-  inst.count = placed;
-  scene.add(inst);
+  species.forEach(s => { s.inst.count = s.n; });
 
   const rg = new THREE.DodecahedronGeometry(1.1, 0);
   const rocks = new THREE.InstancedMesh(rg,
@@ -294,6 +384,7 @@ const clouds = [];
 {
   const geo = new THREE.IcosahedronGeometry(1, 0);
   const mat = new THREE.MeshLambertMaterial({ color: 0xfff1de, transparent: true, opacity: 0.92 });
+  window._cloudMat = mat;
   for (let i = 0; i < 9; i++) {
     const grp = new THREE.Group();
     for (let p = 0; p < 4 + (Math.random() * 3 | 0); p++) {
@@ -307,6 +398,43 @@ const clouds = [];
     scene.add(grp);
     clouds.push(grp);
   }
+}
+
+// ───────────────────────── fireflies (night) ─────────────────────────
+const FF_N = IS_TOUCH ? 80 : 140;
+const ffBase = [];
+const fireflies = (() => {
+  const pos = new Float32Array(FF_N * 3);
+  for (let i = 0; i < FF_N; i++) {
+    const ang = Math.random() * Math.PI * 2, r = 6 + Math.random() * 34;
+    ffBase.push({ ox: Math.cos(ang) * r, oz: Math.sin(ang) * r,
+                  ph: Math.random() * 10, sp: 0.4 + Math.random() * 0.8 });
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  const m = new THREE.PointsMaterial({
+    color: 0xc8ff7a, size: 0.16, transparent: true, opacity: 0,
+    blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true,
+  });
+  const p = new THREE.Points(g, m);
+  p.frustumCulled = false;
+  scene.add(p);
+  return p;
+})();
+
+function updateFireflies(t, night) {
+  fireflies.material.opacity = night * 0.95;
+  if (night < 0.02) return;
+  const pos = fireflies.geometry.attributes.position.array;
+  for (let i = 0; i < FF_N; i++) {
+    const b = ffBase[i];
+    const x = player.x + b.ox + Math.sin(t * b.sp + b.ph) * 2.4;
+    const z = player.z + b.oz + Math.cos(t * b.sp * 0.8 + b.ph * 2) * 2.4;
+    pos[i * 3] = x;
+    pos[i * 3 + 1] = heightAt(x, z) + 0.7 + Math.sin(t * b.sp * 1.7 + b.ph) * 0.5;
+    pos[i * 3 + 2] = z;
+  }
+  fireflies.geometry.attributes.position.needsUpdate = true;
 }
 
 // ───────────────────────── animals ─────────────────────────
@@ -633,6 +761,7 @@ function renderHP() {
 
 // ───────────────────────── main loop ─────────────────────────
 const clock = new THREE.Clock();
+window._clock = clock;
 function tick() {
   requestAnimationFrame(tick);
   try { tickBody(); } catch (e) { window._tickErr = String(e.stack || e); }
@@ -648,7 +777,29 @@ function tickBody() {
   const t = clock.elapsedTime;
   windUniforms.uTime.value = t;
   waterUniforms.uTime.value = t;
+  skyUniforms.uT.value = t;
   for (const c of clouds) { c.position.x += c.userData.v * dt * 2; if (c.position.x > 800) c.position.x = -800; }
+
+  // ── day/night cycle ──
+  const phase = (t / DAY_LEN) % 1;                 // 0 = golden hour
+  const elev = 0.35 * Math.cos(phase * Math.PI * 2) - 0.02;
+  const night = Math.max(0, Math.min(1, (0.05 - elev) / 0.18));
+  const az = new THREE.Vector3(-0.86, 0, -0.28).normalize();
+  const sd = new THREE.Vector3(az.x, 0, az.z).multiplyScalar(Math.sqrt(Math.max(0.05, 1 - elev * elev)))
+    .add(new THREE.Vector3(0, Math.max(-0.5, elev), 0)).normalize();
+  skyUniforms.sunDir.value.copy(sd);
+  skyUniforms.night.value = night;
+  sun.intensity = 0.18 + 2.45 * Math.max(0, Math.min(1, (elev + 0.1) * 3.2)) * (1 - night * 0.92);
+  sun.color.copy(SUN_WARM).lerp(SUN_NIGHT, night);
+  hemi.intensity = 0.85 - night * 0.58;
+  scene.fog.color.copy(FOG_DAY).lerp(FOG_NIGHT, night);
+  scene.background.copy(scene.fog.color);
+  updateFireflies(t, night);
+  if (window._cloudMat) {
+    window._cloudMat.color.setHex(0xfff1de).lerp(new THREE.Color(0x2a3245), night);
+    window._cloudMat.opacity = 0.92 - night * 0.45;
+  }
+  window._night = night;
 
   if (started && !dead) {
     // movement
@@ -693,6 +844,7 @@ function tickBody() {
     audio.update(dt, {
       moving: !!(mx || mz), sprint: !!keys.ShiftLeft,
       wolfDist, lakeDist: Math.hypot(player.x - 70, player.z + 90),
+      night: window._night || 0,
     });
   }
 
@@ -723,6 +875,24 @@ loadAnimals().then(() => {
 }).catch(e => {
   document.getElementById('loadmsg').textContent = 'asset load failed: ' + e;
 });
+
+// dev/screenshot params: ?autostart=1&t=195&pos=-30,-30&yaw=2.2&pitch=0.05
+{
+  const q = new URLSearchParams(location.search);
+  if (q.get('autostart')) {
+    const boot = () => {
+      if (!Object.keys(prefabs).length) { setTimeout(boot, 400); return; }
+      started = true;
+      document.getElementById('title').style.display = 'none';
+      if (q.get('t')) clock.elapsedTime = parseFloat(q.get('t'));
+      if (q.get('pos')) { const [x, z] = q.get('pos').split(',').map(Number);
+        player.x = x; player.z = z; }
+      if (q.get('yaw')) player.yaw = parseFloat(q.get('yaw'));
+      if (q.get('pitch')) player.pitch = parseFloat(q.get('pitch'));
+    };
+    boot();
+  }
+}
 
 document.getElementById('play').addEventListener('click', () => {
   started = true;
