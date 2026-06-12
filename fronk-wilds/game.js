@@ -352,7 +352,9 @@ const windUniforms = { uTime: { value: 0 } };
     const g = gPos[i];
     const y = heightAt(g.x, g.z);
     // fade out toward the field edge so the follow-ring never shows a line
-    const dEdge = Math.max(Math.abs(g.x - player.x), Math.abs(g.z - player.z));
+    // (window._player — the player const doesn't exist yet at grass init)
+    const pc = window._player || { x: 0, z: 26 };
+    const dEdge = Math.max(Math.abs(g.x - pc.x), Math.abs(g.z - pc.z));
     const fade = Math.max(0, Math.min(1, (R - dEdge) / 9));
     if (y < WATER_Y + 0.5 || y > 18 || fade <= 0) { S.set(0, 0, 0); }
     else S.set(g.s * fade, g.s * g.sy * fade, g.s * fade);
