@@ -77,19 +77,24 @@ scene.background = new THREE.Color(0xe8b07a);
 // chain black (Fronk's phone, 2026-06-12). ?bloom=1 forces it on.
 const USE_POST = !IS_TOUCH
   || new URLSearchParams(location.search).get('bloom') === '1';
-const composer = new EffectComposer(renderer);
-let bloomPass;
 scene.fog = new THREE.Fog(0xe8b07a, 80, 400);
 
 const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.1, 1200);
-composer.addPass(new RenderPass(scene, camera));
-bloomPass = new UnrealBloomPass(
-  new THREE.Vector2(innerWidth, innerHeight),
-  0.45,   // strength — glow without soup
-  0.65,   // radius
-  0.82);  // threshold — only genuinely bright things bloom
-composer.addPass(bloomPass);
-composer.addPass(new OutputPass());
+// composer + bloom allocate several full-screen render targets at
+// construction — skip entirely on mobile (USE_POST=false) to save
+// GPU memory on iOS Safari
+let composer = null, bloomPass = null;
+if (USE_POST) {
+  composer = new EffectComposer(renderer);
+  composer.addPass(new RenderPass(scene, camera));
+  bloomPass = new UnrealBloomPass(
+    new THREE.Vector2(innerWidth, innerHeight),
+    0.45,   // strength — glow without soup
+    0.65,   // radius
+    0.82);  // threshold — only genuinely bright things bloom
+  composer.addPass(bloomPass);
+  composer.addPass(new OutputPass());
+}
 
 // golden hour — Fronk's signature light. A full day/night cycle runs
 // on top of it: golden hour is "home base", night brings stars and
@@ -696,7 +701,11 @@ const LANDMARKS = [
   },
 ];
 
-const foundSet = new Set(JSON.parse(localStorage.getItem('fw_found') || '[]'));
+// localStorage can throw in private browsing (iOS Safari) — never let
+// persistence failures kill the game
+let foundSet;
+try { foundSet = new Set(JSON.parse(localStorage.getItem('fw_found') || '[]')); }
+catch (e) { foundSet = new Set(); }
 
 // The noise field has plenty of below-water terrain, so preferred
 // coordinates spiral-walk (deterministically — same result every
@@ -763,7 +772,8 @@ function landmarkUpdate(dt, t) {
       if (d < nearestD) { nearestD = d; nearest = lm; }
       if (d < lm.r) {
         foundSet.add(lm.id);
-        localStorage.setItem('fw_found', JSON.stringify([...foundSet]));
+        try { localStorage.setItem('fw_found', JSON.stringify([...foundSet])); }
+        catch (e) { /* private browsing — discovery just won't persist */ }
         audio.stinger();
         showJournal(lm);
         renderNotes();
@@ -1219,6 +1229,7 @@ function hurtPlayer(dmg) {
   toast(pick(LINES.bite));
   if (player.hp <= 0) {
     dead = true;
+    resetDrawState();
     toast(LINES.death, 4000);
     setTimeout(() => {
       player.hp = 100; player.x = 0; player.z = 26; dead = false; renderHP();
@@ -1229,6 +1240,7 @@ function hurtPlayer(dmg) {
 
 // ───────────────────────── arrows ─────────────────────────
 const arrows = [];
+const _arrowAim = new THREE.Vector3();   // scratch for per-frame lookAt
 const arrowGeo = new THREE.ConeGeometry(0.05, 0.95, 5);
 arrowGeo.rotateX(Math.PI / 2);
 const arrowMat = new THREE.MeshStandardMaterial({ color: 0x8a6a3a, roughness: 0.8 });
@@ -1260,7 +1272,7 @@ function arrowUpdate(dt) {
     if (a.stuck) { a.t -= dt; if (a.t <= 0) { scene.remove(a.m); arrows.splice(i, 1); } continue; }
     a.v.y -= 21 * dt;
     a.m.position.addScaledVector(a.v, dt);
-    a.m.lookAt(a.m.position.clone().add(a.v));
+    a.m.lookAt(_arrowAim.copy(a.m.position).add(a.v));
     // animal hit
     let hit = false;
     for (const an of animals) {
@@ -1361,20 +1373,32 @@ let bowString1, bowString2, nockedArrow;
   scene.add(camera);
 }
 
+// preallocated — updateBowString runs every frame (no per-frame Vector3s)
+const _bsNock = new THREE.Vector3(),
+      _bsTip1 = new THREE.Vector3(0, 0.55, -0.125),
+      _bsTip2 = new THREE.Vector3(0, -0.55, -0.125),
+      _bsUP   = new THREE.Vector3(0, 1, 0),
+      _bsDir  = new THREE.Vector3();
+function _setBowStr(str, tip) {
+  str.position.copy(tip).add(_bsNock).multiplyScalar(0.5);
+  str.scale.y = tip.distanceTo(_bsNock);
+  str.quaternion.setFromUnitVectors(_bsUP, _bsDir.copy(_bsNock).sub(tip).normalize());
+}
 function updateBowString(draw) {
   // string runs tip→nock→tip; nock pulls back toward your eye
-  const tipY = 0.55, tipZ = -0.125;
-  const nock = new THREE.Vector3(0, 0, tipZ + 0.02 + draw * 0.34);
-  const tip1 = new THREE.Vector3(0, tipY, tipZ);
-  const tip2 = new THREE.Vector3(0, -tipY, tipZ);
-  const UP = new THREE.Vector3(0, 1, 0);
-  for (const [str, a, b] of [[bowString1, tip1, nock], [bowString2, tip2, nock]]) {
-    str.position.copy(a).add(b).multiplyScalar(0.5);
-    str.scale.y = a.distanceTo(b);
-    str.quaternion.setFromUnitVectors(UP, b.clone().sub(a).normalize());
-  }
+  _bsNock.set(0, 0, -0.125 + 0.02 + draw * 0.34);
+  _setBowStr(bowString1, _bsTip1);
+  _setBowStr(bowString2, _bsTip2);
   nockedArrow.visible = draw > 0.03;
-  nockedArrow.position.set(0, 0, nock.z);
+  nockedArrow.position.set(0, 0, _bsNock.z);
+}
+
+// dying mid-draw must not leave the camera zoomed / the bow drawn
+function resetDrawState() {
+  drawing = false; drawT = 0;
+  if (camera.fov !== 70) { camera.fov = 70; camera.updateProjectionMatrix(); }
+  updateBowString(0);
+  document.getElementById('crosshair').classList.remove('drawn');
 }
 
 // ───────────────────────── input ─────────────────────────
@@ -1438,9 +1462,20 @@ if (!IS_TOUCH) {
       if (t.identifier === shootId) { shootId = null; drawing = false; loose(); }
     }
   });
+  // iOS fires touchcancel (not touchend) on system gestures, alerts,
+  // notification-center pulls — without this the stick/draw gets STUCK
+  addEventListener('touchcancel', e => {
+    for (const t of e.changedTouches) {
+      if (t.identifier === stickId) { stickId = null; moveVec.x = moveVec.y = 0;
+        knob.style.left = '50%'; knob.style.top = '50%'; }
+      if (t.identifier === lookId) lookId = null;
+      if (t.identifier === shootId) { shootId = null; drawing = false; drawT = 0; }
+    }
+  });
   const btn = document.getElementById('shootBtn');
   btn.addEventListener('touchstart', e => {
     e.preventDefault();
+    if (shootId !== null) return;     // second finger on the button — ignore
     const t = e.changedTouches[0];
     shootId = t.identifier; lastShoot = { x: t.clientX, y: t.clientY };
     drawing = true;
@@ -1468,6 +1503,10 @@ function renderHP() {
 }
 
 // ───────────────────────── main loop ─────────────────────────
+// preallocated scratch for the day/night math (no per-frame Vector3/Color)
+const _sunAz = new THREE.Vector3(-0.86, 0, -0.28).normalize();
+const _sunDir = new THREE.Vector3();
+const _CLOUD_NIGHT = new THREE.Color(0x2a3245);
 const clock = new THREE.Clock();
 window._clock = clock;
 function tick() {
@@ -1492,10 +1531,9 @@ function tickBody() {
   const phase = (t / DAY_LEN) % 1;                 // 0 = golden hour
   const elev = 0.35 * Math.cos(phase * Math.PI * 2) - 0.02;
   const night = Math.max(0, Math.min(1, (0.05 - elev) / 0.18));
-  const az = new THREE.Vector3(-0.86, 0, -0.28).normalize();
-  const sd = new THREE.Vector3(az.x, 0, az.z).multiplyScalar(Math.sqrt(Math.max(0.05, 1 - elev * elev)))
-    .add(new THREE.Vector3(0, Math.max(-0.5, elev), 0)).normalize();
-  skyUniforms.sunDir.value.copy(sd);
+  const azS = Math.sqrt(Math.max(0.05, 1 - elev * elev));
+  _sunDir.set(_sunAz.x * azS, Math.max(-0.5, elev), _sunAz.z * azS).normalize();
+  skyUniforms.sunDir.value.copy(_sunDir);
   skyUniforms.night.value = night;
   sun.intensity = 0.18 + 2.45 * Math.max(0, Math.min(1, (elev + 0.1) * 3.2)) * (1 - night * 0.92);
   sun.color.copy(SUN_WARM).lerp(SUN_NIGHT, night);
@@ -1510,7 +1548,7 @@ function tickBody() {
   farDisc.position.x = player.x; farDisc.position.z = player.z;
   landmarkUpdate(dt, t);
   if (window._cloudMat) {
-    window._cloudMat.color.setHex(0xfff1de).lerp(new THREE.Color(0x2a3245), night);
+    window._cloudMat.color.setHex(0xfff1de).lerp(_CLOUD_NIGHT, night);
     window._cloudMat.opacity = 0.92 - night * 0.45;
   }
   if (window._glitter) {
@@ -1579,6 +1617,7 @@ function tickBody() {
         toast('Hunger. The wilds are patient. Hunt.');
       }
       if (player.hp <= 0 && !dead) { dead = true;
+        resetDrawState();
         toast('The wilds kept you. Respawning…', 4000);
         setTimeout(() => { player.hp = 100; player.meat = 0;
           player.lastAte = clock.elapsedTime; player.x = 0; player.z = 26;
@@ -1645,7 +1684,14 @@ addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
-  composer.setSize(innerWidth, innerHeight);
+  if (composer) composer.setSize(innerWidth, innerHeight);
+});
+
+// GPU context loss (backgrounded tab, memory pressure on iOS) — without
+// this the canvas goes permanently black. Reload is the honest recovery.
+canvas.addEventListener('webglcontextlost', (e) => {
+  e.preventDefault();
+  location.reload();
 });
 
 // ───────────────────────── boot ─────────────────────────

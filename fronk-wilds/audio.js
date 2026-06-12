@@ -319,7 +319,20 @@ export class AudioEngine {
   // called every frame from the game loop
   update(dt, s) {
     if (!this.started || this.muted) return;
-    const t = this.ctx.currentTime;
+    const C = this.ctx;
+    // iOS Safari suspends/interrupts the context when the page is
+    // backgrounded and does NOT auto-resume — nudge it back to life
+    if (C.state !== 'running') {
+      if (!this._resuming) {
+        this._resuming = true;
+        const p = C.resume();
+        if (p && p.then) p.then(() => { this._resuming = false; },
+                                () => { this._resuming = false; });
+        else this._resuming = false;
+      }
+      return;
+    }
+    const t = C.currentTime;
 
     // wind breathes
     const breathe = 0.10 + 0.05 * Math.sin(t * 0.23) + 0.02 * Math.sin(t * 0.71);
