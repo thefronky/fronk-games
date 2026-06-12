@@ -1,6 +1,6 @@
 // FRONK WILDS — open-world scout-survey (hunting) game
 // Three.js r160, Quaternius CC0 animated animals, all procedural world.
-window._V = 9;
+window._V = 10;
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
@@ -400,6 +400,208 @@ const clouds = [];
   }
 }
 
+// ───────────────────────── landmarks (the discovery loop) ─────────────────
+// Terrain noise is deterministic, so these are hand-placed on known
+// terrain. Each landmark = a built scene group + a journal entry that
+// fires once (persisted in localStorage) with a music stinger.
+
+const stoneMat = new THREE.MeshStandardMaterial({ color: 0x9a948a, roughness: 1 });
+const LANDMARKS = [
+  {
+    id: 'circle', name: 'The Standing Stones', x: -250, z: 180, r: 16,
+    journal: 'Seven stones in a circle. Arranged, on purpose, by someone with opinions. The wind goes quiet here. Out of respect, presumably.',
+    build(g, y) {
+      for (let i = 0; i < 7; i++) {
+        const a = i / 7 * Math.PI * 2;
+        const h = 3.2 + ((i * 37) % 5) * 0.4;
+        const s = new THREE.Mesh(new THREE.BoxGeometry(1.1, h, 0.8), stoneMat);
+        s.position.set(Math.cos(a) * 7, h / 2 - 0.3, Math.sin(a) * 7);
+        s.rotation.y = a + 0.3; s.rotation.z = (((i * 13) % 7) - 3) * 0.02;
+        s.castShadow = true; g.add(s);
+      }
+    },
+  },
+  {
+    id: 'tree', name: 'The Considerable Tree', x: 280, z: 250, r: 18,
+    journal: 'A tree significantly larger than the other trees. It has clearly been here longer than everything else. It knows something. It is not telling.',
+    build(g) {
+      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 2.6, 16, 8),
+        new THREE.MeshStandardMaterial({ color: 0x4f3a22, roughness: 1 }));
+      trunk.position.y = 8; trunk.castShadow = true; g.add(trunk);
+      const leaf = new THREE.MeshStandardMaterial({ color: 0x4d7028, roughness: 1,
+        emissive: 0x1d3008, emissiveIntensity: 0.7 });
+      [[0, 18, 0, 7.5], [4.5, 15.5, 2, 4.5], [-4.5, 16, -1.5, 4.8], [1, 14.5, -4.5, 4]]
+        .forEach(([x, y, z, r]) => {
+          const b = new THREE.Mesh(new THREE.IcosahedronGeometry(r, 0), leaf);
+          b.position.set(x, y, z); b.castShadow = true; g.add(b);
+        });
+    },
+  },
+  {
+    id: 'spring', name: 'The Generous Spring', x: 60, z: -228, r: 14,
+    journal: 'Water comes out of the mountain here, continuously, for free. Nobody is charging for this. Remarkable. The survey will not be reporting it.',
+    build(g) {
+      const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(4.2, 0), stoneMat);
+      rock.position.y = 2.4; rock.scale.y = 1.5; rock.castShadow = true; g.add(rock);
+      const fall = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 5.2, 1, 8),
+        new THREE.MeshStandardMaterial({ color: 0xbfe8f2, transparent: true,
+          opacity: 0.65, emissive: 0x9adceb, emissiveIntensity: 0.35,
+          side: THREE.DoubleSide, depthWrite: false }));
+      fall.position.set(0, 3.4, 4.05); g.add(fall);
+      g.userData.fall = fall;
+      const pool = new THREE.Mesh(new THREE.CircleGeometry(4.6, 18),
+        new THREE.MeshStandardMaterial({ color: 0x59aebe, transparent: true,
+          opacity: 0.8, roughness: 0.2 }));
+      pool.rotation.x = -Math.PI / 2; pool.position.set(0, 0.32, 5.6); g.add(pool);
+    },
+  },
+  {
+    id: 'camp', name: 'The Abandoned Camp', x: -180, z: -160, r: 13,
+    journal: 'Someone camped here and left in a hurry. The fire is still going. The tent is fine. Everything is fine. Do not think about it further.',
+    build(g) {
+      const tent = new THREE.Mesh(new THREE.ConeGeometry(2.4, 2.8, 4),
+        new THREE.MeshStandardMaterial({ color: 0xa3622f, roughness: 1, flatShading: true }));
+      tent.position.set(-3, 1.3, 0); tent.rotation.y = 0.6; tent.castShadow = true; g.add(tent);
+      const logM = new THREE.MeshStandardMaterial({ color: 0x5d452c, roughness: 1 });
+      const log1 = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 2.6, 6), logM);
+      log1.rotation.z = Math.PI / 2; log1.position.set(2.2, 0.35, 1.4); g.add(log1);
+      const fire = new THREE.Mesh(new THREE.ConeGeometry(0.5, 1.1, 6),
+        new THREE.MeshStandardMaterial({ color: 0xff8c2e, emissive: 0xff6a14,
+          emissiveIntensity: 2.2 }));
+      fire.position.set(1.2, 0.6, -0.6); g.add(fire);
+      g.userData.flame = fire;
+      const light = new THREE.PointLight(0xff9242, 14, 26, 1.8);
+      light.position.set(1.2, 1.6, -0.6); g.add(light);
+      g.userData.fireLight = light;
+    },
+  },
+  {
+    id: 'cairn', name: 'The Summit Cairn', x: 296, z: -262, r: 14,
+    journal: 'A pile of rocks at the highest point for miles. Someone carried these up here, one at a time, to say "I existed." The survey concurs: they existed.',
+    build(g) {
+      let y = 0;
+      for (let i = 0; i < 6; i++) {
+        const r = 1.5 - i * 0.2;
+        const s = new THREE.Mesh(new THREE.DodecahedronGeometry(r, 0), stoneMat);
+        s.position.set(((i * 17) % 5 - 2) * 0.08, y + r * 0.6, ((i * 31) % 5 - 2) * 0.08);
+        s.scale.y = 0.62; s.castShadow = true; g.add(s);
+        y += r * 0.78;
+      }
+    },
+  },
+  {
+    id: 'grotto', name: 'The Glowing Grotto', x: 150, z: 90, r: 13,
+    journal: 'Mushrooms that produce their own light, free of charge. The forest installed night-lighting and told no one. Touching them is not part of the survey.',
+    build(g) {
+      const stemM = new THREE.MeshStandardMaterial({ color: 0xd8d2c2, roughness: 1 });
+      for (let i = 0; i < 9; i++) {
+        const a = i / 9 * Math.PI * 2, r = 1.5 + ((i * 23) % 4);
+        const h = 0.5 + ((i * 7) % 3) * 0.35;
+        const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.18, h, 5), stemM);
+        const capM = new THREE.MeshStandardMaterial({ color: 0x7fe7d2,
+          emissive: 0x36e0b8, emissiveIntensity: 1.6 });
+        const cap = new THREE.Mesh(new THREE.ConeGeometry(0.42, 0.4, 7), capM);
+        stem.position.set(Math.cos(a) * r, h / 2, Math.sin(a) * r);
+        cap.position.set(Math.cos(a) * r, h + 0.18, Math.sin(a) * r);
+        g.add(stem, cap);
+      }
+      const glow = new THREE.PointLight(0x46e6c0, 6, 16, 2);
+      glow.position.y = 1.2; g.add(glow);
+    },
+  },
+];
+
+const foundSet = new Set(JSON.parse(localStorage.getItem('fw_found') || '[]'));
+
+// The noise field has plenty of below-water terrain, so preferred
+// coordinates spiral-walk (deterministically — same result every
+// load) to the nearest patch of solid, reasonably flat ground.
+function findSpot(px, pz, minY = 3.4) {
+  for (let r = 0; r <= 160; r += 14) {
+    const steps = r === 0 ? 1 : Math.max(6, Math.round(r / 7));
+    for (let s = 0; s < steps; s++) {
+      const a = s / steps * Math.PI * 2 + r * 0.7;
+      const x = px + Math.cos(a) * r, z = pz + Math.sin(a) * r;
+      if (Math.hypot(x, z) > 380) continue;
+      let ok = heightAt(x, z) > minY;
+      for (let q = 0; ok && q < 8; q++) {
+        const qa = q / 8 * Math.PI * 2;
+        if (heightAt(x + Math.cos(qa) * 8, z + Math.sin(qa) * 8) < minY - 0.8) ok = false;
+      }
+      if (ok) return [x, z];
+    }
+  }
+  return [px, pz];
+}
+
+for (const lm of LANDMARKS) {
+  const minY = lm.id === 'spring' ? 2.7 : 3.4;
+  [lm.x, lm.z] = findSpot(lm.x, lm.z, minY);
+  const g = new THREE.Group();
+  const y = heightAt(lm.x, lm.z);
+  g.position.set(lm.x, y, lm.z);
+  lm.build(g, y);
+  scene.add(g);
+  lm.group = g;
+}
+window._landmarks = LANDMARKS;
+let lmCheckT = 0;
+
+function showJournal(lm, ix) {
+  const el = document.getElementById('journal');
+  document.getElementById('jr-kicker').textContent =
+    `FIELD JOURNAL — ENTRY ${foundSet.size}/${LANDMARKS.length}`;
+  document.getElementById('jr-name').textContent = lm.name;
+  document.getElementById('jr-body').textContent = lm.journal;
+  el.style.opacity = 1; el.style.transform = 'translateX(-50%) translateY(0)';
+  clearTimeout(showJournal._t);
+  showJournal._t = setTimeout(() => {
+    el.style.opacity = 0; el.style.transform = 'translateX(-50%) translateY(30px)';
+  }, 7000);
+}
+
+function landmarkUpdate(dt, t) {
+  // ambient animation: campfire flicker, waterfall shimmer
+  for (const lm of LANDMARKS) {
+    const u = lm.group.userData;
+    if (u.fireLight) u.fireLight.intensity = 11 + Math.sin(t * 11) * 2.5 + Math.sin(t * 23) * 1.5;
+    if (u.flame) u.flame.scale.y = 1 + Math.sin(t * 13) * 0.15;
+    if (u.fall) u.fall.material.opacity = 0.55 + Math.sin(t * 6) * 0.12;
+  }
+  lmCheckT -= dt;
+  if (lmCheckT > 0) return;
+  lmCheckT = 0.25;
+  let nearest = null, nearestD = 1e9;
+  for (const lm of LANDMARKS) {
+    const d = Math.hypot(player.x - lm.x, player.z - lm.z);
+    if (!foundSet.has(lm.id)) {
+      if (d < nearestD) { nearestD = d; nearest = lm; }
+      if (d < lm.r) {
+        foundSet.add(lm.id);
+        localStorage.setItem('fw_found', JSON.stringify([...foundSet]));
+        audio.stinger();
+        showJournal(lm);
+        renderNotes();
+        if (foundSet.size === LANDMARKS.length)
+          setTimeout(() => toast('SURVEY COMPLETE. The wilderness has been fully appreciated. It was always ready.', 6000), 7500);
+      }
+    }
+  }
+  // audio breadcrumb: a faint chime from the direction of the nearest
+  // unfound landmark — follow the music and the horizon pays off
+  if (nearest && audio.started && !audio.muted) {
+    landmarkUpdate._beaconT = (landmarkUpdate._beaconT || 0) - 0.25;
+    if (landmarkUpdate._beaconT <= 0) {
+      landmarkUpdate._beaconT = 14 + Math.random() * 10;
+      const dx = nearest.x - player.x, dz = nearest.z - player.z;
+      const ang = Math.atan2(dx, dz) - player.yaw;        // relative bearing
+      const pan = Math.max(-1, Math.min(1, Math.sin(ang)));
+      const vol = Math.max(0.05, Math.min(0.3, 60 / nearestD * 0.1));
+      audio.beacon(pan, vol);
+    }
+  }
+}
+
 // ───────────────────────── fireflies (night) ─────────────────────────
 const FF_N = IS_TOUCH ? 80 : 140;
 const ffBase = [];
@@ -440,6 +642,7 @@ function updateFireflies(t, night) {
 // ───────────────────────── animals ─────────────────────────
 const animals = [];
 window._animals = animals;           // debug hook
+window._h = heightAt;
 window._player = null;
 const loader = new GLTFLoader();
 {
@@ -752,8 +955,9 @@ function toast(msg, ms = 2600) {
 function pick(arr) { return arr[Math.random() * arr.length | 0]; }
 function renderNotes() {
   const parts = Object.entries(score).map(([k, v]) => `${k} <b>${v}</b>`);
+  const j = `JOURNAL <b>${foundSet.size}</b>/${LANDMARKS.length}`;
   document.getElementById('notes').innerHTML =
-    'FIELD NOTES' + (parts.length ? ' — ' + parts.join(' · ') : ' — nothing documented yet');
+    j + '<br>FIELD NOTES' + (parts.length ? ' — ' + parts.join(' · ') : ' — nothing documented yet');
 }
 function renderHP() {
   document.getElementById('hpfill').style.width = Math.max(0, player.hp) + '%';
@@ -795,6 +999,7 @@ function tickBody() {
   scene.fog.color.copy(FOG_DAY).lerp(FOG_NIGHT, night);
   scene.background.copy(scene.fog.color);
   updateFireflies(t, night);
+  landmarkUpdate(dt, t);
   if (window._cloudMat) {
     window._cloudMat.color.setHex(0xfff1de).lerp(new THREE.Color(0x2a3245), night);
     window._cloudMat.opacity = 0.92 - night * 0.45;

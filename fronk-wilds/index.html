@@ -65,6 +65,14 @@
   <div id="crosshair"></div>
   <div id="notes"></div>
   <div id="toast"></div>
+  <div id="journal" style="position:absolute;left:50%;bottom:18%;transform:translateX(-50%) translateY(30px);
+    max-width:min(480px,88%);background:rgba(26,19,10,.92);border:1px solid rgba(217,164,65,.5);
+    border-radius:14px;padding:18px 22px;opacity:0;transition:opacity .5s,transform .5s;
+    box-shadow:0 12px 40px rgba(0,0,0,.6)">
+    <div id="jr-kicker" style="font-size:11px;letter-spacing:.18em;color:#d9a441;font-weight:700;margin-bottom:6px"></div>
+    <div id="jr-name" style="font-family:Georgia,serif;font-size:20px;font-weight:700;margin-bottom:6px"></div>
+    <div id="jr-body" style="font-size:14px;line-height:1.55;opacity:.9"></div>
+  </div>
   <div id="hp"><div id="hpfill"></div></div>
   <div id="mute" style="position:absolute;top:max(34px,calc(env(safe-area-inset-top) + 20px));right:16px;
     font-size:20px;pointer-events:auto;cursor:pointer;opacity:.8">🔊</div>
@@ -91,6 +99,6 @@
   "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
 }}
 </script>
-<script type="module" src="game.js?v=9"></script>
+<script type="module" src="game.js?v=10"></script>
 </body>
 </html>

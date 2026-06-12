@@ -252,6 +252,28 @@ export class AudioEngine {
     }
   }
 
+  beacon(pan = 0, vol = 0.15) {       // distant chime toward a landmark
+    if (!this.started) return;
+    const C = this.ctx, root = ROOTS[this._rootIx];
+    const make = (deg, when, v) => {
+      const o = C.createOscillator(); o.type = 'sine';
+      o.frequency.value = noteHz(root, deg, 1);
+      const g = C.createGain();
+      const t0 = C.currentTime + when;
+      g.gain.setValueAtTime(0, t0);
+      g.gain.linearRampToValueAtTime(v, t0 + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0004, t0 + 2.4);
+      let tail = g;
+      if (C.createStereoPanner) {
+        const p = C.createStereoPanner(); p.pan.value = pan;
+        g.connect(p); tail = p;
+      }
+      tail.connect(this.verb); tail.connect(this.echo);
+      o.start(t0); o.stop(t0 + 2.5);
+    };
+    make(7, 0, vol); make(9, 0.28, vol * 0.7);
+  }
+
   setMuted(m) {
     this.muted = m;
     if (this.master) this.master.gain.value = m ? 0 : 0.9;
