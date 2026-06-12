@@ -988,6 +988,7 @@ function setAnim(a, frag, once = false) {
   if (once) { next.setLoop(THREE.LoopOnce); next.clampWhenFinished = true; }
   else next.setLoop(THREE.LoopRepeat);
   if (a.cur) { next.crossFadeFrom(a.cur, 0.22, false); }
+  next.timeScale = a.limpTs || 1;
   next.play();
   a.cur = next;
 }
@@ -1061,10 +1062,10 @@ function animalUpdate(a, dt) {
         }
         if (player.hp < 95) {
           player.hp = Math.min(100, player.hp + 40); renderHP();
-          toast('You open it. You eat the insides so yours keep working.');
+          say('harvest');
         } else if (player.meat < 3) {
           player.meat++; renderNotes();
-          toast('The insides come with you. The woods waste nothing. Neither do you.');
+          if (player.meat >= 3) say('packFull'); else say('harvest');
           if (player.meat === 3 && !saidFullPack) {
             saidFullPack = true;
             setTimeout(() => toast('Everything downwind knows what you are carrying.', 5200), 3400);
@@ -1165,14 +1166,18 @@ function animalUpdate(a, dt) {
       }
     } else wander(a, dt);
   } else {                                    // ── prey brain
-    if (a.state === 'waddle') {
-      // gut-shot: it limps away from you, bleeding. It will lie down.
+    if (a.state === 'wounded') {
+      // it runs hurt — slower than you, leaving blood. The pace is the
+      // game: you gain on it walking, lose ground while you draw.
       a.bleedT -= dt;
-      a.dir = lerpAngle(a.dir, Math.atan2(-dx, -dz), dt * 1.5);
-      setAnim(a, 'Walk');
-      stepAnimal(a, 1.15, dt);
+      a.dir = lerpAngle(a.dir, Math.atan2(-dx, -dz) + Math.sin(clock.elapsedTime * 0.7) * 0.3, dt * 2);
+      setAnim(a, a.wound.speed < 0.3 ? 'Walk' : 'Gallop');
+      stepAnimal(a, a.cfg.gallop * a.wound.speed, dt);
       dropBlood(a);
-      if (a.bleedT <= 0) killAnimal(a, true);   // bleed-out
+      if (a.bleedT <= 0) {
+        if (a.bleedFatal) killAnimal(a, true);          // it lies down
+        else { a.state = 'flee'; a.t = 4; a.limpTs = 0.8; } // it clots; it survives, marked
+      }
     } else if (a.state === 'flee') {
       a.t -= dt;
       setAnim(a, 'Gallop');
@@ -1181,7 +1186,7 @@ function animalUpdate(a, dt) {
         dropBlood(a);
         a.bleeding -= dt;
         if (a.bleeding <= 0) {
-          if (a.bleedFatal) { a.state = 'waddle'; a.bleedT = 6 + Math.random() * 8; }
+          if (a.bleedFatal) { a.state = 'wounded'; a.wound = WOUNDS.vitals; a.limpTs = 0.55; a.bleedT = 6 + Math.random() * 8; a.bleedFatal = true; }
           else a.bleeding = 0;   // shallow wound — it clots, it remembers
         }
       }
@@ -1253,7 +1258,7 @@ function spookHerd(a) {
   const p = a.obj.position;
   for (const o of animals) {
     if (o === a || o.herdId !== a.herdId || o.dead
-        || o.state === 'flee' || o.state === 'waddle') continue;
+        || o.state === 'flee' || o.state === 'wounded') continue;
     const dx = o.obj.position.x - p.x, dz = o.obj.position.z - p.z;
     if (dx * dx + dz * dz > 625) continue;  // 25m
     o.state = 'flee'; o.t = 5 + Math.random() * 4;
@@ -1405,17 +1410,16 @@ const VOICE = {
 
 function killAnimal(a, suffered = false) {
   a.dead = true; a.t = 75;   // carcasses linger — long enough for scavengers
-  a.suffered = suffered || !!a.bleeding || a.state === 'waddle';
+  a.suffered = suffered || !!a.bleeding || a.state === 'wounded';
   setAnim(a, 'Death', true);
   score[a.name] = (score[a.name] || 0) + 1;
   if (a.isCryptid) {
-    toast(pick(LINES[a.name]), 7000);
+    say('killCryptid', 7000);
     audio.stinger(); cryptid = null; a.t = 20;
-  } else if (a.cfg.hunts || a.cfg.territorial) {
-    toast(pick(LINES[a.name]));
-    audio.documented();
-  } else {
-    toast(pick(a.suffered ? VOICE.suffered : VOICE.peaceful), 3600);
+  } else if (a.name === 'Wolf') { say('killWolf'); audio.documented(); }
+  else if (a.name === 'Bull') { say('killBull'); audio.documented(); }
+  else {
+    say(a.suffered ? 'killSuffer' : (a.lastZone === 'head' ? 'killHead' : 'killClean'), 3800);
     audio.documented();
   }
   renderNotes();
@@ -1560,7 +1564,7 @@ window._player = player;
 player.y = heightAt(player.x, player.z);
 const score = {};
 const keys = {};
-let started = false, drawT = 0, drawing = false, dead = false, bobPhase = 0;
+let started = false, drawT = 0, holdT = 0, drawing = false, dead = false, bobPhase = 0;
 
 // ── what you carry, carries — meat and blood ride the wind ─────────
 // Packed meat (+6m per ◆) and fresh harvest-blood (+6m for 90s) widen
@@ -1699,6 +1703,30 @@ window._dbg = () => ({ started, dead, arrows: arrows.length,
 window._score = score;
 
 const _arrowAim = new THREE.Vector3();   // scratch — no per-frame allocs
+
+// ── wound zones — where the arrow lands decides how it dies ───────
+// speed = fraction of gallop while wounded; ts = anim timeScale (the
+// limp); bleedT = seconds to collapse when fatal; fatal = chance the
+// wound kills if untreated; instant = power needed for a clean kill.
+const WOUNDS = {
+  head:   { speed: 0.94, ts: 0.95, bleed: 8,            fatal: 0.15, instant: 0.5,  cat: 'woundHead' },
+  vitals: { speed: 0.55, ts: 0.55, bleedT: [9, 16],     fatal: 1,    instant: 0.78, cat: 'woundVitals' },
+  leg:    { speed: 0.42, ts: 0.50, bleed: 18,           fatal: 0.5,  instant: 99,   cat: 'woundLeg' },
+  gut:    { speed: 0.22, ts: 0.45, bleedT: [22, 40],    fatal: 1,    instant: 99,   cat: 'woundGut' },
+  hind:   { speed: 0.58, ts: 0.60, bleed: 16,           fatal: 0.6,  instant: 99,   cat: 'woundHind' },
+};
+
+function hitZone(an, hx, hy, hz) {
+  const ap = an.obj.position, r = an.cfg.r;
+  const fx = Math.sin(an.obj.rotation.y), fz = Math.cos(an.obj.rotation.y);
+  const fwd = ((hx - ap.x) * fx + (hz - ap.z) * fz) / r;          // -1 rear … +1 front
+  const up = (hy - (ap.y + r * 0.75)) / (r * 1.4);                // -1 low … +1 high
+  if (fwd > 0.45 && up > 0.3) return 'head';
+  if (up > 0.12 && fwd > -0.1) return 'vitals';
+  if (fwd > 0.12) return 'leg';
+  if (fwd < -0.25) return 'hind';
+  return 'gut';
+}
 function arrowUpdate(dt) {
   for (let i = arrows.length - 1; i >= 0; i--) {
     const a = arrows[i];
@@ -1720,10 +1748,17 @@ function arrowUpdate(dt) {
           Math.abs(dy) < an.cfg.r * 1.4) {
         if (audio.impact) audio.impact('flesh',
           Math.min(1, Math.hypot(a.m.position.x - player.x, a.m.position.z - player.z) / 60));
-        // upper 30% of the collision window + a real draw = clean kill.
-        // Sharpshooting matters.
-        const headshot = dy > an.cfg.r * 0.56 && a.power > 0.4;
-        an.hp -= headshot ? 999 : (a.power > 0.55 ? 2 : 1);
+        const zone = hitZone(an, a.m.position.x, a.m.position.y, a.m.position.z);
+        an.lastZone = zone;
+        const W = WOUNDS[zone];
+        const cleanKill = a.power >= W.instant;
+        if (an.cfg.hunts || an.cfg.territorial) {
+          an.hp -= cleanKill ? 999 : (a.power > 0.55 ? 2 : 1);
+        } else {
+          // prey: a wounded animal hit again goes down. Otherwise the
+          // zone decides everything.
+          an.hp -= (cleanKill || an.state === 'wounded') ? 999 : 0;
+        }
         // kill-feel: flesh always answers — a puff of blood at the wound
         bloodPuff(a.m.position.x, a.m.position.y, a.m.position.z);
         juiceT = Math.max(juiceT, 0.04);          // flesh hit: brief hitstop
@@ -1734,7 +1769,7 @@ function arrowUpdate(dt) {
           const fd = Math.hypot(a.m.position.x - a.ox,
                                 a.m.position.y - a.oy,
                                 a.m.position.z - a.oz);
-          if (fd > 35) toast(pick(LINES.longshot), 5200);
+          if (fd > 35) setTimeout(() => say('longShot', 5200), 1600);
         }
         else if (an.cfg.hunts || an.cfg.territorial) {
           // wounding a predator does not make it leave. It makes it sure.
@@ -1743,25 +1778,22 @@ function arrowUpdate(dt) {
           an.aggro = true;
           toast(an.isCryptid ? 'It felt that. It is coming to feed.' : 'Wounded. Now it knows what you are.');
         } else {
+          // prey, wounded: the zone writes the script from here
           setAnim(an, 'HitReact_Left', true);
-          setTimeout(() => { if (!an.dead) an.cur = null; }, 500);
-          // WHERE did it take the arrow? Rear hit = gut shot: it
-          // waddles off slowly and bleeds. You track it or you lose it.
-          const fx = Math.sin(an.obj.rotation.y), fz = Math.cos(an.obj.rotation.y);
-          const rx = a.m.position.x - ap.x, rz = a.m.position.z - ap.z;
-          const rear = (rx * fx + rz * fz) < -0.25;
+          setTimeout(() => { if (!an.dead) an.cur = null; }, 450);
           an._lastBlood = null;
-          if (rear) {
-            an.state = 'waddle';
-            an.bleedT = 22 + Math.random() * 18;     // it will bleed out
-            toast('Low. Bad shot.', 2400);
+          an.state = 'wounded';
+          an.wound = W;
+          an.limpTs = W.ts;
+          an.dir = Math.atan2(ap.x - player.x, ap.z - player.z);
+          if (W.bleedT) {                       // fatal countdown wound
+            an.bleedT = W.bleedT[0] + Math.random() * (W.bleedT[1] - W.bleedT[0]);
+            an.bleedFatal = true;
           } else {
-            an.state = 'flee'; an.t = 9;
-            an.bleeding = 14 + Math.random() * 8;     // bleeds while running
-            an.bleedFatal = a.power > 0.7 && Math.random() < 0.5;
-            an.dir = Math.atan2(ap.x - player.x, ap.z - player.z);
-            toast('Blood.', 2000);
+            an.bleedT = W.bleed;
+            an.bleedFatal = Math.random() < W.fatal;
           }
+          say(W.cat);
         }
         // kill-feel: the arrow stays in the body — it runs with your
         // work in it. attach() = worldToLocal reparent; leaves physics.
@@ -1949,6 +1981,200 @@ if (!IS_TOUCH) {
 }
 
 // ───────────────────────── HUD ─────────────────────────
+const LINES2 = {
+"killClean": [
+"He dropped before the sound did. Mercy travels faster than noise.",
+"One breath in, none out. That's as clean as this work gets.",
+"It folded like the ground had been waiting for it.",
+"Dead before the fear arrived. I tell myself that counts for something.",
+"The arrow ended the argument before it started.",
+"No last steps. No last anything. Just the quiet after.",
+"It went down still chewing. There are worse last meals than grass.",
+"Quick work. The only kind of kindness I still carry.",
+"One arrow, one ending. The math out here is simple.",
+"It never knew my name. Nothing out here does."
+],
+"killHead": [
+"Through the skull. The lights went out all at once, the way they should.",
+"Between the eyes. Whatever it was thinking, it finished none of it.",
+"The head shot is a door slamming. Nothing on the other side.",
+"It dropped mid-stride. The body ran a step the mind never took.",
+"Straight through the thinking part. No time left to be afraid.",
+"Skull shot. The cleanest sentence I know how to write."
+],
+"killSuffer": [
+"It took the long road out. I built that road.",
+"Slow. It watched me come. I owed it the watching back.",
+"I made dying a job, and it worked the whole shift.",
+"It bled out an hour of its life because my hand wasn't honest.",
+"Bad shot. The woods will forget it before I do.",
+"I gave it pain first and death second. Wrong order. My order.",
+"It kept trying to stand. Hope is the cruelest organ.",
+"Done now. The part of me that flinched went quiet years before it did."
+],
+"killWolf": [
+"The wolf came to collect. Wrong house.",
+"It hunted me like a job. I retired it.",
+"Teeth came for my throat and met fletching instead.",
+"One less shadow in the trees. The trees keep making more.",
+"We were both hunters. Tonight the title changed hands."
+],
+"killBull": [
+"A ton of angry meat, and one thin arrow with an opinion.",
+"It charged like a debt collector. I settled.",
+"The ground stopped shaking. So did my hands, eventually.",
+"Big things fall the same as small ones. Just louder.",
+"It wanted to bury me. The crows got a different appointment."
+],
+"killCryptid": [
+"The black stag is dead. The woods don't feel any emptier.",
+"I killed the thing that shouldn't be. Its blood is dark, and real, and mine.",
+"Some animals are questions. This one I answered the only way I know."
+],
+"woundHead": [
+"Skipped off the skull. I gave it a headache and a grudge.",
+"An inch from the off switch. Now it knows what I am.",
+"Grazed the bone. The worst lesson is the one it survives.",
+"It shook its head like a bad dream. I'm the dream.",
+"Glanced off the skull. The arrow lied to me by a finger's width."
+],
+"woundVitals": [
+"Caught the lungs. It's breathing on borrowed paper now.",
+"Neck. The clock inside it is winding down fast.",
+"It ran, but its blood didn't go with it.",
+"Lungs. Every step from here is a step it can't afford.",
+"The vitals took the hit. The rest of it just hasn't heard yet."
+],
+"woundLeg": [
+"Shoulder. It runs on three legs and borrowed time.",
+"Took the leg out from under its luck.",
+"It limps. I walk. The arithmetic favors me.",
+"Hobbled. Distance is a currency it can't spend anymore.",
+"Caught the shoulder. The arrow's riding along until I collect."
+],
+"woundGut": [
+"Gut shot. The slow kind. I hate the slow kind.",
+"Caught it low. Now we both wait, and only one of us hurts.",
+"Belly wound. Out here that's a sentence, not an injury.",
+"Gut. It'll lie down somewhere quiet, and I'll be there. I'm always there.",
+"Low and bad. My arrow turned the hours into the weapon."
+],
+"woundHind": [
+"Hindquarters. Ugly. It'll run far on fear alone.",
+"Caught it going away. An honest aim, an ugly wound.",
+"The rear took it. Muscle and panic, nothing that ends quick.",
+"Tagged the haunch. Now it's a long evening for both of us.",
+"Hind leg. It bolted carrying my mistake."
+],
+"bloodTrail": [
+"Red on green. The trail reads like a confession.",
+"Drops the size of coins. It's paying out as it goes.",
+"Dark blood, steady. The story has one ending now.",
+"The trail thins, then fattens. It stopped to think. They always do.",
+"Bright and frothing. Lungs. Won't be a long chapter.",
+"Blood doesn't lie. It's the only thing out here that doesn't."
+],
+"pursuit": [
+"It runs. I follow. We both already know how this goes.",
+"Branches whip past. Somewhere ahead, something is losing an argument with gravity.",
+"I don't chase fast. I chase certain.",
+"It's spending blood to buy distance. Bad exchange rate.",
+"Through the timber, after a heartbeat that isn't mine.",
+"Everything runs home when it's dying. I'm the thing waiting on the road."
+],
+"miss": [
+"Missed. The forest swallowed the arrow like it never happened.",
+"Clean miss. Even the trees looked away.",
+"Gone. Somewhere out there an arrow carries my name and nothing else.",
+"Wide. Dinner walked off wearing my pride.",
+"The bow did its part. The rest of it was me."
+],
+"longShot": [
+"From here to there is a prayer's distance. It got answered.",
+"The arrow flew so long I had time to doubt. The doubt arrived second.",
+"A shot like that isn't skill. It's a debt the wind decided to pay.",
+"It fell before the distance made sense. Some math you don't question."
+],
+"harvest": [
+"Knife in, steam out. The animal becomes supper. Nobody wins.",
+"I take the heart first. Respect, or hunger. Same thing now.",
+"Steam rises off the open animal like a soul with nowhere to be.",
+"I work the knife and don't think. Thinking is for before and after.",
+"Meat, hide, heat. It keeps me alive. That's the whole eulogy.",
+"Blood to the elbow. A body's just a pantry with a history."
+],
+"packFull": [
+"Pack's full. I walk slower carrying my reasons.",
+"Can't take another pound. The wolves get the rest. Call it tax.",
+"Heavy pack, light conscience. One of those is a lie."
+],
+"hungry": [
+"The hunger's gone past loud into quiet. The quiet is worse.",
+"My hands shake on the string. The body files its complaints in tremors.",
+"Empty going on hollow. The forest can smell it on me.",
+"I've started eyeing things I'd be ashamed to eat. Shame is negotiable.",
+"Starving is the body holding a grudge against the man steering it."
+],
+"nightFall": [
+"The light's packing up. Everything with teeth clocks in now.",
+"Dark coming on. Out here night isn't a time. It's a tenant.",
+"The sun quits early in these woods. Can't blame it.",
+"Dusk. The trees trade their shadows for longer ones.",
+"Night falls like a verdict. I find somewhere to appeal."
+],
+"dawn": [
+"Morning. Still here. The woods will try again tomorrow.",
+"Dawn comes up gray and grudging. Same as me.",
+"Made it to sunrise. Out here that's the only promotion.",
+"First light. The night counts its losses, and I'm not among them."
+],
+"wolfNear": [
+"Something is pacing me in the trees. Patient. Professional.",
+"I'm being shopped for.",
+"Eyes in the dark, keeping my pace. It's doing the same math I do.",
+"The birds went quiet. They never lie about company.",
+"There's a shape between the trees that's only there when I'm not looking."
+],
+"bullWarn": [
+"Head down, breath like a forge. It's already decided.",
+"The ground tells me first. Then the snort. Then the running.",
+"It paws the dirt like it's digging my spot."
+],
+"staredAt": [
+"The black stag is watching. It doesn't blink. Maybe it doesn't need to.",
+"It stands where no light goes and watches me work. Everyone's a critic.",
+"Those eyes again. Something out here hunts with my method and more patience."
+],
+"death": [
+"The cold came in like an old friend who never liked me.",
+"Turns out the forest eats what it kills too.",
+"Everything I took, paid back at once. The books balance.",
+"I was the warm thing this time."
+],
+"idle": [
+"The woods don't hate me. Hate takes interest. This is just appetite.",
+"I used to count the days. Then the days stopped being different.",
+"Every tree looks like the last one. Maybe it is. Maybe I'm circling.",
+"I talk to myself because the alternative is listening.",
+"Somewhere, people are eating food they never had to apologize to.",
+"The bow was a gift. Turned out to be a prophecy.",
+"Quiet again. Out here quiet is just the woods reloading.",
+"I eat what I kill. Some nights I wonder what keeps the same rule about me."
+]
+};   // the hunter's voice — 129 lines
+const _saidRecent = [];
+function say(cat, ms = 3400) {
+  const pool = LINES2 && LINES2[cat];
+  if (!pool || !pool.length) return;
+  let tries = 6, line;
+  do { line = pool[(Math.random() * pool.length) | 0]; }
+  while (_saidRecent.includes(line) && --tries > 0);
+  _saidRecent.push(line);
+  if (_saidRecent.length > 12) _saidRecent.shift();
+  toast(line, ms);
+}
+window._say = say;
+
 let toastTimer = null;
 function toast(msg, ms = 2600) {
   const el = document.getElementById('toast');
@@ -2043,6 +2269,25 @@ function tickBody() {
     g.position.x = Math.sin(t * 0.4) * 0.8;   // shimmer drift
   }
   window._night = night;
+  // ── the hunter talks to himself, sparingly ──
+  if (started && !dead) {
+    const M = tickBody;
+    if (night > 0.6 && !M._saidNight) { M._saidNight = true; M._saidDawn = false; say('nightFall', 4200); }
+    if (night < 0.15 && M._saidNight && !M._saidDawn) { M._saidDawn = true; M._saidNight = false; say('dawn', 4200); }
+    M._idleT = (M._idleT ?? 75) - dt;
+    if (M._idleT <= 0) { M._idleT = 100 + Math.random() * 80; if (Math.random() < 0.5) say('idle', 4600); }
+    // being stalked — first time the danger drone would be rising
+    let wd = 1e9;
+    for (const an2 of animals) if (an2.cfg.hunts && !an2.dead && an2.aggro)
+      wd = Math.min(wd, Math.hypot(an2.obj.position.x - player.x, an2.obj.position.z - player.z));
+    if (wd < 30 && (M._wolfSaidT ?? 0) < t - 45) { M._wolfSaidT = t; say('wolfNear', 3600); }
+    // following blood: near fresh blood while something out there is wounded
+    const hasWounded = animals.some(an2 => an2.state === 'wounded');
+    if (hasWounded) {
+      M._trailT = (M._trailT ?? 0) - dt;
+      if (M._trailT <= 0) { M._trailT = 18 + Math.random() * 14; say(Math.random() < 0.5 ? 'bloodTrail' : 'pursuit', 3400); }
+    } else M._trailT = 2;
+  }
 
   if (started && !dead) {
     // movement
@@ -2057,7 +2302,7 @@ function tickBody() {
       || (IS_TOUCH && stickMag > 0.92);
     noiseLevel = stickMag > 0.02 ? (sprinting ? 2 : 1) : 0;
     const sprint = sprinting ? 1.65 : 1;
-    const sp = 5.4 * sprint * (drawing ? 0.55 : 1) * (IS_TOUCH ? Math.max(stickMag, 0.25) : 1);
+    const sp = 5.4 * sprint * (drawing ? 0.35 : 1) * (IS_TOUCH ? Math.max(stickMag, 0.25) : 1);
     const sin = Math.sin(player.yaw), cos = Math.cos(player.yaw);
     let nx = player.x + (-sin * mz + cos * mx) * sp * dt;
     let nz = player.z + (-cos * mz - sin * mx) * sp * dt;
@@ -2076,9 +2321,11 @@ function tickBody() {
 
     // bow — at full draw it RAISES to your eye: grip near center,
     // nock at the cheek, slight zoom like focusing down the arrow
-    if (drawing) drawT = Math.min(1, drawT + dt / 0.85);
-    else drawT = Math.max(0, drawT - dt * 4);   // relax down if cancelled
-    if (drawing && drawT > 0 && audio.drawCreak) audio.drawCreak(drawT);
+    if (drawing) {
+      drawT = Math.min(1, drawT + dt / 1.6);    // a longbow takes its time
+      if (drawT >= 1) holdT += dt; else holdT = 0;
+    } else { drawT = Math.max(0, drawT - dt * 4); holdT = 0; }
+    if (drawing && drawT > 0 && audio.drawCreak) audio.drawCreak(Math.min(1, drawT + holdT * 0.12));
     document.getElementById('crosshair').classList.toggle('drawn', drawT > 0.5);
     const e = drawT * drawT * (3 - 2 * drawT);  // smoothstep — weighty
     bow.position.set(0.34 + (-0.055 - 0.34) * e,   // riser lands LEFT of the eye-line
@@ -2103,11 +2350,11 @@ function tickBody() {
       player.hp -= dt * 0.7; renderHP();
       if (!tickBody._hungerWarned || t - tickBody._hungerWarned > 30) {
         tickBody._hungerWarned = t;
-        toast('Hunger. Your body has begun eating itself. It will finish.');
+        say('hungry', 4200);
       }
       if (player.hp <= 0 && !dead) { dead = true;
         resetDrawState();
-        toast('Empty. The woods take back the meat that was you…', 4000);
+        say('death', 4200);
         setTimeout(() => { player.hp = 100; player.meat = 0;
           player.lastAte = clock.elapsedTime; player.x = 0; player.z = 26;
           dead = false; renderHP(); }, 3500);
@@ -2162,8 +2409,13 @@ function tickBody() {
   } else {
     camera.position.set(player.x, player.y + EYE, player.z);
     camera.rotation.order = 'YXZ';
-    camera.rotation.y = player.yaw;
-    camera.rotation.x = player.pitch;
+    // full draw is heavy: the aim breathes, and the longer you hold,
+    // the worse it gets. The sway is real — the arrow inherits it.
+    const swayA = drawT * drawT * 0.0026 + Math.min(holdT, 4) * 0.0012;
+    camera.rotation.y = player.yaw
+      + (Math.sin(t * 1.7) + 0.5 * Math.sin(t * 4.3)) * swayA;
+    camera.rotation.x = player.pitch
+      + (Math.cos(t * 2.3) * 0.8 + Math.sin(t * 5.1) * 0.4) * swayA;
     // kill-feel: release kick (pitch up, decays 120ms) + near-miss rattle
     if (kickT > 0) camera.rotation.x += 0.012 * (kickT / KICK_DUR);
     if (camShakeT > 0) {
