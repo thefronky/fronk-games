@@ -1054,12 +1054,21 @@ function animalUpdate(a, dt) {
       if (dd < 2.4) {
         a.eaten = true; a.t = Math.min(a.t, 9);
         player.lastAte = clock.elapsedTime;
+        bloodedUntil = clock.elapsedTime + 90;   // the opening gets on you
+        if (!saidBlooded) {
+          saidBlooded = true;
+          setTimeout(() => toast('You smell like the inside of something now.', 4600), 4800);
+        }
         if (player.hp < 95) {
           player.hp = Math.min(100, player.hp + 40); renderHP();
           toast('You open it. You eat the insides so yours keep working.');
         } else if (player.meat < 3) {
           player.meat++; renderNotes();
           toast('The insides come with you. The woods waste nothing. Neither do you.');
+          if (player.meat === 3 && !saidFullPack) {
+            saidFullPack = true;
+            setTimeout(() => toast('Everything downwind knows what you are carrying.', 5200), 3400);
+          }
         } else toast('You can carry no more. Whatever follows you gets the rest.');
       }
     }
@@ -1083,8 +1092,15 @@ function animalUpdate(a, dt) {
     a.attackCd -= dt;
     // wolves grow bolder after dark — wider trigger, and they don't come alone
     const night = window._night || 0;
+<<<<<<< ours
     const trigger = (a.cfg.aggroR || a.cfg.territorial)
       * (a.cfg.hunts && !a.isCryptid && night > 0.4 ? 1.3 : 1);
+=======
+    let trigger = (a.cfg.aggroR || a.cfg.territorial)
+      * (a.cfg.hunts && !a.isCryptid && night > 0.4 ? 1.25 : 1);
+    if (a.cfg.hunts) trigger += scentM;   // what you carry, carries
+    if (fireNear) trigger *= 0.5;         // the fire disagrees
+>>>>>>> theirs
     if (a.aggro && dist > trigger * 2.2) {    // lost you
       a.aggro = false; a.warned = false; a.circleT = 0; a.packBias = 0;
       if (a.state === 'warn' || a.state === 'stare') { a.state = 'idle'; a.t = 1; }
@@ -1259,9 +1275,11 @@ function wander(a, dt) {
     a.t = 2.5 + Math.random() * 5;
     if (a.state === 'walk') {
       a.dir += (Math.random() - 0.5) * 2.4;
-      // after dark, wandering wolves drift loosely toward the smell of you
-      if (a.cfg.hunts && !a.isCryptid && (window._night || 0) > 0.5
-          && Math.random() < 0.5) {
+      // after dark — or when you reek of meat and harvest-blood —
+      // wandering wolves drift loosely toward the smell of you
+      if (a.cfg.hunts && !a.isCryptid && !fireNear
+          && ((window._night || 0) > 0.5 || scentM > 0)
+          && Math.random() < (scentM > 0 ? 0.72 : 0.5)) {
         const p = a.obj.position;
         a.dir = Math.atan2(player.x - p.x, player.z - p.z)
           + (Math.random() - 0.5) * 1.2;
@@ -1549,6 +1567,46 @@ const score = {};
 const keys = {};
 let started = false, drawT = 0, drawing = false, dead = false, bobPhase = 0;
 
+// ── what you carry, carries — meat and blood ride the wind ─────────
+// Packed meat (+6m per ◆) and fresh harvest-blood (+6m for 90s) widen
+// every hunter's trigger radius. Near the camp fire it all halves:
+// sanctuary, never explained. Computed once per frame into scalars.
+const CAMP_X = -180, CAMP_Z = -160, CAMP_SAFE = 10;
+let bloodedUntil = -99, scentM = 0, fireNear = false;
+let saidBlooded = false, saidFullPack = false, sawNight = false;
+
+// the meat you died holding waits where you fell — one mound, reused
+const cacheMesh = new THREE.Mesh(
+  new THREE.IcosahedronGeometry(0.42, 0),
+  new THREE.MeshStandardMaterial({ color: 0x4a1410, roughness: 0.95 }));
+cacheMesh.scale.set(1.3, 0.55, 1.3);
+cacheMesh.visible = false;
+scene.add(cacheMesh);
+let meatCache = null;            // { x, z, n }
+
+function dropMeatCache() {
+  if (player.meat <= 0) return;
+  meatCache = { x: player.x, z: player.z, n: player.meat };
+  player.meat = 0; renderNotes();
+  cacheMesh.position.set(meatCache.x,
+    heightAt(meatCache.x, meatCache.z) + 0.16, meatCache.z);
+  cacheMesh.visible = true;
+}
+
+function cacheUpdate(t) {
+  // same shape as a carcass: stoop, take back what kept
+  if (Math.hypot(player.x - meatCache.x, player.z - meatCache.z) > 2.4) return;
+  let n = meatCache.n;
+  if (player.hp < 95 && n > 0) {
+    player.hp = Math.min(100, player.hp + 40); renderHP(); n--;
+  }
+  while (n > 0 && player.meat < 3) { player.meat++; n--; }
+  player.lastAte = t; bloodedUntil = t + 90;
+  renderNotes();
+  toast('The meat you died with. Something ate around it. Take the rest.', 4600);
+  meatCache = null; cacheMesh.visible = false;
+}
+
 function hurtPlayer(dmg) {
   if (dead) return;
   player.hp -= dmg; player.lastHit = clock.elapsedTime;
@@ -1560,9 +1618,13 @@ function hurtPlayer(dmg) {
   if (player.hp <= 0) {
     dead = true;
     resetDrawState();
+    dropMeatCache();               // your body fed something. Some keeps.
+    sawNight = false;              // no dawn credit for the dead
     toast(LINES.death, 4000);
     setTimeout(() => {
-      player.hp = 100; player.x = 0; player.z = 26; dead = false; renderHP();
+      player.hp = 100; player.x = 0; player.z = 26; dead = false;
+      player.lastAte = clock.elapsedTime;   // restarted, not starved
+      renderHP();
     }, 3500);
   }
   renderHP();
@@ -2067,6 +2129,19 @@ function tickBody() {
       player.hp = Math.min(100, player.hp + dt * 6); renderHP();
     }
 
+    // what fell with you, if you fell carrying
+    if (meatCache) cacheUpdate(t);
+
+    // dawn relief — the night ends and you are still in it
+    if (night > 0.65) sawNight = true;
+    else if (sawNight && night < 0.05) {
+      sawNight = false;
+      toast('Morning. You are still the eater.', 5200);
+      if (typeof audio._motif === 'function') {
+        try { audio._motif(); } catch (e) { /* the hymn is optional */ }
+      }
+    }
+
     // feed the score
     let wolfDist = 999;
     for (const a of animals)
@@ -2107,6 +2182,7 @@ function tickBody() {
 
   window._tickInfo = { f: (window._tickInfo?.f || 0) + 1, n: animals.length,
                        px: Math.round(player.x), pz: Math.round(player.z) };
+<<<<<<< ours
   // kill-feel hitstop: a connected arrow holds the world at 5% speed
   // for a few real frames (0.04s flesh / 0.09s lethal). No setTimeout —
   // juiceT burns down on real dt, world dt gets scaled while it lasts.
@@ -2114,6 +2190,14 @@ function tickBody() {
   if (juiceT > 0) { juiceT -= dt; wdt = dt * 0.05; }
   for (const a of animals) animalUpdate(a, wdt);
   arrowUpdate(wdt);
+=======
+  // scent + sanctuary — once per frame, every brain reads the same air
+  scentM = started ? player.meat * 6 + (t < bloodedUntil ? 6 : 0) : 0;
+  fireNear = started
+    && Math.hypot(player.x - CAMP_X, player.z - CAMP_Z) < CAMP_SAFE;
+  for (const a of animals) animalUpdate(a, dt);
+  arrowUpdate(dt);
+>>>>>>> theirs
   if (USE_POST) {
     // night needs a softer bloom threshold so fireflies/stars breathe
     bloomPass.threshold = 0.85 - (window._night || 0) * 0.38;
