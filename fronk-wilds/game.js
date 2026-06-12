@@ -1,6 +1,7 @@
 // FRONK WILDS — open-world scout-survey (hunting) game
 // Three.js r160, Quaternius CC0 animated animals, all procedural world.
-window._V = 12;
+window._V = 13;
+window._spawnCryptid = () => spawnCryptid();   // debug
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
@@ -27,8 +28,16 @@ const SPECIES = {
   Deer: { n: 6,  speed: 3.0, gallop: 10.5, hp: 1, flee: 30, r: 1.5 },
   Stag: { n: 3,  speed: 2.7, gallop: 10.0, hp: 2, flee: 26, r: 1.7 },
   Fox:  { n: 4,  speed: 3.4, gallop: 11.5, hp: 1, flee: 22, r: 1.0 },
-  Wolf: { n: 3,  speed: 3.2, gallop: 8.8,  hp: 2, flee: 0,  r: 1.2, hunts: true },
+  Wolf: { n: 3,  speed: 3.2, gallop: 8.8,  hp: 2, flee: 0,  r: 1.2,
+          hunts: true, aggroR: 38, dmg: 22 },
+  Bull: { n: 3,  speed: 2.2, gallop: 9.6,  hp: 3, flee: 0,  r: 1.7,
+          territorial: 16, dmg: 30 },   // wanders calm — until you're close
 };
+
+// the rare one. Night only, hunts YOU, glows in the dark.
+const CRYPTID_CFG = { speed: 3.6, gallop: 11.8, hp: 5, flee: 0, r: 1.7,
+                      hunts: true, aggroR: 64, dmg: 40 };
+const CRYPTID_CHANCE = 0.45;     // per night
 
 const LINES = {
   Deer: ['Deer documented. It is at peace now. You did this.',
@@ -39,6 +48,9 @@ const LINES = {
          'The fox has been fully surveyed. Forever.'],
   Wolf: ['The wolf’s project has been cancelled.',
          'Wolf neutralized. It started it. This is documented.'],
+  Bull: ['The bull disagreed with your presence. The bull has been overruled.',
+         'Bull down. It charged first. Witnesses: the grass.'],
+  '???': ['THE HOLLOW STAG IS DOWN. Whatever it was — it isn’t anymore. Sleep well, if you can.'],
   wound: ['Wounded. It remembers your face now.',
           'A graze. The paperwork calls this “partial data.”'],
   bite:  ['The wolf disagrees with the survey.',
@@ -812,16 +824,26 @@ function animalUpdate(a, dt) {
   const dx = player.x - p.x, dz = player.z - p.z;
   const dist = Math.hypot(dx, dz);
 
-  if (a.cfg.hunts) {                          // ── wolf brain
+  if (a.cfg.hunts || a.cfg.territorial) {     // ── predator / territorial brain
     a.attackCd -= dt;
-    if (dist < 2.6) {
-      a.state = 'attack';
-      if (a.attackCd <= 0) { setAnim(a, 'Attack', true); a.attackCd = 1.4; hurtPlayer(22); setTimeout(() => { if (!a.dead) a.cur = null; }, 700); }
-    } else if (dist < 38) {
-      a.state = 'stalk'; a.dir = Math.atan2(dx, dz);
-      const sp = dist < 17 ? a.cfg.gallop : a.cfg.speed;
-      setAnim(a, dist < 17 ? 'Gallop' : 'Walk');
-      stepAnimal(a, sp, dt);
+    const trigger = a.cfg.aggroR || a.cfg.territorial;
+    if (a.aggro && dist > trigger * 2.2) a.aggro = false;   // lost you
+    if (dist < 2.8) {
+      a.state = 'attack'; a.aggro = true;
+      if (a.attackCd <= 0) {
+        setAnim(a, 'Attack', true); a.attackCd = 1.5;
+        hurtPlayer(a.cfg.dmg || 22);
+        setTimeout(() => { if (!a.dead) a.cur = null; }, 700);
+      }
+    } else if (a.aggro || dist < trigger) {
+      a.aggro = true;
+      a.state = 'stalk';
+      // the cryptid circles as it closes — unsettling, hard to hit
+      const drift = a.isCryptid ? Math.sin(clock.elapsedTime * 0.9) * 0.55 : 0;
+      a.dir = Math.atan2(dx, dz) + drift;
+      const fast = dist < (a.isCryptid ? 30 : 17);
+      setAnim(a, fast ? 'Gallop' : 'Walk');
+      stepAnimal(a, fast ? a.cfg.gallop : a.cfg.speed, dt);
     } else wander(a, dt);
   } else {                                    // ── prey brain
     if (a.state === 'flee') {
@@ -871,9 +893,81 @@ function killAnimal(a) {
   a.dead = true; a.t = 9;
   setAnim(a, 'Death', true);
   score[a.name] = (score[a.name] || 0) + 1;
-  toast(pick(LINES[a.name]));
-  audio.documented();
+  toast(pick(LINES[a.name]), a.isCryptid ? 7000 : 2600);
+  if (a.isCryptid) { audio.stinger(); cryptid = null; a.t = 20; }
+  else audio.documented();
   renderNotes();
+}
+
+// ── the Hollow Stag — rare, night-only, and it hunts you ──────────
+let cryptid = null, nightRolled = false;
+
+function spawnCryptid() {
+  const prefab = prefabs.Stag;
+  if (!prefab) return;
+  const obj = SkeletonUtils.clone(prefab.scene);
+  obj.traverse(o => {
+    if (o.isMesh || o.isSkinnedMesh) {
+      o.castShadow = true;
+      o.material = new THREE.MeshStandardMaterial({
+        color: 0x05060a, roughness: 0.95,
+        emissive: 0x0e3a3e, emissiveIntensity: 0.65,   // ghost-rim for bloom
+      });
+    }
+  });
+  // glowing eyes on the head bone, if the rig names one
+  obj.traverse(o => {
+    if (o.isBone && /head/i.test(o.name) && !o.userData.eyed) {
+      o.userData.eyed = true;
+      const eyeM = new THREE.MeshStandardMaterial({ color: 0xbffcf2,
+        emissive: 0x7df5e2, emissiveIntensity: 4 });
+      for (const s of [-0.09, 0.09]) {
+        const e = new THREE.Mesh(new THREE.SphereGeometry(0.035, 6, 6), eyeM);
+        e.position.set(s, 0.12, 0.16);
+        o.add(e);
+      }
+    }
+  });
+  const glow = new THREE.PointLight(0x52e8d8, 5, 13, 2);
+  glow.position.y = 1.9;
+  obj.add(glow);
+  obj.scale.setScalar(1.18);
+  // appears in the dark, far enough that you see the eyes first
+  const ang = Math.random() * Math.PI * 2, d = 70 + Math.random() * 30;
+  let x = player.x + Math.cos(ang) * d, z = player.z + Math.sin(ang) * d;
+  const lim = WORLD * 0.45;
+  x = Math.max(-lim, Math.min(lim, x)); z = Math.max(-lim, Math.min(lim, z));
+  obj.position.set(x, heightAt(x, z), z);
+  scene.add(obj);
+  const mixer = new THREE.AnimationMixer(obj);
+  const acts = {};
+  for (const frag of ['Idle', 'Eating', 'Walk', 'Gallop', 'Death', 'HitReact_Left', 'Attack']) {
+    const clip = clipOf(prefab, frag);
+    if (clip) acts[frag] = mixer.clipAction(clip);
+  }
+  const a = { name: '???', cfg: CRYPTID_CFG, obj, mixer, acts, cur: null,
+              state: 'stalk', t: 0, dir: 0, hp: CRYPTID_CFG.hp, dead: false,
+              attackCd: 2, aggro: true, isCryptid: true };
+  setAnim(a, 'Walk');
+  animals.push(a);
+  cryptid = a;
+  setTimeout(() => toast('Something is out there. It has already seen you.', 5000), 2500);
+}
+
+function cryptidUpdate(night) {
+  if (night > 0.65 && !nightRolled) {
+    nightRolled = true;
+    if (!cryptid && Math.random() < CRYPTID_CHANCE) spawnCryptid();
+  }
+  if (night < 0.3) {
+    nightRolled = false;
+    if (cryptid && !cryptid.dead) {       // dawn — it leaves. For now.
+      scene.remove(cryptid.obj);
+      animals.splice(animals.indexOf(cryptid), 1);
+      cryptid = null;
+      toast('Whatever it was — it’s gone with the dark.', 4200);
+    }
+  }
 }
 
 // ───────────────────────── player ─────────────────────────
@@ -945,7 +1039,13 @@ function arrowUpdate(dt) {
           Math.abs(dy) < an.cfg.r * 1.4) {
         an.hp -= (a.power > 0.55 ? 2 : 1);
         if (an.hp <= 0) killAnimal(an);
-        else {
+        else if (an.cfg.hunts || an.cfg.territorial) {
+          // wounding a predator does not make it leave. It makes it sure.
+          setAnim(an, 'HitReact_Left', true);
+          setTimeout(() => { if (!an.dead) an.cur = null; }, 400);
+          an.aggro = true;
+          toast(an.isCryptid ? 'It noticed. It is coming.' : 'Wounded — and now it’s personal.');
+        } else {
           setAnim(an, 'HitReact_Left', true);
           setTimeout(() => { if (!an.dead) an.cur = null; }, 500);
           an.state = 'flee'; an.t = 8;
@@ -1114,7 +1214,8 @@ function renderNotes() {
   const parts = Object.entries(score).map(([k, v]) => `${k} <b>${v}</b>`);
   const j = `JOURNAL <b>${foundSet.size}</b>/${LANDMARKS.length}`;
   document.getElementById('notes').innerHTML =
-    j + '<br>FIELD NOTES' + (parts.length ? ' — ' + parts.join(' · ') : ' — nothing documented yet');
+    'TROPHIES' + (parts.length ? ' — ' + parts.join(' · ') : ' — none yet. The wilds are watching.')
+    + '<br>' + j;
 }
 function renderHP() {
   document.getElementById('hpfill').style.width = Math.max(0, player.hp) + '%';
@@ -1157,6 +1258,7 @@ function tickBody() {
   scene.background.copy(scene.fog.color);
   updateFireflies(t, night);
   updateMist(t, night);
+  if (started) cryptidUpdate(night);
   farDisc.material.color.copy(scene.fog.color);
   farDisc.position.x = player.x; farDisc.position.z = player.z;
   landmarkUpdate(dt, t);
