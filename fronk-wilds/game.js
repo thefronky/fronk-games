@@ -59,7 +59,7 @@ const LINES = {
           'A graze. The paperwork calls this “partial data.”'],
   bite:  ['The wolf disagrees with the survey.',
           'You have been bitten. Note it in the log.'],
-  death: 'YOU WERE SURVEYED BY WOLVES. The badge is awarded posthumously. Respawning…',
+  death: 'YOU WERE SURVEYED BY WOLVES. The badge is awarded posthumously.',
 };
 
 // ───────────────────────── renderer / scene ─────────────────────────
@@ -1058,11 +1058,11 @@ function animalUpdate(a, dt) {
         player.lastAte = clock.elapsedTime;
         if (player.hp < 95) {
           player.hp = Math.min(100, player.hp + 40); renderHP();
-          toast('You open it and take the organs. You eat where it fell. Warm.');
+          toast('You eat where it fell. Warm.');
         } else if (player.meat < 3) {
           player.meat++; renderNotes();
-          toast('Organs taken, meat packed. Nothing wasted.');
-        } else toast('You are carrying all the meat one scout can carry.');
+          toast('Nothing wasted.');
+        } else toast('Heavy enough already.');
       }
     }
     if (a.t <= 0) { scene.remove(a.obj); animals.splice(animals.indexOf(a), 1); spawn(a.name); }
@@ -1468,13 +1468,13 @@ function arrowUpdate(dt) {
           if (rear) {
             an.state = 'waddle';
             an.bleedT = 22 + Math.random() * 18;     // it will bleed out
-            toast('Gut shot. It’s moving off slow, leaving blood. Follow it — or let the forest have it.', 4200);
+            toast('Low. Bad shot.', 2400);
           } else {
             an.state = 'flee'; an.t = 9;
             an.bleeding = 14 + Math.random() * 8;     // bleeds while running
             an.bleedFatal = a.power > 0.7 && Math.random() < 0.5;
             an.dir = Math.atan2(ap.x - player.x, ap.z - player.z);
-            toast('Hit. There’s blood in the grass.', 2800);
+            toast('Blood.', 2000);
           }
         }
         scene.remove(a.m); arrows.splice(i, 1); hit = true; break;
@@ -1813,11 +1813,15 @@ function tickBody() {
       player.hp -= dt * 0.7; renderHP();
       if (!tickBody._hungerWarned || t - tickBody._hungerWarned > 30) {
         tickBody._hungerWarned = t;
-        toast('Hunger. The wilds are patient. Hunt.');
+        toast('Your stomach turns on you.');
       }
       if (player.hp <= 0 && !dead) { dead = true;
+<<<<<<< ours
         resetDrawState();
         toast('The wilds kept you. Respawning…', 4000);
+=======
+        toast('You go out empty. Something eats well tonight.', 4000);
+>>>>>>> theirs
         setTimeout(() => { player.hp = 100; player.meat = 0;
           player.lastAte = clock.elapsedTime; player.x = 0; player.z = 26;
           dead = false; renderHP(); }, 3500);
@@ -1827,7 +1831,7 @@ function tickBody() {
     if (player.hp < 35 && player.meat > 0 && !dead) {
       player.meat--; player.hp = Math.min(100, player.hp + 40);
       player.lastAte = t; renderNotes(); renderHP();
-      toast('You eat from the pack. Keep moving.');
+      toast('You eat from the pack. Cold.');
     }
     // slow regen, only when fed
     if (!starving && t - player.lastHit > 8 && player.hp < 100) {
@@ -1928,9 +1932,6 @@ document.getElementById('play').addEventListener('click', () => {
   updateBowString(0);
   document.getElementById('hud').style.opacity = 1;
   try { audio.start(); } catch (e) { console.warn('audio unavailable:', e); }
-  setTimeout(() => toast(IS_TOUCH
-    ? 'Half-stick = stalk quietly, full stick = sprint (loud) · hold the button + DRAG to aim'
-    : 'WASD walks, Shift sprints (loud) · stalk slow + stay behind cover · hold click to draw', 6200), 1200);
   document.getElementById('title').style.opacity = 0;
   setTimeout(() => document.getElementById('title').style.display = 'none', 650);
   if (!IS_TOUCH) canvas.requestPointerLock();
