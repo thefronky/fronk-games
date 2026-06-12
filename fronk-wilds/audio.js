@@ -20,6 +20,8 @@
 //   audio.stinger() / audio.documented() / audio.thud() / audio.twang(power)
 //   audio.drawCreak(t01)        — call every frame while drawing the bow
 //   audio.impact(kind, dist01)  — 'flesh' | 'ground' | 'wood', 0=close 1=far
+//   audio.setGround(kind)       — 'grass' | 'rock' | 'sand' footstep material
+//   update() also reads s.altitude01 (0..1) — scales wind-gust intensity
 
 const PENT = [0, 3, 5, 7, 10];         // minor pentatonic degrees
 const ROOTS = [110.0, 98.0, 82.41, 73.42];   // A2 G2 E2 D2 — drift low
@@ -40,6 +42,11 @@ export class AudioEngine {
     this._chordIx = 0;
     this._rootIx = 0;
     this._padVoices = [];
+    this._ground = 'grass';            // footstep material (setGround)
+    this._stepL = false;               // alternating step pan
+    this._gustWait = 12 + Math.random() * 24;   // wind-gust state machine
+    this._gustDur = 0;
+    this._gustT = 0;
   }
 
   start() {
@@ -47,8 +54,17 @@ export class AudioEngine {
     this.started = true;
     const C = this.ctx = new (window.AudioContext || window.webkitAudioContext)();
     this.master = C.createGain();
-    this.master.gain.value = 0.9;
-    this.master.connect(C.destination);
+    this.master.gain.value = 1.0;
+    // master compressor — gentle glue + free sidechain pump when the
+    // foley bus hits hot. The compressor is the ONLY node touching
+    // the destination.
+    this.comp = C.createDynamicsCompressor();
+    this.comp.threshold.value = -18;
+    this.comp.knee.value = 12;
+    this.comp.ratio.value = 3.5;
+    this.comp.attack.value = 0.005;
+    this.comp.release.value = 0.2;
+    this.master.connect(this.comp).connect(C.destination);
 
     // ── shared reverb (generated impulse: 2.8s exponential noise tail)
     const len = C.sampleRate * 2.8;
@@ -71,13 +87,13 @@ export class AudioEngine {
     this.echoOut.connect(this.verb);
 
     // ── buses (music runs through a warm lowpass — no glassy edges)
-    this.musicBus = C.createGain(); this.musicBus.gain.value = 0.8;
+    this.musicBus = C.createGain(); this.musicBus.gain.value = 0.7;
     this.musicLp = C.createBiquadFilter();
     this.musicLp.type = 'lowpass'; this.musicLp.frequency.value = 1450;
     this.musicLp.Q.value = 0.5;
     this.musicBus.connect(this.musicLp);
     this.musicLp.connect(this.master); this.musicLp.connect(this.verb);
-    this.foleyBus = C.createGain(); this.foleyBus.gain.value = 0.85;
+    this.foleyBus = C.createGain(); this.foleyBus.gain.value = 1.15;   // hot into comp = pump
     this.foleyBus.connect(this.master);
     this._musicLevel = this.musicBus.gain.value;   // for sidechain restore
 
@@ -240,6 +256,7 @@ export class AudioEngine {
     const root = ROOTS[this._rootIx];
     [0, 2, 4, 7, 9].forEach((d, i) =>
       this._pluck(noteHz(root, d, 1), 0.62 - i * 0.06, i * 0.13));
+    this._pluck(noteHz(root, 0, -1), 0.55, 0);   // low body under the arp
     const t = this.ctx.currentTime;
     this.verbGain.gain.setTargetAtTime(0.9, t, 0.1);
     this.verbGain.gain.setTargetAtTime(0.5, t + 1.5, 2);
@@ -249,6 +266,7 @@ export class AudioEngine {
     const root = ROOTS[this._rootIx];
     this._pluck(noteHz(root, 4, 0), 0.5, 0);
     this._pluck(noteHz(root, 7, 0), 0.4, 0.16);
+    this._pluck(noteHz(root, 0, -1), 0.34, 0.02);   // low body
   }
   // bow RELEASE — four simultaneous layers, like real foley:
   //   snap (string crack) + thwack (limb body) + string ring + arrow whoosh.
@@ -417,28 +435,92 @@ export class AudioEngine {
       burst(0.07, 0.03, 3200, 'bandpass', 2, 0.012);
     }
   }
-  thud() {                          // player hurt
+  thud() {                          // player hurt — gut punch
     if (!this.started) return;
     const C = this.ctx, t = C.currentTime;
-    const o = C.createOscillator(); o.frequency.value = 70;
-    o.frequency.exponentialRampToValueAtTime(36, t + 0.18);
-    const g = C.createGain();
-    g.gain.setValueAtTime(0.5, t);
-    g.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
-    o.connect(g).connect(this.foleyBus);
-    o.start(t); o.stop(t + 0.32);
+
+    // (a) body knock — the hit itself
+    {
+      const o = C.createOscillator(); o.frequency.value = 78;
+      o.frequency.exponentialRampToValueAtTime(38, t + 0.16);
+      const g = C.createGain();
+      g.gain.setValueAtTime(0.55, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.16);
+      o.connect(g).connect(this.foleyBus);
+      o.start(t); o.stop(t + 0.18);
+    }
+
+    // (b) sub drop — the floor falls out from under it
+    {
+      const o = C.createOscillator(); o.type = 'sine';
+      o.frequency.setValueAtTime(96, t);
+      o.frequency.exponentialRampToValueAtTime(26, t + 0.35);
+      const g = C.createGain();
+      g.gain.setValueAtTime(0.5, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+      o.connect(g).connect(this.foleyBus);
+      o.start(t); o.stop(t + 0.37);
+    }
+
+    // (c) dark grit — lowpassed noise burst, the texture of the blow
+    {
+      const src = C.createBufferSource(); src.buffer = this._shotNoise;
+      const f = C.createBiquadFilter(); f.type = 'lowpass';
+      f.frequency.value = 600;
+      const g = C.createGain();
+      g.gain.setValueAtTime(0.3, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+      src.connect(f).connect(g).connect(this.foleyBus);
+      src.start(t, Math.random() * 0.6, 0.14);
+    }
+
+    // (d) everything-duck — music AND reverb drop out for a beat,
+    // matching twang()'s duck pattern
+    const mg = this.musicBus.gain;
+    mg.cancelScheduledValues(t);
+    mg.setValueAtTime(mg.value, t);
+    mg.linearRampToValueAtTime(this._musicLevel * 0.18, t + 0.02);
+    mg.setTargetAtTime(this._musicLevel, t + 0.25, 0.3);
+    const vg = this.verbGain.gain;
+    vg.cancelScheduledValues(t);
+    vg.setValueAtTime(vg.value, t);
+    vg.linearRampToValueAtTime(0.15, t + 0.02);
+    vg.setTargetAtTime(0.5, t + 0.25, 0.3);
   }
-  _step(sprint) {                   // footstep tap (shared noise, no alloc)
+  setGround(kind) {                 // footstep material from the game
+    this._ground = (kind === 'rock' || kind === 'sand') ? kind : 'grass';
+  }
+  _step(sprint) {                   // footstep (shared noise, no alloc)
     const C = this.ctx, t = C.currentTime;
-    const src = C.createBufferSource();
-    src.buffer = this._shotNoise;
-    const f = C.createBiquadFilter(); f.type = 'lowpass';
-    f.frequency.value = 300 + Math.random() * 160;
-    const g = C.createGain();
-    g.gain.setValueAtTime(sprint ? 0.34 : 0.2, t);
-    g.gain.exponentialRampToValueAtTime(0.001, t + 0.07);
-    src.connect(f).connect(g).connect(this.foleyBus);
-    src.start(t, Math.random() * 0.6, 0.09);
+    // single persistent panner — steps alternate gently L/R
+    if (!this._stepPan && C.createStereoPanner) {
+      this._stepPan = C.createStereoPanner();
+      this._stepPan.connect(this.foleyBus);
+    }
+    const out = this._stepPan || this.foleyBus;
+    if (this._stepPan) {
+      this._stepL = !this._stepL;
+      this._stepPan.pan.setValueAtTime(this._stepL ? -0.12 : 0.12, t);
+    }
+    const lvl = sprint ? 1.0 : 0.6;   // walk vs sprint = one multiplier
+    const burst = (v, dur, fHz, type = 'lowpass', q = 0.7) => {
+      const src = C.createBufferSource(); src.buffer = this._shotNoise;
+      const f = C.createBiquadFilter(); f.type = type;
+      f.frequency.value = fHz; f.Q.value = q;
+      const g = C.createGain();
+      g.gain.setValueAtTime(v * lvl, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+      src.connect(f).connect(g).connect(out);
+      src.start(t, Math.random() * 0.6, dur + 0.02);
+    };
+    if (this._ground === 'rock') {        // sharper knock + tiny high click
+      burst(0.3, 0.05, 850 + Math.random() * 120, 'bandpass', 1.5);
+      burst(0.08, 0.02, 3400, 'bandpass', 2);
+    } else if (this._ground === 'sand') { // soft shuffle — longer, quieter
+      burst(0.22, 0.11, 460 + Math.random() * 90);
+    } else {                              // grass: the soft pat
+      burst(0.34, 0.07, 300 + Math.random() * 160);
+    }
   }
   _cricket() {
     const C = this.ctx, t = C.currentTime;
@@ -560,7 +642,7 @@ export class AudioEngine {
 
   setMuted(m) {
     this.muted = m;
-    if (this.master) this.master.gain.value = m ? 0 : 0.9;
+    if (this.master) this.master.gain.value = m ? 0 : 1.0;
   }
 
   // called every frame from the game loop
@@ -589,10 +671,32 @@ export class AudioEngine {
       if (this._creakT <= 0) { this._creakOn = false; this._silenceCreak(t); }
     }
 
-    // wind breathes
-    const breathe = 0.10 + 0.05 * Math.sin(t * 0.23) + 0.02 * Math.sin(t * 0.71);
-    this.windGain.gain.setTargetAtTime(breathe, t, 0.6);
-    this._windLp.frequency.setTargetAtTime(380 + 180 * Math.sin(t * 0.17), t, 0.8);
+    // wind breathes; occasional gusts sweep through, bigger up high.
+    // Pure math on the existing wind nodes — no new graph.
+    const alt = s.altitude01 || 0;
+    let gust = 0;
+    if (this._gustDur > 0) {                    // mid-gust
+      this._gustT += dt;
+      if (this._gustT >= this._gustDur) {
+        this._gustDur = 0;
+        this._gustWait = 12 + Math.random() * 24;
+      } else {
+        const ph = this._gustT / this._gustDur;          // 0..1
+        gust = Math.pow(Math.sin(Math.PI * ph), 1.5);    // sin^1.5 envelope
+      }
+    } else {
+      this._gustWait -= dt;
+      if (this._gustWait <= 0) {
+        this._gustDur = 3 + Math.random() * 3;
+        this._gustT = 0;
+      }
+    }
+    gust *= 1 + 1.4 * alt;                      // altitude: up to +140%
+    const breathe = 0.10 + 0.03 * alt
+      + 0.05 * Math.sin(t * 0.23) + 0.02 * Math.sin(t * 0.71);
+    this.windGain.gain.setTargetAtTime(breathe + gust * 0.12, t, 0.6);
+    this._windLp.frequency.setTargetAtTime(
+      380 + 180 * Math.sin(t * 0.17) + gust * 520, t, 0.8);
 
     // water by lake proximity (full inside 60m, silent past 220m)
     const lk = Math.max(0, Math.min(1, 1 - (s.lakeDist - 60) / 160));
@@ -664,7 +768,12 @@ export class AudioEngine {
           o.connect(g).connect(this.master);
           o.start(t + when); o.stop(t + when + 0.2);
         };
-        thump(0, 0.22 + urgency * 0.2); thump(0.17, 0.13 + urgency * 0.12);
+        thump(0, 0.30 + urgency * 0.24); thump(0.17, 0.17 + urgency * 0.14);
+        // per-beat music duck — paired setTargetAtTime only, no
+        // cancelScheduledValues, so it can't stomp a twang duck
+        const mg = this.musicBus.gain;
+        mg.setTargetAtTime(this._musicLevel * 0.7, t, 0.05);
+        mg.setTargetAtTime(this._musicLevel, t + 0.4, 0.25);
       }
     }
 
