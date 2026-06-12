@@ -1946,7 +1946,7 @@ canvas.addEventListener('webglcontextlost', (e) => {
 // ───────────────────────── boot ─────────────────────────
 renderNotes(); renderHP();
 loadAnimals().then(() => {
-  document.getElementById('loadmsg').textContent = 'the wilderness is ready. it was always ready.';
+  document.getElementById('loadmsg').textContent = 'it is ready. it was always hungry.';
 }).catch(e => {
   document.getElementById('loadmsg').textContent = 'asset load failed: ' + e;
 });
