@@ -1731,15 +1731,13 @@ function tickBody() {
   hemi.intensity = (0.72 - night * 0.62) * (1 - dawn * 0.18);
   scene.fog.color.copy(FOG_DAY).lerp(FOG_NIGHT, night);
   if (dawn > 0) scene.fog.color.lerp(FOG_DAWN, dawn * 0.65);
-  scene.fog.near = 60 - night * 24;     // night closes in
-  scene.fog.far = 340 - night * 110;
   scene.background.copy(scene.fog.color);
   // fog closes in after dark — dusk stays open, true night clamps the world to ~60m
   const fogClose = night * Math.sqrt(night);
-  scene.fog.near = 80 - 68 * fogClose;
-  scene.fog.far = 400 - 340 * fogClose;
+  scene.fog.near = 60 - 44 * fogClose;
+  scene.fog.far = 340 - 270 * fogClose;
   // moon rides opposite the sun — only shows once it clears the horizon
-  _moonDir.copy(sd).multiplyScalar(-1);
+  _moonDir.copy(_sunDir).multiplyScalar(-1);
   moon.position.set(player.x + _moonDir.x * 820, _moonDir.y * 820, player.z + _moonDir.z * 820);
   moon.material.opacity = night * Math.max(0, Math.min(1, (_moonDir.y - 0.06) * 6)) * 0.9;
   updateFireflies(t, night);
