@@ -1672,10 +1672,22 @@ const arrows = [];
 // existing lookAt-along-velocity orientation just works.
 const arrowTemplate = new THREE.Group();
 {
-  const woodM  = new THREE.MeshStandardMaterial({ color: 0xa8865a, roughness: 0.75 });
-  const steelM = new THREE.MeshStandardMaterial({ color: 0x3e444c, roughness: 0.35, metalness: 0.75 });
-  const hornM  = new THREE.MeshStandardMaterial({ color: 0x2e2418, roughness: 0.9 });
-  const fM     = new THREE.MeshStandardMaterial({ color: 0xc94f3a, roughness: 1, side: THREE.DoubleSide });
+  // colorful, faintly enchanted arrow — the shaft is a cool teal-violet
+  // that catches light, the head is mirror-bright so it GLINTS against
+  // the low sun, and a thin emissive band shimmers down the shaft.
+  const woodM  = new THREE.MeshStandardMaterial({ color: 0x3aa6c4, roughness: 0.3, metalness: 0.5,
+                                                  emissive: 0x16414f, emissiveIntensity: 0.5 });
+  const steelM = new THREE.MeshStandardMaterial({ color: 0xdfe9f2, roughness: 0.06, metalness: 1.0,
+                                                  emissive: 0x223040, emissiveIntensity: 0.35 });
+  const hornM  = new THREE.MeshStandardMaterial({ color: 0x6a4fb0, roughness: 0.5, metalness: 0.4 });
+  const fM     = new THREE.MeshStandardMaterial({ color: 0xff5a7a, roughness: 0.6, metalness: 0.2,
+                                                  emissive: 0x5a1024, emissiveIntensity: 0.4,
+                                                  side: THREE.DoubleSide });
+  const fM2    = new THREE.MeshStandardMaterial({ color: 0x6ad0ff, roughness: 0.6, metalness: 0.2,
+                                                  emissive: 0x12455f, emissiveIntensity: 0.4,
+                                                  side: THREE.DoubleSide });
+  const bandM  = new THREE.MeshStandardMaterial({ color: 0xfff0a8, roughness: 0.2, metalness: 0.3,
+                                                  emissive: 0xffcf5a, emissiveIntensity: 1.4 });
   // 0.78 m shaft, slightly tapered toward the head — centered on z
   const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.0055, 0.0075, 0.78, 6), woodM);
   shaft.rotation.x = Math.PI / 2;
@@ -1684,17 +1696,20 @@ const arrowTemplate = new THREE.Group();
   head.rotation.x = Math.PI / 2; head.position.z = 0.437;
   const collar = new THREE.Mesh(new THREE.CylinderGeometry(0.0085, 0.0085, 0.018, 6), steelM);
   collar.rotation.x = Math.PI / 2; collar.position.z = 0.382;
+  // thin glowing band near the head — the subtle glint that catches the eye
+  const band = new THREE.Mesh(new THREE.CylinderGeometry(0.0072, 0.0072, 0.012, 6), bandM);
+  band.rotation.x = Math.PI / 2; band.position.z = 0.31;
   // nock notch hint at the tail
   const nock = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.0055, 0.02, 5), hornM);
   nock.rotation.x = Math.PI / 2; nock.position.z = -0.396;
-  arrowTemplate.add(shaft, head, collar, nock);
+  arrowTemplate.add(shaft, head, collar, nock, band);
   // 3 fletches — thin doubled planes (two slightly splayed planes per
   // fletch fake real vane thickness for free)
   const fGeo = new THREE.PlaneGeometry(0.016, 0.085);
   for (let i = 0; i < 3; i++) {
     const ang = i * Math.PI * 2 / 3;
     for (let s = -1; s <= 1; s += 2) {
-      const f = new THREE.Mesh(fGeo, fM);
+      const f = new THREE.Mesh(fGeo, i === 1 ? fM2 : fM);
       f.position.z = -0.33;
       f.position.x = -Math.sin(ang) * 0.008;
       f.position.y =  Math.cos(ang) * 0.008;
