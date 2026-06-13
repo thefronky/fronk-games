@@ -21,13 +21,13 @@ const WORLD = 860;            // square world size
 const WATER_Y = 2.1;          // lake level
 const EYE = 1.7;
 const CFG = IS_TOUCH
-  ? { grass: 15000, trees: 340, bushes: 260, rocks: 60, px: 1.6, shadow: 1024, segs: 180 }
-  : { grass: 34000, trees: 540, bushes: 420, rocks: 90, px: 2, shadow: 2048, segs: 260 };
+  ? { grass: 22000, trees: 620, bushes: 380, rocks: 90, px: 2, shadow: 1536, segs: 230 }
+  : { grass: 50000, trees: 1100, bushes: 620, rocks: 130, px: 2.5, shadow: 3072, segs: 360 };
 
 const SPECIES = {
-  Deer: { n: 6,  speed: 3.0, gallop: 10.5, hp: 1, flee: 30, r: 1.5 },
-  Stag: { n: 3,  speed: 2.7, gallop: 10.0, hp: 2, flee: 26, r: 1.7 },
-  Fox:  { n: 4,  speed: 3.4, gallop: 11.5, hp: 1, flee: 22, r: 1.0 },
+  Deer: { n: 8,  speed: 3.0, gallop: 10.5, hp: 1, flee: 34, r: 1.5 },
+  Stag: { n: 4,  speed: 2.7, gallop: 10.0, hp: 2, flee: 30, r: 1.7 },
+  Fox:  { n: 5,  speed: 3.4, gallop: 11.5, hp: 1, flee: 26, r: 1.0 },
   Wolf: { n: 3,  speed: 3.2, gallop: 8.8,  hp: 2, flee: 0,  r: 1.2,
           hunts: true, aggroR: 38, dmg: 22, packR: 80 },
           // circles before committing; after dark the whole pack answers
@@ -466,23 +466,50 @@ function mergeGeoms(list) {
     geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
     return geo;
   };
-  const pineTrunk = new THREE.CylinderGeometry(0.32, 0.5, 3.2, 6);
-  pineTrunk.translate(0, 1.6, 0);
-  const p1 = new THREE.ConeGeometry(2.6, 4.4, 7);  p1.translate(0, 5.0, 0);
-  const p2 = new THREE.ConeGeometry(1.9, 3.4, 7);  p2.translate(0, 7.4, 0);
-  const p3 = new THREE.ConeGeometry(1.15, 2.3, 7); p3.translate(0, 9.4, 0);
-  const pineGeo = paintTwoTone(mergeGeoms([pineTrunk, p1, p2, p3]), pineTrunk,
+  // a branch limb: thin cylinder, tilted out + up, seated on the trunk
+  const mkBranch = (len, rad, ax, ay, az, yaw, tilt) => {
+    const g = new THREE.CylinderGeometry(rad * 0.5, rad, len, 5);
+    g.translate(0, len / 2, 0);            // base at origin, grows +y
+    g.rotateZ(tilt); g.rotateY(yaw);       // splay outward
+    g.translate(ax, ay, az);
+    return g;
+  };
+  // PINE — taller, layered cones + a ring of bare lower limbs (branches)
+  const pineTrunk = new THREE.CylinderGeometry(0.26, 0.46, 4.0, 7);
+  pineTrunk.translate(0, 2.0, 0);
+  const pineParts = [pineTrunk];
+  for (let i = 0; i < 5; i++) {            // bare branches up the trunk
+    const a = i / 5 * Math.PI * 2 + 0.6;
+    pineParts.push(mkBranch(1.5 - i * 0.12, 0.05, 0, 1.6 + i * 0.55, 0, a, 1.15));
+  }
+  const pc1 = new THREE.ConeGeometry(2.7, 4.6, 9); pc1.translate(0, 5.2, 0);
+  const pc2 = new THREE.ConeGeometry(2.0, 3.6, 9); pc2.translate(0, 7.6, 0);
+  const pc3 = new THREE.ConeGeometry(1.2, 2.6, 9); pc3.translate(0, 9.8, 0);
+  pineParts.push(pc1, pc2, pc3);
+  const pineTrunkN = mergeGeoms([pineTrunk, ...pineParts.slice(1, 6)]);  // trunk+branches = bark
+  const pineGeo = paintTwoTone(mergeGeoms(pineParts), pineTrunkN,
     0x6b4a2a, () => new THREE.Color().setHSL(0.27 + Math.random() * 0.03, 0.45,
-                                             0.30 + Math.random() * 0.06));
+                                             0.28 + Math.random() * 0.07));
 
-  const blTrunk = new THREE.CylinderGeometry(0.4, 0.58, 4.4, 6);
-  blTrunk.translate(0, 2.2, 0);
-  const b1 = new THREE.IcosahedronGeometry(2.5, 0); b1.translate(0, 6.0, 0);
-  const b2 = new THREE.IcosahedronGeometry(1.9, 0); b2.translate(1.5, 5.0, 0.5);
-  const b3 = new THREE.IcosahedronGeometry(1.7, 0); b3.translate(-1.4, 5.2, -0.4);
-  const broadGeo = paintTwoTone(mergeGeoms([blTrunk, b1, b2, b3]), blTrunk,
+  // BROADLEAF — real boughs (branches) fanning into clustered canopy blobs
+  const blTrunk = new THREE.CylinderGeometry(0.34, 0.6, 4.8, 7);
+  blTrunk.translate(0, 2.4, 0);
+  const blParts = [blTrunk];
+  const boughs = [];
+  for (let i = 0; i < 5; i++) {
+    const a = i / 5 * Math.PI * 2 + 0.3;
+    boughs.push(mkBranch(2.6, 0.11, 0, 3.6, 0, a, 0.8));
+  }
+  blParts.push(...boughs);
+  // canopy blobs perched at the bough tips
+  const blob = (r, x, y, z) => { const g = new THREE.IcosahedronGeometry(r, 1); g.translate(x, y, z); return g; };
+  blParts.push(blob(2.4, 0, 6.4, 0), blob(1.8, 1.9, 5.7, 0.4),
+               blob(1.7, -1.7, 5.9, -0.5), blob(1.6, 0.4, 5.4, 1.8),
+               blob(1.5, -0.6, 5.6, -1.7));
+  const blTrunkN = mergeGeoms([blTrunk, ...boughs]);
+  const broadGeo = paintTwoTone(mergeGeoms(blParts), blTrunkN,
     0x5d452c, () => new THREE.Color().setHSL(0.23 + Math.random() * 0.05, 0.5,
-                                             0.32 + Math.random() * 0.08));
+                                             0.30 + Math.random() * 0.09));
 
   const biTrunk = new THREE.CylinderGeometry(0.16, 0.22, 5.2, 6);
   biTrunk.translate(0, 2.6, 0);
@@ -1021,12 +1048,15 @@ function losBlocked(a) {
 }
 
 function spookRadius(a, dist) {
-  // hearing scales with your noise; sight needs a clear line.
-  // Sneak low behind cover and you can get close enough to whisper.
   let r = a.cfg.flee;
-  r *= noiseLevel === 2 ? 1.35 : noiseLevel === 1 ? 0.85 : 0.5;
-  if (dist < 60 && losBlocked(a)) r *= 0.45;
-  return Math.max(r, noiseLevel === 2 ? 18 : 6);   // sprint is LOUD
+  r *= noiseLevel === 2 ? 1.4 : noiseLevel === 1 ? 0.85 : 0.5;
+  if (dist < 60 && losBlocked(a)) r *= 0.42;       // cover buys you closer
+  return Math.max(r, noiseLevel === 2 ? 20 : 7);
+}
+// crowding panic: inside this and prey bolts no matter how quiet. The
+// close approach is the hard part; the long pot-shot is the reward.
+function panicRadius(a) {
+  return (a.cfg.flee * 0.42) * (noiseLevel === 0 ? 0.85 : 1);
 }
 
 function animalUpdate(a, dt) {
@@ -1191,7 +1221,7 @@ function animalUpdate(a, dt) {
         }
       }
       if (a.t <= 0 && dist > a.cfg.flee * 1.5) a.state = 'idle', a.t = 1 + Math.random() * 3;
-    } else if (dist < spookRadius(a, dist)) {
+    } else if (dist < panicRadius(a) || dist < spookRadius(a, dist)) {
       a.state = 'flee'; a.t = 5 + Math.random() * 4;
       a.dir = Math.atan2(-dx, -dz) + (Math.random() - 0.5) * 0.7;
       spookHerd(a);                       // one spooks, the herd spooks
@@ -1632,9 +1662,9 @@ function hurtPlayer(dmg) {
 // ───────────────────────── arrows ─────────────────────────
 // Ballistics: real longbow numbers. ~60 m/s at full draw, true 9.81
 // gravity, no drag, long lifetime so far shots actually land.
-const ARROW_SPEED_BASE = 34, ARROW_SPEED_DRAW = 26;   // v = 34 + power*26
-const ARROW_GRAVITY = 9.81;
-const ARROW_LIFE = 9, ARROW_STUCK_LIFE = 12;
+const ARROW_SPEED_BASE = 42, ARROW_SPEED_DRAW = 44;   // ≈86 m/s full draw — rifle-flat at range
+const ARROW_GRAVITY = 8.4;   // flatter, readable drop
+const ARROW_LIFE = 14, ARROW_STUCK_LIFE = 14;
 
 const arrows = [];
 // Real arrow template — built ONCE, cloned per shot (clones share
