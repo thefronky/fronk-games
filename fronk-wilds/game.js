@@ -26,17 +26,50 @@ const CFG = IS_TOUCH
   : { grass: 50000, trees: 4500, bushes: 620, rocks: 260, px: 2.5, shadow: 3072, segs: 360,
       flowers: 4000, tufts: 2600, mushrooms: 420, bedFlowers: 760 };
 
-const SPECIES = {
-  Deer: { n: 8,  speed: 3.0, gallop: 10.5, hp: 1, flee: 34, r: 1.5 },
-  Stag: { n: 4,  speed: 2.7, gallop: 10.0, hp: 2, flee: 30, r: 1.7 },
-  Fox:  { n: 5,  speed: 3.4, gallop: 11.5, hp: 1, flee: 26, r: 1.0 },
-  Wolf: { n: 3,  speed: 3.2, gallop: 8.8,  hp: 2, flee: 0,  r: 1.2,
-          hunts: true, aggroR: 38, dmg: 22, packR: 80 },
-          // circles before committing; after dark the whole pack answers
-  Bull: { n: 3,  speed: 2.2, gallop: 9.6,  hp: 3, flee: 0,  r: 1.7,
-          territorial: 16, dmg: 30 },
-          // wanders calm — gives ONE warning stomp, then it's a freight train
+// ── THE MENAGERIE ─────────────────────────────────────────────────
+// Field meanings:
+//   n         = how many spawn
+//   speed     = wander/walk m/s ; gallop = flee/charge m/s
+//   hp        = nominal hit-points (per-individual jitter on top, see spawn)
+//   flee      = base flee distance feeding the dB hearing model (0 = never flees)
+//   r         = body radius (hit + collision + cover)
+//   keen      = hearing acuity multiplier (fox keenest, cow dullest)
+//   aggroBias = added to the per-body aggression roll (0..1 after clamp)
+//   rear      = chance a cornered, high-aggression PREY rears + strikes
+//   gait      = 'sway' | 'smooth' | 'bound' | undefined (default trot)
+//   hpJit     = wide per-individual hp band (horse 8-10, bear 6-8)
+//   tanky     = soaks damage but keeps the prey flee-brain (horse)
+//   bearish   = Bull-rig stand-in with its own brain (bear)
+//   scale/tint = render overrides (bear: 1.8 scale, dark-brown 0x3a2616)
+const MENAGERIE = {
+  // ── prey ──
+  Deer:  { n: 8, speed: 3.0, gallop: 10.5, hp: 1, flee: 34, r: 1.5,
+           keen: 1.15, aggroBias: 0.10, rear: 0.55 },
+  Stag:  { n: 4, speed: 2.7, gallop: 10.0, hp: 2, flee: 30, r: 1.7,
+           keen: 1.05, aggroBias: 0.30, rear: 0.70 },
+  Fox:   { n: 5, speed: 3.4, gallop: 11.5, hp: 1, flee: 26, r: 1.0,
+           keen: 1.55, aggroBias: 0.05, rear: 0.25 },   // cunning, keenest ears
+  Cow:   { n: 4, speed: 1.9, gallop: 7.4,  hp: 2, flee: 20, r: 1.7,
+           keen: 0.55, aggroBias: 0.05, rear: 0.20, gait: 'sway' }, // docile, dull
+  Horse: { n: 3, speed: 3.2, gallop: 13.5, hp: 9, flee: 30, r: 1.7,
+           keen: 1.20, aggroBias: 0.25, rear: 0.65, gait: 'smooth',
+           hpJit: true, tanky: true },                  // 8-10 hits, impressive bolt
+  // ── predator / territorial ──
+  Wolf:  { n: 3, speed: 3.2, gallop: 8.8,  hp: 2, flee: 0,  r: 1.2,
+           keen: 1.6,  aggroBias: 0.45,
+           hunts: true, aggroR: 38, dmg: 22, packR: 80 },
+           // circles before committing; after dark the whole pack answers
+  Bull:  { n: 3, speed: 2.2, gallop: 9.6,  hp: 3, flee: 0,  r: 1.7,
+           keen: 0.8,  aggroBias: 0.6,
+           territorial: 16, dmg: 30 },
+           // wanders calm — gives ONE warning stomp, then it's a freight train
+  Bear:  { n: 2, speed: 2.4, gallop: 9.2,  hp: 7, flee: 0,  r: 2.1,
+           keen: 0.9,  aggroBias: 0.7,
+           hpJit: true, gait: 'bound', bearish: true,
+           aggroR: 22, dmg: 38, scale: 1.8, tint: 0x3a2616 },  // RARE
 };
+// SPECIES aliases MENAGERIE so every a.cfg.* reference keeps working.
+const SPECIES = MENAGERIE;
 
 // the rare one. Night only, hunts YOU, glows in the dark.
 // stareNear/stareFar: the band where it sometimes stops dead and just looks.
@@ -214,20 +247,36 @@ function ridged(x, z, f) {
 // runs per grass blade. Max gradient ≈ 1.5*h/r rise-over-run
 // (~0.6 here ≈ 32°): brisk to climb, never a cliff. matching rock
 // geometry is dropped at each anchor later (see OUTCROP geometry).
+// Each outcrop optionally elongates: ax = long-axis stretch (1 = round),
+// ang = the ridge's heading. outcropAt rotates the sample into the ridge
+// frame and divides the long axis by ax, so anisotropic hogbacks/walls
+// read as ridges instead of cones.
 const OUTCROPS = [
   { x: -46, z:  -8, r: 27, h: 11.5 },  // SW of spawn — vantage over the meadow
   { x: -10, z: -55, r: 30, h: 12.5 },  // lake NE shore — vantage over the water
   { x: 160, z:-140, r: 25, h: 11.0 },  // SE autumn ridge — overlooks the rust woods
-  { x:-180, z:  80, r: 26, h: 11.0 },  // NW pine — a perch in the deep conifers
+  { x:-180, z:  80, r: 26, h: 14.0 },  // NW pine — a perch in the deep conifers (raised)
   { x:  64, z: 120, r: 22, h:  9.0 },  // S meadow edge — a lower stepping perch
+  { x:  18, z: -18, r: 19, h:  8.5, ax: 2.2, ang: 1.2 },   // low hogback near spawn
+  { x: 120, z:  40, r: 28, h: 15.5, ax: 1.4, ang: 2.6 },   // tallest E shoulder
+  { x:-120, z:-120, r: 24, h: 12.0, ax: 1.7, ang: 0.3 },   // angled SW rock wall
+  { x:-250, z: -40, r: 30, h: 13.0 },                       // far-W massif (round)
 ];
 // added height from outcrops at (x,z). Cheap: a handful of hypots,
-// smoothstep falloff, no loops over noise octaves.
+// smoothstep falloff, no loops over noise octaves. cos/sin of each ridge
+// heading are cached on first call (_ca/_sa), 0-safe via ===undefined.
 function outcropAt(x, z) {
   let add = 0;
   for (let i = 0; i < OUTCROPS.length; i++) {
     const o = OUTCROPS[i];
-    const dx = x - o.x, dz = z - o.z;
+    let dx = x - o.x, dz = z - o.z;
+    const ax = o.ax || 1;
+    if (ax !== 1) {                    // rotate into the ridge frame, squeeze long axis
+      if (o._ca === undefined) { o._ca = Math.cos(o.ang || 0); o._sa = Math.sin(o.ang || 0); }
+      const lx = dx * o._ca + dz * o._sa;     // along the ridge
+      const lz = -dx * o._sa + dz * o._ca;    // across it
+      dx = lx / ax; dz = lz;
+    }
     const d2 = dx * dx + dz * dz, r2 = o.r * o.r;
     if (d2 >= r2) continue;
     let q = 1 - Math.sqrt(d2) / o.r;   // 1 at center → 0 at rim
@@ -430,6 +479,10 @@ const waterUniforms = { uTime: { value: 0 } };
 
 // ───────────────────────── wind-blown grass ─────────────────────────
 const windUniforms = { uTime: { value: 0 } };
+// interactive flower trample — xy = live player XZ (instant bend), zw = a
+// lagging "wake" that trails the player and eases back ~5s after you pass,
+// so a flattened corridor pops back upright behind you. Updated in tickBody.
+const trampleUniform = { value: new THREE.Vector4(0, 0, 0, 26) };
 {
   // curved, tapered blade — three of them in a tuft, color gradient
   // dark base → bright tip, tips bend hardest in the wind
@@ -579,14 +632,41 @@ const FLOWER_PALETTE = [
     cap.scale(1, 0.7, 1); cap.translate(0, 0.22, 0);
     return mergeGeoms([stem, cap]);
   };
-  const windHead = (intensity) => (sh) => {
+  // wind sway, and (for the flower field) interactive trample. When
+  // trample=true the shader reads the instance's world XZ off
+  // instanceMatrix[3] (modelMatrix is identity for these field meshes),
+  // measures distance to BOTH the live player (uTrample.xy) and the lagging
+  // wake (uTrample.zw), and folds the flower flat away from whichever is
+  // stronger. Pure vertex math — no per-instance JS, scales to thousands.
+  const windHead = (intensity, trample = false) => (sh) => {
     sh.uniforms.uTime = windUniforms.uTime;
-    sh.vertexShader = 'uniform float uTime;\n' + sh.vertexShader.replace('#include <begin_vertex>',
-      `#include <begin_vertex>
+    let header = 'uniform float uTime;\n';
+    let bend = `#include <begin_vertex>
        float bendY = position.y * position.y * ${intensity.toFixed(2)};
        float ph = instanceMatrix[3][0]*0.23 + instanceMatrix[3][2]*0.19;
        transformed.x += (sin(uTime*1.7+ph)+0.35*sin(uTime*3.3+ph*1.6))*bendY;
-       transformed.z += cos(uTime*1.3+ph)*bendY*0.6;`);
+       transformed.z += cos(uTime*1.3+ph)*bendY*0.6;`;
+    if (trample) {
+      sh.uniforms.uTrample = trampleUniform;
+      header += 'uniform vec4 uTrample;\n';
+      bend += `
+       vec2 iw = vec2(instanceMatrix[3][0], instanceMatrix[3][2]);
+       float dP = distance(iw, uTrample.xy);
+       float dW = distance(iw, uTrample.zw);
+       float amtP = 1.0 - smoothstep(0.0, 1.5, dP);
+       float amtW = 1.0 - smoothstep(0.0, 1.5, dW);
+       float amt; vec2 src;
+       if (amtP >= amtW) { amt = amtP; src = uTrample.xy; }
+       else              { amt = amtW; src = uTrample.zw; }
+       if (amt > 0.001) {
+         vec2 dir = normalize(iw - src + vec2(0.0001, 0.0));
+         float lay = clamp(position.y / 0.66, 0.0, 1.0) * amt;
+         transformed.x += dir.x * lay * 0.6;
+         transformed.z += dir.y * lay * 0.6;
+         transformed.y -= lay * position.y * 0.85;
+       }`;
+    }
+    sh.vertexShader = header + sh.vertexShader.replace('#include <begin_vertex>', bend);
   };
   const M=new THREE.Matrix4(), Q=new THREE.Quaternion(), S=new THREE.Vector3(), P=new THREE.Vector3(), E=new THREE.Euler();
   const SPAWN = { x: 0, z: 26 };
@@ -594,7 +674,7 @@ const FLOWER_PALETTE = [
   // shared vertex-colored, wind-swayed materials (one uniform each, prebuilt)
   const flowerMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1,
     emissive: 0x101006, emissiveIntensity: 0.3, side: THREE.DoubleSide });
-  flowerMat.onBeforeCompile = windHead(0.20);
+  flowerMat.onBeforeCompile = windHead(0.20, true);   // flowers trample underfoot
   const tuftMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1,
     emissive: 0x0a1206, emissiveIntensity: 0.25, side: THREE.DoubleSide });
   tuftMat.onBeforeCompile = windHead(0.16);
@@ -797,16 +877,18 @@ function mergeGeoms(list) {
     return g;
   };
   // PINE — taller, layered cones + a ring of bare lower limbs (branches)
-  const pineTrunk = new THREE.CylinderGeometry(0.26, 0.46, 4.0, 7);
-  pineTrunk.translate(0, 2.0, 0);
+  // trunk + branches + cones all raised so the lowest occluding geometry
+  // clears the ~2.8m jump-apex eye even at 0.8 min scale (no headbump).
+  const pineTrunk = new THREE.CylinderGeometry(0.26, 0.46, 6.2, 7);
+  pineTrunk.translate(0, 3.1, 0);
   const pineParts = [pineTrunk];
   for (let i = 0; i < 5; i++) {            // bare branches up the trunk
     const a = i / 5 * Math.PI * 2 + 0.6;
-    pineParts.push(mkBranch(1.5 - i * 0.12, 0.05, 0, 1.6 + i * 0.55, 0, a, 1.15));
+    pineParts.push(mkBranch(1.5 - i * 0.12, 0.05, 0, 3.9 + i * 0.55, 0, a, 1.15));
   }
-  const pc1 = new THREE.ConeGeometry(2.7, 4.6, 9); pc1.translate(0, 5.2, 0);
-  const pc2 = new THREE.ConeGeometry(2.0, 3.6, 9); pc2.translate(0, 7.6, 0);
-  const pc3 = new THREE.ConeGeometry(1.2, 2.6, 9); pc3.translate(0, 9.8, 0);
+  const pc1 = new THREE.ConeGeometry(2.7, 4.6, 9); pc1.translate(0, 7.0, 0);
+  const pc2 = new THREE.ConeGeometry(2.0, 3.6, 9); pc2.translate(0, 9.4, 0);
+  const pc3 = new THREE.ConeGeometry(1.2, 2.6, 9); pc3.translate(0, 11.6, 0);
   pineParts.push(pc1, pc2, pc3);
   const pineTrunkN = mergeGeoms([pineTrunk, ...pineParts.slice(1, 6)]);  // trunk+branches = bark
   const pineGeo = paintTwoTone(mergeGeoms(pineParts), pineTrunkN,
@@ -814,20 +896,21 @@ function mergeGeoms(list) {
                                              0.28 + Math.random() * 0.07));
 
   // BROADLEAF — real boughs (branches) fanning into clustered canopy blobs
-  const blTrunk = new THREE.CylinderGeometry(0.34, 0.6, 4.8, 7);
-  blTrunk.translate(0, 2.4, 0);
+  const blTrunk = new THREE.CylinderGeometry(0.34, 0.6, 6.6, 7);
+  blTrunk.translate(0, 3.3, 0);
   const blParts = [blTrunk];
   const boughs = [];
   for (let i = 0; i < 5; i++) {
     const a = i / 5 * Math.PI * 2 + 0.3;
-    boughs.push(mkBranch(2.6, 0.11, 0, 3.6, 0, a, 0.8));
+    boughs.push(mkBranch(2.6, 0.11, 0, 5.2, 0, a, 0.8));
   }
   blParts.push(...boughs);
-  // canopy blobs perched at the bough tips
+  // canopy blobs perched at the bough tips — raised so the lowest blob
+  // bottom sits ~5.4m up, clear above the jump-apex eye.
   const blob = (r, x, y, z) => { const g = new THREE.IcosahedronGeometry(r, 1); g.translate(x, y, z); return g; };
-  blParts.push(blob(2.4, 0, 6.4, 0), blob(1.8, 1.9, 5.7, 0.4),
-               blob(1.7, -1.7, 5.9, -0.5), blob(1.6, 0.4, 5.4, 1.8),
-               blob(1.5, -0.6, 5.6, -1.7));
+  blParts.push(blob(2.4, 0, 8.0, 0), blob(1.8, 1.9, 7.3, 0.4),
+               blob(1.7, -1.7, 7.5, -0.5), blob(1.6, 0.4, 7.0, 1.8),
+               blob(1.5, -0.6, 7.2, -1.7));
   const blTrunkN = mergeGeoms([blTrunk, ...boughs]);
   const broadGeo = paintTwoTone(mergeGeoms(blParts), blTrunkN,
     0x5d452c, () => new THREE.Color().setHSL(0.23 + Math.random() * 0.05, 0.5,
@@ -853,18 +936,11 @@ function mergeGeoms(list) {
   //           whole forest surges together between lulls.
   // H≈12 (tallest canopy ~y=12). amp in *local* units; instance scale (0.8–1.9)
   // multiplies it for free, so big trees sway proportionally more.
-  const treeWind = (amp, sideAmp) => (sh) => {
-    sh.uniforms.uTime = windUniforms.uTime;
-    sh.vertexShader = 'uniform float uTime;\n' + sh.vertexShader.replace('#include <begin_vertex>',
-      `#include <begin_vertex>
-       float wH = clamp(position.y / 12.0, 0.0, 1.0);
-       float bendY = pow(wH, 1.6) * ${amp.toFixed(2)};
-       float ph = instanceMatrix[3][0]*0.07 + instanceMatrix[3][2]*0.05;
-       float gust = 0.7 + 0.3*sin(uTime*0.16 + instanceMatrix[3][0]*0.01);
-       transformed.x += (sin(uTime*0.42 + ph) + 0.22*sin(uTime*1.05 + ph*1.7)) * bendY * gust;
-       transformed.z += cos(uTime*0.36 + ph*1.3) * bendY * ${sideAmp.toFixed(2)} * gust;`);
-  };
-  treeMat.onBeforeCompile = treeWind(0.2, 0.16);   // gentle drift, not a wobble
+  // tree sway REMOVED — treeMat now compiles with the stock vertex shader
+  // (zero displacement, zero per-frame cost). treeWind kept as a no-op stub
+  // so the call site stays stable; grass/flowers/reeds keep their wind.
+  const treeWind = (amp, sideAmp) => (sh) => {};
+  // (intentionally NOT assigning treeMat.onBeforeCompile — trees are still)
   const species = [
     { geo: pineGeo,  inst: new THREE.InstancedMesh(pineGeo, treeMat, CFG.trees), n: 0, r: 1.1 },
     { geo: broadGeo, inst: new THREE.InstancedMesh(broadGeo, treeMat, CFG.trees), n: 0, r: 1.2 },
@@ -906,6 +982,9 @@ function mergeGeoms(list) {
         S = new THREE.Vector3(), P = new THREE.Vector3(), E = new THREE.Euler();
   let placed = 0, guard = 0;
   window.TREES = [];
+  // solid AND walkable-on-top props (logs, stumps, squat boulders). Each
+  // carries a world-space `top` you can clamber onto. See the movement loop.
+  window.STEPPROPS = [];
   // Cap collidable trunks so the hunt's collision scan stays cheap even
   // as rendered tree count climbs. ~1600 real obstacles is plenty of
   // cover; the rest render as canopy mass only.
@@ -1079,6 +1158,94 @@ function mergeGeoms(list) {
   }
   rocks.count = placed;
   scene.add(rocks);
+
+  // ─────────── vision-blockers — undergrowth that breaks sightlines ──────────
+  // Three new instanced foliage masses that OCCLUDE at eye level. They do
+  // NOT hard-block movement (you push through brush) — they push into
+  // BUSHES[] so losBlocked() hides you AND the animals from each other.
+  // Grove-biased placement; one shared wind-swayed material; no shadows.
+  {
+    const blockerMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1,
+      emissive: 0x101a08, emissiveIntensity: 0.45 });
+    blockerMat.onBeforeCompile = (sh) => {
+      sh.uniforms.uTime = windUniforms.uTime;
+      sh.vertexShader = 'uniform float uTime;\n' + sh.vertexShader.replace('#include <begin_vertex>',
+        `#include <begin_vertex>
+         float bendY = position.y * 0.07;
+         float ph = instanceMatrix[3][0]*0.2 + instanceMatrix[3][2]*0.16;
+         float gust = 0.6 + 0.4*sin(uTime*0.28 + instanceMatrix[3][2]*0.013);
+         transformed.x += (sin(uTime*1.5 + ph) + 0.3*sin(uTime*3.0 + ph*1.6)) * bendY * gust;
+         transformed.z += cos(uTime*1.1 + ph) * bendY * 0.6 * gust;`);
+    };
+    const tintFoliage = (geo, lo, hi) => {
+      const n = geo.attributes.position.count, col = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) {
+        const c = new THREE.Color().setHSL(0.24 + Math.random() * 0.06,
+          0.4 + Math.random() * 0.2, lo + Math.random() * (hi - lo));
+        col[i*3] = c.r; col[i*3+1] = c.g; col[i*3+2] = c.b;
+      }
+      geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      return geo;
+    };
+    // THICKET — squat opaque dome of 7 overlapping icosa, ~1.9m
+    const thicketParts = [];
+    for (let i = 0; i < 7; i++) {
+      const r = 0.7 + Math.random() * 0.5;
+      const g = new THREE.IcosahedronGeometry(r, 0);
+      g.translate((Math.random() - 0.5) * 1.2, 0.5 + Math.random() * 1.1, (Math.random() - 0.5) * 1.2);
+      thicketParts.push(g);
+    }
+    const thicketGeo = tintFoliage(mergeGeoms(thicketParts), 0.18, 0.30);
+    // LEAN BRUSH — a fat foliage mass tipped off a short stalk, ~2.2m wall
+    const lbStalk = new THREE.CylinderGeometry(0.06, 0.1, 0.9, 5); lbStalk.translate(0, 0.45, 0);
+    const lbMass = new THREE.IcosahedronGeometry(1.15, 0); lbMass.scale(1.2, 0.9, 1.0);
+    lbMass.translate(0.3, 1.55, 0);
+    const lbMass2 = new THREE.IcosahedronGeometry(0.8, 0); lbMass2.translate(-0.4, 1.2, 0.3);
+    const leanGeo = tintFoliage(mergeGeoms([lbStalk, lbMass, lbMass2]), 0.16, 0.28);
+    // FERN STAND — 9 arcing cone-fronds, ~2.4m
+    const fernParts = [];
+    for (let i = 0; i < 9; i++) {
+      const a = i / 9 * Math.PI * 2, len = 1.6 + Math.random() * 0.7;
+      const fr = new THREE.ConeGeometry(0.12, len, 4);
+      fr.translate(0, len / 2, 0);
+      fr.rotateZ((0.3 + Math.random() * 0.4) * (Math.cos(a) > 0 ? 1 : -1));
+      fr.rotateY(a);
+      fr.translate(Math.cos(a) * 0.2, 0.1, Math.sin(a) * 0.2);
+      fernParts.push(fr);
+    }
+    const fernGeo = tintFoliage(mergeGeoms(fernParts), 0.20, 0.34);
+
+    const N_THICKET = IS_TOUCH ? 220 : 380;
+    const N_LEAN = IS_TOUCH ? 150 : 260;
+    const N_FERN = IS_TOUCH ? 200 : 340;
+    const blockers = [
+      { geo: thicketGeo, n: N_THICKET, br: 1.6, off: 137 },
+      { geo: leanGeo,    n: N_LEAN,    br: 1.3, off: 311 },
+      { geo: fernGeo,    n: N_FERN,    br: 1.1, off: 53  },
+    ];
+    for (const bk of blockers) {
+      const inst = new THREE.InstancedMesh(bk.geo, blockerMat, bk.n);
+      inst.castShadow = false; inst.receiveShadow = false; inst.frustumCulled = false;
+      let bp = 0, bg = 0;
+      while (bp < bk.n && bg++ < bk.n * 40) {
+        const x = (Math.random() - 0.5) * WORLD * 0.92,
+              z = (Math.random() - 0.5) * WORLD * 0.92,
+              y = heightAt(x, z);
+        if (y < WATER_Y + 1 || y > 24) continue;
+        if (Math.hypot(x, z) < 16) continue;            // keep the spawn clearing open
+        // grove-biased: decorrelated sample so each kind clumps differently
+        const gv = groveAt(x + bk.off, z - bk.off);
+        if (Math.random() > 0.22 + 1.5 * gv * gv) continue;
+        P.set(x, y - 0.1, z);
+        E.set(0, Math.random() * Math.PI * 2, (Math.random() - 0.5) * 0.12); Q.setFromEuler(E);
+        const s = 0.8 + Math.random() * 0.7; S.set(s, s * (0.9 + Math.random() * 0.4), s);
+        inst.setMatrixAt(bp++, M.compose(P, Q, S));
+        BUSHES.push({ x, z, r: bk.br * s });             // occludes player AND animals
+      }
+      inst.count = bp;
+      scene.add(inst);
+    }
+  }
 
   // ─────────── climbable outcrop cladding — visual rock on the perches ──────────
   // The walkable surface IS the heightAt dome; these boulders just make
@@ -1273,6 +1440,8 @@ function mergeGeoms(list) {
       S.set(r.sx, r.sy, r.sz);
       mesh.setMatrixAt(p++, M.compose(P, Q, S));
       if (r.collide) TREES.push({ x, z, r: r.cr });
+      // step-on prop: solid AND climbable. `top` = world-space walkable surface.
+      if (r.step) STEPPROPS.push({ x, z, r: r.cr, top: r.top });
     }
     mesh.count = p;
   };
@@ -1281,30 +1450,45 @@ function mergeGeoms(list) {
     if (y < WATER_Y + 1.2 || y > 24) return null;
     if (Math.hypot(x, z) < 16) return null;
     const s = 0.8 + Math.random() * 0.9;
-    return { y: y + 0.15, sx: s, sy: s, sz: s, collide: true, cr: 1.3 * s };
+    const baseY = y + 0.15;
+    // log geo: cylinder centered at local y≈0.62, radius≈0.62 → top ≈ 1.24 local
+    return { y: baseY, sx: s, sy: s, sz: s,
+             collide: true, cr: 1.3 * s, step: true, top: baseY + 1.24 * s };
   });
 
   scatter(stumpsM, N_STUMPS, (x, z, y) => {
     if (y < WATER_Y + 1.0 || y > 24) return null;
     if (Math.hypot(x, z) < 12) return null;
     const s = 0.8 + Math.random() * 0.8;
-    return { y: y - 0.05, sx: s, sy: s * (0.8 + Math.random() * 0.5), sz: s };
+    const sy = s * (0.8 + Math.random() * 0.5);
+    const baseY = y - 0.05;
+    // stump sawn face at local y≈1.18 → walkable top
+    return { y: baseY, sx: s, sy, sz: s,
+             collide: true, cr: 0.82 * s, step: true, top: baseY + 1.18 * sy };
   });
 
   scatter(bouldersM, N_BOULDERS, (x, z, y) => {
     if (y < WATER_Y + 0.4) return null;
     if (Math.hypot(x, z) < 14) return null;
     const s = 0.7 + Math.random() * 1.2;
-    return { y: y + 0.2, tilt: (Math.random() - 0.5) * 0.3, roll: (Math.random() - 0.5) * 0.3,
-             sx: s, sy: s * (0.8 + Math.random() * 0.4), sz: s, collide: true, cr: 2.2 * s };
+    const sy = s * (0.8 + Math.random() * 0.4);
+    const baseY = y + 0.2;
+    // boulder geo tops out ~local 3.5 (big dodec center 1.5 + r 2.0) → world top
+    const top = baseY + 3.5 * sy;
+    const squat = (top - y) <= 2.7;          // low enough to clamber onto
+    return { y: baseY, tilt: (Math.random() - 0.5) * 0.3, roll: (Math.random() - 0.5) * 0.3,
+             sx: s, sy, sz: s,
+             collide: !squat, cr: 2.2 * s, step: squat, top };
   });
 
   scatter(snagsM, N_SNAGS, (x, z, y) => {
     if (y < WATER_Y + 0.5 || y > 30) return null;
     if (Math.hypot(x, z) < 18) return null;
     const s = 0.7 + Math.random() * 0.9;
+    // snags now BLOCK (were non-colliding) — a padded trunk-base radius
     return { tilt: (Math.random() - 0.5) * 0.18, roll: (Math.random() - 0.5) * 0.18,
-             y: y - 0.1, sx: s, sy: s * (0.9 + Math.random() * 0.5), sz: s };
+             y: y - 0.1, sx: s, sy: s * (0.9 + Math.random() * 0.5), sz: s,
+             collide: true, cr: 0.6 * s };
   });
 
   scatter(cattailsM, N_CATTAILS, (x, z, y) => {
@@ -1989,17 +2173,25 @@ const butterflies = [];
   }
 }
 let bflyUsed = false, bflyT = 0;
+const BFLY_LIFE = 9;                    // total time the ring lives
+// A delight you can never quite reach: the butterflies appear as a DISTANT
+// ring (8–20m), drift outward, and sink into the ground while fading out —
+// gone before you can close on them even at a sprint.
 function releaseButterflies() {
-  if (bflyUsed) return; bflyUsed = true; bflyT = 7;
+  if (bflyUsed) return; bflyUsed = true; bflyT = BFLY_LIFE;
   for (const b of butterflies) {
-    const a = Math.random() * 6.283, r = 0.8 + Math.random() * 4;
-    b.position.set(player.x + Math.cos(a) * r,
-                   heightAt(player.x + Math.cos(a) * r, player.z + Math.sin(a) * r) + 0.3 + Math.random() * 0.6,
-                   player.z + Math.sin(a) * r);
+    const a = Math.random() * 6.283, r = 8 + Math.random() * 12;   // 8–20m ring
+    const bx = player.x + Math.cos(a) * r, bz = player.z + Math.sin(a) * r;
     const u = b.userData;
-    u.vx = (Math.random() - 0.5) * 1.3; u.vz = (Math.random() - 0.5) * 1.3;
-    u.vy = 0.7 + Math.random() * 0.9; u.ph = Math.random() * 6.283;
-    u.mat.opacity = 1; b.visible = true;
+    u.gy = heightAt(bx, bz);             // its ground reference — sinks each frame
+    b.position.set(bx, u.gy + 0.6 + Math.random() * 1.8, bz);
+    // drift mostly OUTWARD (away from the player), with a little jitter
+    u.vx = Math.cos(a) * (0.25 + Math.random() * 0.35) + (Math.random() - 0.5) * 0.2;
+    u.vz = Math.sin(a) * (0.25 + Math.random() * 0.35) + (Math.random() - 0.5) * 0.2;
+    u.sink = 0.18 + Math.random() * 0.16;   // 0.18–0.34 m/s into the terrain
+    u.ph = Math.random() * 6.283;
+    u.life = 0;                          // fade IN from 0
+    u.mat.opacity = 0; b.visible = true;
   }
 }
 window._butterflies = releaseButterflies;   // test hook
@@ -2009,12 +2201,18 @@ function updateButterflies(dt, t) {
   for (const b of butterflies) {
     if (!b.visible) continue;
     const u = b.userData;
+    u.life += dt;
     b.position.x += u.vx * dt; b.position.z += u.vz * dt;
-    b.position.y += u.vy * dt; u.vy = Math.max(-0.2, u.vy - dt * 0.3);
+    u.gy -= u.sink * dt;                  // baseline sinks INTO the ground
+    b.position.y += (u.gy - b.position.y) * Math.min(1, dt * 2)
+      + Math.sin(t * 2.2 + u.ph) * 0.02; // ride the sinking ref + a soft bob
     const fl = Math.sin(t * 17 + u.ph) * 0.95;   // wing flap
     u.wl.rotation.y = fl; u.wr.rotation.y = -fl;
     b.lookAt(player.x, b.position.y, player.z);
-    if (bflyT < 1.6) u.mat.opacity = Math.max(0, bflyT / 1.6);
+    // appear, then fade as the ring's life runs out (unreachable either way)
+    const fadeIn = Math.min(1, u.life / 1.2);
+    const fadeOut = Math.min(1, bflyT / 2.5);
+    u.mat.opacity = fadeIn * fadeOut;
     if (bflyT <= 0) b.visible = false;
   }
 }
@@ -2051,10 +2249,16 @@ function clipOf(prefab, frag) {
   return prefab.animations.find(c => c.name.toLowerCase().includes(frag.toLowerCase()));
 }
 
+// some species reuse another's rig (Bear is a scaled, dark-tinted Bull).
+const PREFAB_FILE = { Bear: 'Bull' };
+
 async function loadAnimals() {
   const names = Object.keys(SPECIES);
-  await Promise.all(names.map(n => new Promise((res, rej) =>
-    loader.load(`assets/animals/${n}.glb`, g => { prefabs[n] = g; res(); }, undefined, rej))));
+  // load each distinct .glb once, keyed by its filename, then alias
+  const files = [...new Set(names.map(n => PREFAB_FILE[n] || n))];
+  await Promise.all(files.map(f => new Promise((res, rej) =>
+    loader.load(`assets/animals/${f}.glb`, g => { prefabs[f] = g; res(); }, undefined, rej))));
+  for (const n of names) prefabs[n] = prefabs[PREFAB_FILE[n] || n];
   for (const n of names) {
     if (n === 'Deer') {                 // deer come in herds, 2–4 to a group
       let left = SPECIES.Deer.n, herd = 0;
@@ -2075,7 +2279,29 @@ async function loadAnimals() {
 function spawn(name, near) {
   const cfg = SPECIES[name], prefab = prefabs[name];
   const obj = SkeletonUtils.clone(prefab.scene);
-  obj.traverse(o => { if (o.isMesh) { o.castShadow = true; o.frustumCulled = true; } });
+  // ── per-individual LOOK ── a herd should read as individuals, not clones.
+  // Non-bears get a cloned material with a small HSL hue/brightness drift;
+  // bears get a hard dark-brown standard material on the Bull rig.
+  const shade = 0.82 + Math.random() * 0.36;            // 0.82–1.18 brightness
+  if (cfg.bearish) {
+    const bc = new THREE.Color(cfg.tint || 0x3a2616).multiplyScalar(shade);
+    const bearMat = new THREE.MeshStandardMaterial({ color: bc, roughness: 0.95, metalness: 0 });
+    obj.traverse(o => {
+      if (o.isMesh || o.isSkinnedMesh) { o.castShadow = true; o.frustumCulled = true; o.material = bearMat; }
+    });
+  } else {
+    const hueDrift = (Math.random() - 0.5) * 0.06;       // ±0.03 hue
+    obj.traverse(o => {
+      if (o.isMesh || o.isSkinnedMesh) {
+        o.castShadow = true; o.frustumCulled = true;
+        if (o.material && o.material.color) {
+          const m = o.material.clone();
+          m.color = o.material.color.clone().offsetHSL(hueDrift, 0, 0).multiplyScalar(shade);
+          o.material = m;
+        }
+      }
+    });
+  }
   let x, z, y, tries = 0;
   do {
     if (near && tries < 40) {           // herd member — settle near the anchor
@@ -2088,21 +2314,63 @@ function spawn(name, near) {
     y = heightAt(x, z);
   } while ((y < WATER_Y + 1 || Math.hypot(x, z) < 45) && tries++ < 60);
   obj.position.set(x, y, z);
+  // ── per-individual SIZE ── base scale ±10%, bears 1.8× on top
+  const sizeJit = 0.9 + Math.random() * 0.2;            // ±10%
+  obj.scale.setScalar((cfg.scale || 1) * sizeJit);
   scene.add(obj);
   const mixer = new THREE.AnimationMixer(obj);
   const acts = {};
-  for (const frag of ['Idle', 'Eating', 'Walk', 'Gallop', 'Death', 'HitReact_Left', 'Attack']) {
+  for (const frag of ['Idle', 'Idle_2', 'Eating', 'Walk', 'Gallop', 'Death',
+                      'HitReact_Left', 'Attack', 'Attack_Kick']) {
     const clip = clipOf(prefab, frag);
     if (clip) acts[frag] = mixer.clipAction(clip);
   }
+  // ── per-individual PERSONALITY (rolled ONCE, stored on the record) ──
+  const aggression = Math.max(0, Math.min(1,
+    cfg.aggroBias + (Math.random() - 0.5) * 0.5));      // ±0.25 around the bias
+  // wide hp band for the tanky ones: horse 8-10, bear 6-8
+  let hp = cfg.hp;
+  if (cfg.hpJit) hp = (cfg.bearish ? 6 : 8) + Math.round(Math.random() * 2 - 1) + 1;
+  const hearJit = 0.85 + Math.random() * 0.30;          // 0.85–1.15
+  // per-gait playback tempo: cow plods, horse is quick, bear is heavy — ±5%
+  const gaitTs = (cfg.gait === 'sway' ? 0.85 : cfg.gait === 'smooth' ? 1.15
+                 : cfg.gait === 'bound' ? 0.9 : 1) * (0.95 + Math.random() * 0.1);
   const a = {
     name, cfg, obj, mixer, acts, cur: null,
     state: 'idle', t: Math.random() * 4, dir: Math.random() * Math.PI * 2,
-    hp: cfg.hp, dead: false, attackCd: 0,
+    hp, dead: false, attackCd: 0,
+    aggression, hearJit, gaitTs,
+    gaitPhase: Math.random() * Math.PI * 2,             // desyncs sway/bob across a herd
+    gaitRoll: 0,                                         // current rotation.z, decays to 0
+    sizeJit,
   };
   setAnim(a, Math.random() < 0.5 ? 'Idle' : 'Eating');
   animals.push(a);
   return a;
+}
+
+// ── gaits ── pure trig on existing fields, called per animal per frame.
+// Sways/rolls the body via rotation.z and a small y-bob, only while moving.
+// No allocations. rotation.z eases back toward 0 when idle.
+function applyGait(a, moving, dt) {
+  const g = a.cfg.gait;
+  a.gaitPhase += dt * 7 * (a.gaitTs || 1);
+  let targetRoll = 0, bob = 0;
+  if (moving) {
+    const s = Math.sin(a.gaitPhase);
+    if (g === 'sway')        targetRoll = s * 0.13;                 // cow lumbers
+    else if (g === 'smooth') targetRoll = s * 0.03;                 // horse is level
+    else if (g === 'bound') { targetRoll = s * 0.05; bob = Math.abs(s) * 0.12; } // bear lopes
+    else                     targetRoll = s * 0.05;                 // default trot
+  }
+  // ease roll toward target (snappy while moving, decays out when idle)
+  a.gaitRoll += (targetRoll - a.gaitRoll) * Math.min(1, dt * 8);
+  a.obj.rotation.z = a.gaitRoll;
+  if (g === 'bound') {
+    a._baseY = a._baseY ?? a.obj.position.y;
+    // bob rides on top of the live ground height (which stepAnimal sets)
+    a.obj.position.y = heightAt(a.obj.position.x, a.obj.position.z) + bob;
+  }
 }
 
 function setAnim(a, frag, once = false) {
@@ -2118,8 +2386,17 @@ function setAnim(a, frag, once = false) {
 }
 
 // ── stealth: what the animal can actually perceive ────────────────
-// noiseLevel: 0 = still, 1 = moving, 2 = sprinting (set in the tick)
+// dB-style hearing. noise01 is a CONTINUOUS 0..1 loudness:
+//   still 0 · stalk ≈0.35 (half-stick, or moving while drawn) · walk ≈0.6 · sprint 1.0
+// Legacy noiseLevel (0/1/2) is kept in sync for any old reads.
 let noiseLevel = 0;
+let noise01 = 0;
+function setNoise(level, stalking) {
+  // level: 0 still / 1 moving / 2 sprinting ; stalking = quiet half-stick or
+  // moving-while-drawn. Maps the discrete state to the continuous loudness.
+  noiseLevel = level;
+  noise01 = level === 0 ? 0 : level === 2 ? 1.0 : (stalking ? 0.35 : 0.6);
+}
 
 function losBlocked(a) {
   // cached, throttled — is there a tree/bush between player and animal?
@@ -2144,16 +2421,23 @@ function losBlocked(a) {
   return a._losB;
 }
 
+// the detection dartboard: how far away its ears catch you. Louder you
+// are + keener its ears = wider radius. A dull cow lets you in close; a
+// fox bolts from across the meadow.
+//   spookRadius = flee * (0.4 + noise01 * keen)
+// where keen folds the species acuity and this individual's hearJit.
 function spookRadius(a, dist) {
-  let r = a.cfg.flee;
-  r *= noiseLevel === 2 ? 1.4 : noiseLevel === 1 ? 0.85 : 0.5;
+  const keen = (a.cfg.keen || 1) * (a.hearJit || 1);
+  let r = a.cfg.flee * (0.4 + noise01 * keen);
   if (dist < 60 && losBlocked(a)) r *= 0.42;       // cover buys you closer
   return Math.max(r, noiseLevel === 2 ? 20 : 7);
 }
 // crowding panic: inside this and prey bolts no matter how quiet. The
 // close approach is the hard part; the long pot-shot is the reward.
+// Scaled by keen so a dull cow tolerates you closer, a fox bolts sooner.
 function panicRadius(a) {
-  return (a.cfg.flee * 0.42) * (noiseLevel === 0 ? 0.85 : 1);
+  const keen = (a.cfg.keen || 1) * (a.hearJit || 1);
+  return (a.cfg.flee * 0.42) * keen * (noiseLevel === 0 ? 0.85 : 1);
 }
 
 function animalUpdate(a, dt) {
@@ -2216,7 +2500,13 @@ function animalUpdate(a, dt) {
     }
   }
 
-  if (a.cfg.hunts || a.cfg.territorial) {     // ── predator / territorial brain
+  if (a.cfg.bearish) {                         // ── the bear has its own brain
+    bearUpdate(a, dt, dx, dz, dist);
+    a.obj.rotation.y = lerpAngle(a.obj.rotation.y, a.dir, Math.min(1, dt * 6));
+    applyGait(a, a._moved, dt);
+    a._moved = false;
+    return;
+  } else if (a.cfg.hunts || a.cfg.territorial) {     // ── predator / territorial brain
     a.attackCd -= dt;
     // wolves grow bolder after dark — wider trigger, and they don't come alone
     const night = window._night || 0;
@@ -2293,7 +2583,21 @@ function animalUpdate(a, dt) {
       }
     } else wander(a, dt);
   } else {                                    // ── prey brain
-    if (a.state === 'wounded') {
+    if (a.state === 'rear') {
+      // cornered + bold: it stands and strikes instead of fleeing. Faces
+      // you, kicks once (small damage if you're right on it), then bolts.
+      a.rearT -= dt;
+      a.dir = Math.atan2(dx, dz);
+      if (!a.rearStruck && a.rearT < a.rearDur - 0.35) {
+        a.rearStruck = true;
+        if (dist < 3.0) { hurtPlayer(8 + a.aggression * 8); camShakeT = SHAKE_DUR; }
+      }
+      if (a.rearT <= 0) {                      // done posturing — flee for real
+        a.state = 'flee'; a.t = 5 + Math.random() * 4;
+        a.dir = Math.atan2(-dx, -dz) + (Math.random() - 0.5) * 0.7;
+        a.cur = null;
+      }
+    } else if (a.state === 'wounded') {
       // it runs hurt — slower than you, leaving blood. The pace is the
       // game: you gain on it walking, lose ground while you draw.
       a.bleedT -= dt;
@@ -2319,12 +2623,98 @@ function animalUpdate(a, dt) {
       }
       if (a.t <= 0 && dist > a.cfg.flee * 1.5) a.state = 'idle', a.t = 1 + Math.random() * 3;
     } else if (dist < panicRadius(a) || dist < spookRadius(a, dist)) {
-      a.state = 'flee'; a.t = 5 + Math.random() * 4;
-      a.dir = Math.atan2(-dx, -dz) + (Math.random() - 0.5) * 0.7;
-      spookHerd(a);                       // one spooks, the herd spooks
+      // crowded hard AND bold AND able to kick → it may turn and fight
+      // instead of running. A stag/horse that's had enough rears up.
+      if (dist < 3.2 && a.aggression > 0.5 && a.acts.Attack_Kick
+          && Math.random() < (a.cfg.rear || 0)) {
+        a.state = 'rear'; a.rearDur = a.rearT = 0.9 + Math.random() * 0.4;
+        a.rearStruck = false;
+        setAnim(a, 'Attack_Kick', true);
+        a.dir = Math.atan2(dx, dz);
+        camShakeT = SHAKE_DUR;
+      } else {
+        a.state = 'flee'; a.t = 5 + Math.random() * 4;
+        a.dir = Math.atan2(-dx, -dz) + (Math.random() - 0.5) * 0.7;
+        spookHerd(a);                     // one spooks, the herd spooks
+      }
     } else wander(a, dt);
   }
   a.obj.rotation.y = lerpAngle(a.obj.rotation.y, a.dir, Math.min(1, dt * 6));
+  applyGait(a, a._moved, dt);
+  a._moved = false;
+}
+
+// ── the bear ── a tank with its own brain. It doesn't hunt you; it
+// objects to you. States: idle/wander → rear (stands up, sizes you up)
+// → charge (bounding lope) → attack (claw) → retreat. Provoked by a
+// close approach (scales with this bear's aggression) or by a shot. A
+// shot from real range only baffles it (a.confused → rear, then leave);
+// a close shot enrages it (a.aggro → charge). Loses you well out.
+function bearUpdate(a, dt, dx, dz, dist) {
+  a.attackCd -= dt;
+  const provokeR = 6 + (1 - a.aggression) * 6;          // bold bear: ~6m, shy: ~12m
+  const loseR = (a.cfg.aggroR || 22) + 26;
+
+  // first provoke by proximity (a shot sets a.aggro/a.confused directly)
+  if (!a.aggro && !a.confused && a.state !== 'rear' && a.state !== 'retreat'
+      && dist < provokeR) {
+    a.confused = false; a.rearAfter = 'charge';
+    enterBearRear(a, dx, dz);
+  }
+
+  if (a.state === 'rear') {
+    a.rearT -= dt;
+    a.dir = Math.atan2(dx, dz);                          // faces you, all of it
+    if (a.rearT <= 0) {
+      a.cur = null;
+      if (a.rearAfter === 'retreat') {
+        a.state = 'retreat'; a.t = 4 + Math.random() * 3;
+        a.confused = false;
+        toast('It swats the air, baffled, and lumbers off.', 4200);
+      } else {
+        a.state = 'charge'; a.aggro = true;
+      }
+    }
+    return;
+  }
+
+  if (a.state === 'retreat') {
+    a.t -= dt;
+    a.dir = Math.atan2(-dx, -dz);
+    setAnim(a, 'Gallop');
+    stepAnimal(a, a.cfg.gallop * 0.7, dt);
+    if (a.t <= 0 || dist > loseR) { a.state = 'idle'; a.t = 1 + Math.random() * 2; a.aggro = false; }
+    return;
+  }
+
+  if (a.state === 'charge' || a.aggro) {
+    a.state = 'charge';
+    if (dist > loseR) {                                  // it loses interest
+      a.aggro = false; a.state = 'idle'; a.t = 1; a.cur = null; return;
+    }
+    if (dist < 2.9) {                                    // contact — it claws
+      if (a.attackCd <= 0) {
+        setAnim(a, a.acts.Attack ? 'Attack' : 'Attack_Kick', true);
+        a.attackCd = 1.6;
+        hurtPlayer(a.cfg.dmg || 38); camShakeT = SHAKE_DUR;
+        setTimeout(() => { if (!a.dead) a.cur = null; }, 700);
+      }
+    } else {
+      a.dir = Math.atan2(dx, dz);
+      setAnim(a, 'Gallop');                              // bounding gait carries it
+      stepAnimal(a, a.cfg.gallop, dt);
+    }
+    return;
+  }
+
+  wander(a, dt);                                         // calm — just a bear in the woods
+}
+function enterBearRear(a, dx, dz) {
+  a.state = 'rear'; a.rearT = 0.9;
+  a.dir = Math.atan2(dx, dz);
+  setAnim(a, a.acts.Idle_2 ? 'Idle_2' : 'HitReact_Left', true);
+  camShakeT = SHAKE_DUR;
+  toast('It stands up. All of it.', 3600);
 }
 
 // a wolf that commits to a hunt calls EVERY calm wolf in earshot —
@@ -2437,6 +2827,7 @@ function stepAnimal(a, speed, dt) {
     a.dir += Math.PI * (0.5 + Math.random() * 0.5); return;
   }
   p.set(nx, ny, nz);
+  a._moved = true;            // gait sway/bob only plays while actually moving
 }
 
 function lerpAngle(a, b, t) {
@@ -2694,6 +3085,7 @@ player.y = heightAt(player.x, player.z);
 const score = {};
 const keys = {};
 let started = false, drawT = 0, holdT = 0, raiseT = 0, drawing = false, dead = false, bobPhase = 0, hapticT = 0;
+let _moveLvl = 0;   // 0..1 gait level — drives footstep audio + camera head-bob
 let playerVy = 0, grounded = true, jumpQ = false;
 
 // ── the wake-up: a ~3.5s cinematic intro that plays on enter and on
@@ -2959,7 +3351,14 @@ function arrowUpdate(dt) {
         an.lastZone = zone;
         const W = WOUNDS[zone];
         const cleanKill = a.power >= W.instant;
-        if (an.cfg.hunts || an.cfg.territorial) {
+        // distance the arrow actually flew — used by bear's "far shot" baffle
+        const flightD = Math.hypot(a.m.position.x - a.ox,
+                                   a.m.position.y - a.oy,
+                                   a.m.position.z - a.oz);
+        if (an.cfg.bearish) {
+          // a tank: it soaks hits. clean 2 / strong 1 / weak 0.5 → ~3-4 shots.
+          an.hp -= cleanKill ? 2 : (a.power > 0.55 ? 1 : 0.5);
+        } else if (an.cfg.hunts || an.cfg.territorial) {
           an.hp -= cleanKill ? 999 : (a.power > 0.55 ? 2 : 1);
         } else {
           // prey: a wounded animal hit again goes down. Otherwise the
@@ -2978,7 +3377,19 @@ function arrowUpdate(dt) {
                                 a.m.position.z - a.oz);
           if (fd > 35) setTimeout(() => say('longShot', 5200), 1600);
         }
-        else if (an.cfg.hunts || an.cfg.territorial) {
+        else if (an.cfg.bearish) {
+          // an arrow into a bear: a close shot enrages it (charge); a far,
+          // impressive shot only baffles it — it rears, then lumbers off.
+          const dxB = ap.x - player.x, dzB = ap.z - player.z;
+          if (flightD > 40) {
+            an.confused = true; an.rearAfter = 'retreat';
+            enterBearRear(an, -dxB, -dzB);
+          } else {
+            an.aggro = true; an.rearAfter = 'charge';
+            enterBearRear(an, -dxB, -dzB);
+            toast('You put an arrow in a bear. It noticed.', 4200);
+          }
+        } else if (an.cfg.hunts || an.cfg.territorial) {
           // wounding a predator does not make it leave. It makes it sure.
           setAnim(an, 'HitReact_Left', true);
           setTimeout(() => { if (!an.dead) an.cur = null; }, 400);
@@ -3266,198 +3677,168 @@ if (!IS_TOUCH) {
 }
 
 // ───────────────────────── HUD ─────────────────────────
+// the hunter's voice — quiet, weathered, real. Few words. He states
+// facts and lets them sit. Same keys, same hooks; terser lines.
 const LINES2 = {
-"corrupt": ["Something here is wrong. It wants in.",
-            "Those barbs are weeping. Don't touch the weeping ones.",
-            "The tree breathed. Trees don't breathe.",
-            "It drinks. I felt it take a sip of me."],
+"corrupt": ["Something's wrong here.",
+            "Don't touch the weeping ones.",
+            "That tree breathed.",
+            "It took a sip of me."],
 "wake": [
-"Still here. The woods didn't take me in my sleep.",
-"Eyes open. The grass let me keep them this time.",
-"Awake. The hunger beat the sun to it, like always.",
-"Another morning I wasn't owed. I'll spend it anyway.",
-"Up again. The forest counted me out. The forest can wait."
+"Still here.",
+"Eyes open. Good.",
+"Up before the sun. Like always.",
+"Another morning.",
+"The woods didn't take me."
 ],
 "killClean": [
-"He dropped before the sound did. Mercy travels faster than noise.",
-"One breath in, none out. That's as clean as this work gets.",
-"It folded like the ground had been waiting for it.",
-"Dead before the fear arrived. I tell myself that counts for something.",
-"The arrow ended the argument before it started.",
-"No last steps. No last anything. Just the quiet after.",
-"It went down still chewing. There are worse last meals than grass.",
-"Quick work. The only kind of kindness I still carry.",
-"One arrow, one ending. The math out here is simple.",
-"It never knew my name. Nothing out here does."
+"Down. Clean.",
+"Folded right there.",
+"Didn't suffer. Good.",
+"One breath, then none.",
+"Quick. The way it should be.",
+"No last steps. Just quiet.",
+"Dead before the fear got there."
 ],
 "killHead": [
-"Through the skull. The lights went out all at once, the way they should.",
-"Between the eyes. Whatever it was thinking, it finished none of it.",
-"The head shot is a door slamming. Nothing on the other side.",
-"It dropped mid-stride. The body ran a step the mind never took.",
-"Straight through the thinking part. No time left to be afraid.",
-"Skull shot. The cleanest sentence I know how to write."
+"Through the skull. Quick.",
+"Lights out, all at once.",
+"Right behind the eye. Done.",
+"Dropped mid-stride.",
+"Clean as it gets."
 ],
 "killSuffer": [
-"It took the long road out. I built that road.",
-"Slow. It watched me come. I owed it the watching back.",
-"I made dying a job, and it worked the whole shift.",
-"It bled out an hour of its life because my hand wasn't honest.",
-"Bad shot. The woods will forget it before I do.",
-"I gave it pain first and death second. Wrong order. My order.",
-"It kept trying to stand. Hope is the cruelest organ.",
-"Done now. The part of me that flinched went quiet years before it did."
+"Took too long. My fault.",
+"That one's on me.",
+"Bad shot. It paid for it.",
+"I owed it better.",
+"Made it hard. Shouldn't have."
 ],
 "killWolf": [
-"The wolf came to collect. Wrong house.",
-"It hunted me like a job. I retired it.",
-"Teeth came for my throat and met fletching instead.",
-"One less shadow in the trees. The trees keep making more.",
-"We were both hunters. Tonight the title changed hands."
+"Came for me. Wrong call.",
+"It hunted. So do I.",
+"One less in the dark.",
+"Teeth met the arrow first."
 ],
 "killBull": [
-"A ton of angry meat, and one thin arrow with an opinion.",
-"It charged like a debt collector. I settled.",
-"The ground stopped shaking. So did my hands, eventually.",
-"Big things fall the same as small ones. Just louder.",
-"It wanted to bury me. The crows got a different appointment."
+"Big one down.",
+"It charged. I held.",
+"Ground's quiet again.",
+"Settled."
 ],
 "killCryptid": [
-"The black stag is dead. The woods don't feel any emptier.",
-"I killed the thing that shouldn't be. Its blood is dark, and real, and mine.",
-"Some animals are questions. This one I answered the only way I know."
+"The black stag's dead.",
+"Real blood after all.",
+"Answered it the only way I know."
 ],
 "woundHead": [
-"Skipped off the skull. I gave it a headache and a grudge.",
-"An inch from the off switch. Now it knows what I am.",
-"Grazed the bone. The worst lesson is the one it survives.",
-"It shook its head like a bad dream. I'm the dream.",
-"Glanced off the skull. The arrow lied to me by a finger's width."
+"Grazed the skull. Now it knows.",
+"Off the bone. Bad luck.",
+"An inch high. My miss."
 ],
 "woundVitals": [
-"Caught the lungs. It's breathing on borrowed paper now.",
-"Neck. The clock inside it is winding down fast.",
-"It ran, but its blood didn't go with it.",
-"Lungs. Every step from here is a step it can't afford.",
-"The vitals took the hit. The rest of it just hasn't heard yet."
+"Caught the lungs.",
+"It won't go far.",
+"Blood's bright. Won't be long."
 ],
 "woundLeg": [
-"Shoulder. It runs on three legs and borrowed time.",
-"Took the leg out from under its luck.",
-"It limps. I walk. The arithmetic favors me.",
-"Hobbled. Distance is a currency it can't spend anymore.",
-"Caught the shoulder. The arrow's riding along until I collect."
+"Took the shoulder.",
+"It's limping. I'm not.",
+"On three legs now."
 ],
 "woundGut": [
-"Gut shot. The slow kind. I hate the slow kind.",
-"Caught it low. Now we both wait, and only one of us hurts.",
-"Belly wound. Out here that's a sentence, not an injury.",
-"Gut. It'll lie down somewhere quiet, and I'll be there. I'm always there.",
-"Low and bad. My arrow turned the hours into the weapon."
+"Gut shot. The slow kind.",
+"Low and bad. I hate it.",
+"It'll lie down. I'll be there."
 ],
 "woundHind": [
-"Hindquarters. Ugly. It'll run far on fear alone.",
-"Caught it going away. An honest aim, an ugly wound.",
-"The rear took it. Muscle and panic, nothing that ends quick.",
-"Tagged the haunch. Now it's a long evening for both of us.",
-"Hind leg. It bolted carrying my mistake."
+"Tagged the haunch. Ugly.",
+"Caught it going away.",
+"Long evening for both of us."
 ],
 "bloodTrail": [
-"Red on green. The trail reads like a confession.",
-"Drops the size of coins. It's paying out as it goes.",
-"Dark blood, steady. The story has one ending now.",
-"The trail thins, then fattens. It stopped to think. They always do.",
-"Bright and frothing. Lungs. Won't be a long chapter.",
-"Blood doesn't lie. It's the only thing out here that doesn't."
+"Blood on the leaves.",
+"Steady drops. It's paying out.",
+"Trail reads clear.",
+"Bright and frothing. Lungs."
 ],
 "pursuit": [
-"It runs. I follow. We both already know how this goes.",
-"Branches whip past. Somewhere ahead, something is losing an argument with gravity.",
-"I don't chase fast. I chase certain.",
-"It's spending blood to buy distance. Bad exchange rate.",
-"Through the timber, after a heartbeat that isn't mine.",
-"Everything runs home when it's dying. I'm the thing waiting on the road."
+"It runs. I follow.",
+"I don't chase fast. I chase sure.",
+"After the blood now.",
+"It's spending what it can't spare."
 ],
 "miss": [
-"Missed. The forest swallowed the arrow like it never happened.",
-"Clean miss. Even the trees looked away.",
-"Gone. Somewhere out there an arrow carries my name and nothing else.",
-"Wide. Dinner walked off wearing my pride.",
-"The bow did its part. The rest of it was me."
+"Missed.",
+"Pulled it. My fault.",
+"Wide. Gone.",
+"That was me, not the bow."
 ],
 "longShot": [
-"From here to there is a prayer's distance. It got answered.",
-"The arrow flew so long I had time to doubt. The doubt arrived second.",
-"A shot like that isn't skill. It's a debt the wind decided to pay.",
-"It fell before the distance made sense. Some math you don't question."
+"Long way off. Took it anyway.",
+"Farther than it should've worked.",
+"Good shot. I'll take it.",
+"Long one. Clean."
 ],
 "harvest": [
-"Knife in, steam out. The animal becomes supper. Nobody wins.",
-"I take the heart first. Respect, or hunger. Same thing now.",
-"Steam rises off the open animal like a soul with nowhere to be.",
-"I work the knife and don't think. Thinking is for before and after.",
-"Meat, hide, heat. It keeps me alive. That's the whole eulogy.",
-"Blood to the elbow. A body's just a pantry with a history."
+"Knife in. Steam out.",
+"Heart first.",
+"Eat what I kill.",
+"Meat, hide, heat. That's it."
 ],
 "packFull": [
-"Pack's full. I walk slower carrying my reasons.",
-"Can't take another pound. The wolves get the rest. Call it tax.",
-"Heavy pack, light conscience. One of those is a lie."
+"Pack's full.",
+"Can't carry more.",
+"That'll do."
 ],
 "hungry": [
-"The hunger's gone past loud into quiet. The quiet is worse.",
-"My hands shake on the string. The body files its complaints in tremors.",
-"Empty going on hollow. The forest can smell it on me.",
-"I've started eyeing things I'd be ashamed to eat. Shame is negotiable.",
-"Starving is the body holding a grudge against the man steering it."
+"Hands are shaking. Need to eat.",
+"Empty going on hollow.",
+"Been too long since a kill."
 ],
 "nightFall": [
-"The light's packing up. Everything with teeth clocks in now.",
-"Dark coming on. Out here night isn't a time. It's a tenant.",
-"The sun quits early in these woods. Can't blame it.",
-"Dusk. The trees trade their shadows for longer ones.",
-"Night falls like a verdict. I find somewhere to appeal."
+"Light's going.",
+"Dark coming on. Stay sharp.",
+"Sun quits early here.",
+"Dusk. Things wake up now."
 ],
 "dawn": [
-"Morning. Still here. The woods will try again tomorrow.",
-"Dawn comes up gray and grudging. Same as me.",
-"Made it to sunrise. Out here that's the only promotion.",
-"First light. The night counts its losses, and I'm not among them."
+"Morning. Made it.",
+"First light. Still here.",
+"Night's done.",
+"Sun's up. Good."
 ],
 "wolfNear": [
-"Something is pacing me in the trees. Patient. Professional.",
-"I'm being shopped for.",
-"Eyes in the dark, keeping my pace. It's doing the same math I do.",
-"The birds went quiet. They never lie about company.",
-"There's a shape between the trees that's only there when I'm not looking."
+"Something's out there.",
+"Birds went quiet.",
+"Being followed.",
+"Eyes in the trees."
 ],
 "bullWarn": [
-"Head down, breath like a forge. It's already decided.",
-"The ground tells me first. Then the snort. Then the running.",
-"It paws the dirt like it's digging my spot."
+"Head's down. It's decided.",
+"Hear that snort. Move.",
+"It's pawing the dirt."
 ],
 "staredAt": [
-"The black stag is watching. It doesn't blink. Maybe it doesn't need to.",
-"It stands where no light goes and watches me work. Everyone's a critic.",
-"Those eyes again. Something out here hunts with my method and more patience."
+"It's watching. Doesn't blink.",
+"Those eyes again.",
+"Standing where no light goes. Watching."
 ],
 "death": [
-"The cold came in like an old friend who never liked me.",
-"Turns out the forest eats what it kills too.",
-"Everything I took, paid back at once. The books balance.",
-"I was the warm thing this time."
+"Cold now.",
+"My turn this time.",
+"The books balance.",
+"I was the warm thing."
 ],
 "idle": [
-"The woods don't hate me. Hate takes interest. This is just appetite.",
-"I used to count the days. Then the days stopped being different.",
-"Every tree looks like the last one. Maybe it is. Maybe I'm circling.",
-"I talk to myself because the alternative is listening.",
-"Somewhere, people are eating food they never had to apologize to.",
-"The bow was a gift. Turned out to be a prophecy.",
-"Quiet again. Out here quiet is just the woods reloading.",
-"I eat what I kill. Some nights I wonder what keeps the same rule about me."
+"Just me and the woods.",
+"Eat what I kill. That's the deal.",
+"Quiet again.",
+"Lost count of the days.",
+"Every tree looks the same.",
+"Talk to myself. Beats listening."
 ]
-};   // the hunter's voice — 129 lines
+};   // the hunter's voice
 const _saidRecent = [];
 function say(cat, ms = 3400) {
   const pool = LINES2 && LINES2[cat];
@@ -3552,6 +3933,15 @@ function tickBody() {
   updateButterflies(dt, t);
   corruptionUpdate(dt, t);
   updateMist(t, night);
+  // flower trample: live player bends instantly; the wake (zw) trails and
+  // eases to the player over ~5s (frame-rate-independent), so a flattened
+  // corridor pops back upright ~5s after you pass.
+  {
+    const tv = trampleUniform.value;
+    tv.x = player.x; tv.y = player.z;
+    const k = 1 - Math.exp(-dt / 5);
+    tv.z += (player.x - tv.z) * k; tv.w += (player.z - tv.w) * k;
+  }
   if (window._updateGrassField) window._updateGrassField();
   if (window._updateFlowerField) window._updateFlowerField();
   if (started) cryptidUpdate(night);
@@ -3618,7 +4008,13 @@ function tickBody() {
     const stickMag = Math.min(1, Math.hypot(mx, mz));
     const sprinting = (!IS_TOUCH && keys.ShiftLeft && stickMag > 0)
       || (IS_TOUCH && stickMag > 0.92);
-    noiseLevel = stickMag > 0.02 ? (sprinting ? 2 : 1) : 0;
+    // a quiet stalk = a half-stick creep, OR moving while drawn (you step soft
+    // when you're trying to thread an arrow). Feeds the continuous dB model.
+    const stalking = (!sprinting && stickMag > 0.02 && (stickMag < 0.55 || drawing));
+    setNoise(stickMag > 0.02 ? (sprinting ? 2 : 1) : 0, stalking);
+    // 0..1 gait level for audio footsteps + head-bob: stalk is quiet/slow.
+    _moveLvl = stickMag <= 0.02 ? 0
+      : (sprinting ? 1 : 0.4 + stickMag * 0.4);
     if (stickMag > 0.05 && !bflyUsed) releaseButterflies();   // first steps stir them up
     const sprint = sprinting ? 1.65 : 1;
     const sp = 5.4 * sprint * (drawing ? 0.5 : 1) * (IS_TOUCH ? Math.max(stickMag, 0.25) : 1);
@@ -3633,12 +4029,35 @@ function tickBody() {
         nx += (nx - tr.x) / (d || 1) * push; nz += (nz - tr.z) / (d || 1) * push;
       }
     }
+    // ── step-on props: clamber onto low surfaces, block tall ones ──
+    // If a prop's `top` is within STEP_REACH of the feet, stand on it
+    // (effective ground rises to `top`); otherwise it blocks like a tree.
+    // feetY uses player.y so you can jump-onto props slightly above you.
+    const STEP_REACH = 1.1;
+    let stepGround = -Infinity;
+    const feetY = player.y;
+    for (const sp2 of STEPPROPS) {
+      const d = Math.hypot(nx - sp2.x, nz - sp2.z);
+      if (d >= sp2.r + 0.5) continue;
+      if (sp2.top <= feetY + STEP_REACH) {
+        if (sp2.top > stepGround) stepGround = sp2.top;   // clamber on
+      } else {
+        const push = (sp2.r + 0.5 - d);                   // too tall — block
+        nx += (nx - sp2.x) / (d || 1) * push; nz += (nz - sp2.z) / (d || 1) * push;
+      }
+    }
     const lim = WORLD * 0.47;
     nx = Math.max(-lim, Math.min(lim, nx)); nz = Math.max(-lim, Math.min(lim, nz));
     const ny = heightAt(nx, nz);
     // ── jump / fall: light, forgiving hop (Apple-simple) ──
-    const groundY = (ny > WATER_Y - 0.4) ? ny : player.y;
+    let groundY = (ny > WATER_Y - 0.4) ? ny : player.y;
+    if (stepGround > groundY) groundY = stepGround;       // standing on a prop
     if (ny > WATER_Y - 0.4) { player.x = nx; player.z = nz; }
+    // walking off a ledge (stepped down >0.35m) starts a real fall through
+    // the existing jump integrator instead of snapping the camera down.
+    if (grounded && groundY < player.y - 0.35) {
+      grounded = false; playerVy = 0; player.airY = player.y;
+    }
     if (jumpQ && grounded) { playerVy = 6.2; grounded = false; }
     jumpQ = false;
     if (!grounded) {
@@ -3753,7 +4172,7 @@ function tickBody() {
         if (dd < wolfDist) wolfDist = dd;
       }
     audio.update(dt, {
-      moving: !!(mx || mz), sprint: sprinting,
+      moving: !!(mx || mz), sprint: sprinting, _moveLvl,
       wolfDist, lakeDist: Math.hypot(player.x - 70, player.z + 90),
       night: window._night || 0, hp: player.hp,
     });
@@ -3830,6 +4249,19 @@ function tickBody() {
   } else {
     camera.position.set(player.x, player.y + EYE, player.z);
     camera.rotation.order = 'YXZ';
+    // subtle head-bob — stronger at a sprint, damped while drawing, zero
+    // when standing (bobPhase only advances while moving). Lateral sway is
+    // rotated into world by yaw so it reads as a side-to-side gait.
+    {
+      const amp = _moveLvl * (1 - drawT * 0.7);
+      if (amp > 0.001) {
+        const bobY = Math.sin(bobPhase) * 0.035 * amp;
+        const bobX = Math.cos(bobPhase * 0.5) * 0.022 * amp;
+        camera.position.y += bobY;
+        camera.position.x += Math.cos(player.yaw) * bobX;
+        camera.position.z += -Math.sin(player.yaw) * bobX;
+      }
+    }
     // full draw is heavy: the aim breathes, and the longer you hold,
     // the worse it gets. The sway is real — the arrow inherits it.
     const swayA = drawT * drawT * 0.0044 + Math.min(holdT, 4) * 0.0019;

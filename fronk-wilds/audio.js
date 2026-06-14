@@ -518,8 +518,12 @@ export class AudioEngine {
   setGround(kind) {                 // footstep material from the game
     this._ground = (kind === 'rock' || kind === 'sand') ? kind : 'grass';
   }
-  _step(sprint) {                   // footstep (shared noise, no alloc)
+  _step(speed) {                   // footstep (shared noise, no alloc)
+    // speed: 0..1 gait level. The hunter's noise is a real dB curve — a
+    // half-stick stalk is a whisper, a full sprint is the loud floor. The
+    // dartboard the animals read off scales with this too (see game.js).
     const C = this.ctx, t = C.currentTime;
+    const sp = Math.max(0, Math.min(1, speed == null ? 1 : speed));
     // single persistent panner — steps alternate gently L/R
     if (!this._stepPan && C.createStereoPanner) {
       this._stepPan = C.createStereoPanner();
@@ -530,7 +534,9 @@ export class AudioEngine {
       this._stepL = !this._stepL;
       this._stepPan.pan.setValueAtTime(this._stepL ? -0.12 : 0.12, t);
     }
-    const lvl = sprint ? 1.0 : 0.6;   // walk vs sprint = one multiplier
+    // dB-below-max: speed=1 → 0 dB (full), speed=0.4 stalk → ~ -16 dB.
+    const lvl = Math.pow(10, (-(1 - sp) * 26) / 20);
+    const sprintMix = Math.max(0, (sp - 0.6) / 0.4);   // 0 below jog, 1 at full sprint
     const burst = (v, dur, fHz, type = 'lowpass', q = 0.7) => {
       const src = C.createBufferSource(); src.buffer = this._shotNoise;
       const f = C.createBiquadFilter(); f.type = type;
@@ -546,8 +552,14 @@ export class AudioEngine {
       burst(0.08, 0.02, 3400, 'bandpass', 2);
     } else if (this._ground === 'sand') { // soft shuffle — longer, quieter
       burst(0.22, 0.11, 460 + Math.random() * 90);
-    } else {                              // grass: the soft pat
-      burst(0.34, 0.07, 300 + Math.random() * 160);
+    } else {                              // grass: the soft body thud
+      burst(0.34, 0.07, 250 + Math.random() * 130);
+      // a run is richer: a hard heel down low + a scuff of grit up top,
+      // mixed in only as the gait crosses into a sprint.
+      if (sprintMix > 0.01) {
+        burst(0.30 * sprintMix, 0.05, 120 + Math.random() * 40);          // hard heel
+        burst(0.10 * sprintMix, 0.06, 1600 + Math.random() * 700, 'highpass', 0.8); // grit/scuff
+      }
     }
   }
   _cricket() {
@@ -805,12 +817,16 @@ export class AudioEngine {
       }
     }
 
-    // footsteps
+    // footsteps — cadence and loudness both ride the gait level (_moveLvl,
+    // 0..1). A stalk is slow + quiet; a sprint is fast + loud. Falls back to
+    // the old sprint flag if the game didn't pass a level.
     if (s.moving) {
+      const speed = s._moveLvl != null ? Math.max(0, Math.min(1, s._moveLvl))
+                  : (s.sprint ? 1 : 0.55);
       this._stepT -= dt;
       if (this._stepT <= 0) {
-        this._stepT = s.sprint ? 0.3 : 0.46;
-        this._step(s.sprint);
+        this._stepT = 0.52 - speed * 0.24;   // ~0.52s stalk → ~0.28s sprint
+        this._step(speed);
       }
     } else this._stepT = 0.12;
   }
