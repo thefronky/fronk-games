@@ -2079,35 +2079,61 @@ function placeWildfires(spawnX, spawnZ, campX, campZ) {
 // a small fire. Safe from animals, peaceful music. Returned to often.
 let BASE_FIRE = null;        // {cx,cz} the central campfire (warmth pulse)
 let COVE = null;             // {x,z} the storage cove — walk in to stash meat
+let BASE_RING = null;        // {x,z,r} the wall ring — animals stay out
 const BASE_FIRES = [];       // fire handles to flicker each frame
+const bigStoneGeo = new THREE.DodecahedronGeometry(1, 0);
 function buildBase(bx, bz) {
   const g = new THREE.Group();
   const baseY = heightAt(bx, bz);
   g.position.set(bx, baseY, bz);
 
-  // a ring of hand-set stones around the flower bed — you must step over
-  const RING = 12;
   const boneMat = new THREE.MeshStandardMaterial({ color: 0xe8e0cf, roughness: 0.9 });
-  for (let i = 0; i < 22; i++) {
-    const a = i / 22 * Math.PI * 2;
-    const s = new THREE.Mesh(ringStoneGeo, stoneMat);
-    const rr = RING + Math.sin(i * 2.3) * 0.7;
-    s.position.set(Math.cos(a) * rr, 0.12 + (i % 3) * 0.04, Math.sin(a) * rr);
-    s.rotation.set(i * 0.6, a, i * 0.3);
-    s.scale.setScalar(0.9 + (i % 4) * 0.18);
-    g.add(s);
-  }
+  const cdir = Math.PI * 0.5;                 // the cove's bearing (its gap in the wall)
 
-  // the central campfire — its warmth always here
-  buildFire(g, 0, 0, true);
-  BASE_FIRE = { cx: bx, cz: bz, fire: g.userData.fire };
+  // ── the wall ── a real ring of boulders you must JUMP to clear, set
+  // shoulder-high. Solid (no walking through) and tall enough that
+  // animals can't get in — but a hop puts you up and over. A gap is
+  // left where the cove sits.
+  const RING = 9.5, WALL_H = 1.6;             // 1.6m ABOVE LOCAL GROUND → blocks a walk, clears a jump
+  for (let i = 0; i < 38; i++) {
+    const a = i / 38 * Math.PI * 2;            // a COMPLETE ring — you must jump out anywhere
+    const rr = RING + Math.sin(i * 2.3) * 0.5;
+    const wx = bx + Math.cos(a) * rr, wz = bz + Math.sin(a) * rr;
+    const gY = heightAt(wx, wz);               // sit each boulder on its OWN ground
+    const sc = 1.3 + (i % 4) * 0.18;
+    const s = new THREE.Mesh(bigStoneGeo, stoneMat);
+    s.position.set(Math.cos(a) * rr, (gY - baseY) + WALL_H * 0.55, Math.sin(a) * rr);
+    s.rotation.set(i * 0.3, a, i * 0.25);
+    s.scale.set(sc, WALL_H * 0.9, sc);
+    g.add(s);
+    // solid + clamber-on-jump: top is 1.6m over its own footing, so a
+    // grounded walk is blocked but a jump puts your feet over it
+    STEPPROPS.push({ x: wx, z: wz, r: sc * 0.92, top: gY + WALL_H });
+  }
+  BASE_RING = { x: bx, z: bz, r: RING - 1.2 };   // animals deflected at this radius
+
+  // ── the campfire — OFF to one side so you wake NEXT to it, not in it ──
+  const FX = -3.6, FZ = 1.4;
+  buildFire(g, FX, FZ, true);
+  BASE_FIRE = { cx: bx + FX, cz: bz + FZ, fire: g.userData.fire };
   BASE_FIRES.push(g.userData.fire);
-  // a sitting log by the fire
+  // make it a real campfire: bigger flames + a teepee of burning wood
+  const cf = g.userData.fire;
+  cf.flame.scale.set(1.7, 2.0, 1.7); cf.flame.position.y = 0.7;
+  cf.light.distance = 30; cf.light.position.y = 2.2;
+  for (let i = 0; i < 5; i++) {               // logs stacked into the fire
+    const lg = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.2, 2.2, 6),
+      i % 2 ? logMat : charMat);
+    const a = i / 5 * Math.PI * 2;
+    lg.position.set(FX + Math.cos(a) * 0.5, 0.7, FZ + Math.sin(a) * 0.5);
+    lg.rotation.set(Math.cos(a) * 0.5, a, 0.95);   // leaning teepee
+    g.add(lg);
+  }
+  // a sitting log beside the fire
   const log = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.32, 2.4, 7), logMat);
-  log.rotation.z = Math.PI / 2; log.position.set(2.4, 0.34, 1.0); log.rotation.y = 0.5; g.add(log);
+  log.rotation.z = Math.PI / 2; log.position.set(FX + 2.6, 0.34, FZ + 1.2); log.rotation.y = 0.5; g.add(log);
 
   // ── the cove: a low arc of big stones with a meat cache ──
-  const cdir = Math.PI * 0.5;                 // cove sits to one side of the fire
   const cx = Math.cos(cdir) * 8.5, cz = Math.sin(cdir) * 8.5;
   COVE = { x: bx + cx, z: bz + cz };
   for (let i = 0; i < 6; i++) {                // the curved back wall
@@ -2152,7 +2178,7 @@ function buildBase(bx, bz) {
 }
 
 // nearest wild fire to the player, and whether you're inside its safe ring
-let nearWildFire = false, nearWildFireD = 1e9;
+let nearWildFire = false, nearWildFireD = 1e9, _fireStare = 0, _revealStep = 0;
 function updateWildfires(t, night) {
   const fl1 = Math.sin(t * 11), fl2 = Math.sin(t * 23), fl3 = Math.sin(t * 31);
   // they bank to embers in daylight, roar back up after dark
@@ -2186,6 +2212,26 @@ function updateWildfires(t, night) {
       e.position.y = 0.63 + Math.sin(t * 2.3 + e.userData.ph) * 0.18 + (i % 3) * 0.06;
       e.material.emissiveIntensity = 2.5 + Math.sin(t * 7 + e.userData.ph) * 1.2;
     }
+  }
+
+  // ── stare into the campfire and it answers ── hold your gaze on it and
+  // the flames warm up: brighter, more yellow, the light swells. Look
+  // away and it settles back. A small, alive thing to find.
+  if (BASE_FIRE) {
+    const dx = BASE_FIRE.cx - player.x, dz = BASE_FIRE.cz - player.z;
+    const d = Math.hypot(dx, dz) || 1;
+    const look = (Math.sin(player.yaw) * dx + Math.cos(player.yaw) * dz) / d;
+    const staring = d < 13 && look > 0.86 && player.pitch < 0.2;
+    _fireStare += ((staring ? 1 : 0) - _fireStare) * Math.min(1, (simDt ?? 0.016) * 1.6);
+    const s = _fireStare;
+    const cf = BASE_FIRE.fire;
+    cf.fa.material.emissiveIntensity = 2.4 + s * 3.2;
+    cf.fb.material.emissiveIntensity = 2.8 + s * 3.6;
+    cf.fc.material.emissiveIntensity = 3.4 + s * 4.2;
+    cf.fc.material.color.setRGB(1, 0.89 + s * 0.11, 0.6 + s * 0.3);   // toward white-hot yellow
+    cf.fb.material.color.setRGB(1, 0.70 + s * 0.18, 0.28 + s * 0.22);
+    cf.light.intensity += s * 10;
+    cf.light.color.setRGB(1, 0.57 + s * 0.18, 0.26 + s * 0.12);
   }
 }
 
@@ -3053,6 +3099,10 @@ function stepAnimal(a, speed, dt) {
   if (ny < WATER_Y + 0.6 || Math.abs(nx) > lim || Math.abs(nz) > lim) {
     a.dir += Math.PI * (0.5 + Math.random() * 0.5); return;
   }
+  // the base wall keeps animals out — they can't climb it. Turn away.
+  if (BASE_RING && Math.hypot(nx - BASE_RING.x, nz - BASE_RING.z) < BASE_RING.r) {
+    a.dir += Math.PI * (0.5 + Math.random() * 0.5); return;
+  }
   p.set(nx, ny, nz);
   a._moved = true;            // gait sway/bob only plays while actually moving
 }
@@ -3333,6 +3383,8 @@ window._player = player;
 player.y = heightAt(player.x, player.z);
 const score = {};
 const keys = {};
+window._keys = keys;   // test hook: drive movement from window._sim
+window._jump = () => { jumpQ = true; };   // test hook: queue a jump in window._sim
 let started = false, drawT = 0, holdT = 0, raiseT = 0, drawing = false, dead = false, bobPhase = 0, hapticT = 0;
 let _moveLvl = 0;   // 0..1 gait level — drives footstep audio + camera head-bob
 let playerVy = 0, grounded = true, jumpQ = false;
@@ -3344,7 +3396,8 @@ let inCanoe = false, canoeSpd = 0, oarLStroke = false, oarRStroke = false, _wasC
 const INTRO_DUR = 3.5;
 // the opening: a vast aerial of the whole valley; tap and the camera
 // dives toward the clearing, blacks out, and you wake there.
-let launching = false, launchT = 0; const LAUNCH_DUR = 2.6;
+let launching = false, launchT = 0; const LAUNCH_DUR = 3.2;
+const _diveFrom = new THREE.Vector3();   // frozen aerial origin of the dive
 // arrow-cam: a brief cinematic chase that rides each loosed arrow
 let arrowCam = null;        // { rec, mode:'follow'|'return', rt }
 window._acState = () => arrowCam ? arrowCam.mode : 'none';
@@ -4433,13 +4486,10 @@ function tickBody() {
     }
     const _ch = document.getElementById('crosshair');
     _ch.classList.toggle('drawn', drawT > 0.5);
-    // at full draw the aim WANDERS — the crosshair drifts with the
-    // strain (worsens the longer you hold), so you must time the loose.
-    const chDrift = drawT * drawT * 9 + Math.min(holdT, 4) * 5;
-    const chx = (Math.sin(t * 1.7) + 0.5 * Math.sin(t * 4.3)) * chDrift;
-    const chy = (Math.cos(t * 2.3) * 0.8 + Math.sin(t * 5.1) * 0.4) * chDrift;
-    _ch.style.transform = 'translate(calc(-50% + ' + chx.toFixed(1) +
-      'px), calc(-50% + ' + chy.toFixed(1) + 'px))' + (drawT > 0.5 ? ' scale(2.2)' : '');
+    // the reticle stays DEAD CENTER — it always marks exactly where the
+    // arrow goes. The aim still wanders, but as the camera sway below
+    // drifts the whole VIEW under the fixed reticle (truthful, not a lie).
+    _ch.style.transform = 'translate(-50%,-50%)' + (drawT > 0.5 ? ' scale(2.0)' : '');
     const e = drawT * drawT * (3 - 2 * drawT);  // smoothstep — power/string pull
     const r = raiseT * raiseT * (3 - 2 * raiseT); // smoothstep — the whip-up raise
     // the bow POSE is driven by the whip (raiseT): it snaps up into the
@@ -4448,12 +4498,14 @@ function tickBody() {
     // full draw = a real longbow anchor: the riser stands nearly
     // VERTICAL just left of the sight line, the arrow runs dead ahead
     // under the eye, the string is at the cheek. You look down the shaft.
-    bow.position.set(0.34 + (-0.028 - 0.34) * r,   // settles just off the eye-line
-                     -0.4 + (-0.052 + 0.4) * r,    // up to eye height
-                     -0.62 + (-0.44 + 0.62) * r);  // drawn in close to the face
+    // the riser sits OFF to the left of the sight line — like a real
+    // archer, you look PAST the bow, not through it. Center stays clear.
+    bow.position.set(0.34 + (-0.22 - 0.34) * r,    // riser well left of center
+                     -0.4 + (-0.10 + 0.4) * r,     // a touch below the eye
+                     -0.62 + (-0.46 + 0.62) * r);  // drawn in close to the face
     bow.rotation.set(0.05 - 0.02 * r,              // limbs vertical
-                     -0.55 + 0.52 * r,             // face square downrange
-                     0.21 - 0.19 * r);             // lose the carry-cant
+                     -0.55 + 0.46 * r,             // angled slightly, not dead-on your eye
+                     0.21 - 0.10 * r);             // keep a little cant so it reads as held aside
     // walk bob + breath — you're holding it, not gliding with it
     bobPhase += dt * (mx || mz ? 7.5 : 1.6);
     bow.position.y += Math.sin(bobPhase) * (mx || mz ? 0.012 : 0.004);
@@ -4542,22 +4594,24 @@ function tickBody() {
     camera.lookAt(0, 6, 0);
     camera.rotation.order = 'YXZ';
   } else if (launching) {
-    // the dive: from the aerial down to the spawn eye, easing in, while
-    // a black veil rises — the last thing you see before you wake.
+    // the dive: a single smooth dolly from the frozen aerial down to the
+    // spawn eye. Position AND look-target both ease from exactly where the
+    // title left them — no snap, no jitter — while a black veil rises.
     launchT += dt;
     const lp = Math.min(1, launchT / LAUNCH_DUR);
-    const e = lp * lp;                    // accelerate downward (ease-in)
-    const a = t * 0.012;
-    _aerial.set(Math.cos(a) * 150, 165, Math.sin(a) * 150);
+    const e = lp * lp * (3 - 2 * lp);     // smoothstep — eases in AND out
     const tx = SPAWN.x, tz = SPAWN.z, ty = heightAt(tx, tz) + EYE;
     camera.position.set(
-      _aerial.x + (tx - _aerial.x) * e,
-      _aerial.y + (ty - _aerial.y) * e,
-      _aerial.z + (tz - _aerial.z) * e);
-    camera.lookAt(tx, heightAt(tx, tz) + 2 - e * 2, tz);
+      _diveFrom.x + (tx - _diveFrom.x) * e,
+      _diveFrom.y + (ty - _diveFrom.y) * e,
+      _diveFrom.z + (tz - _diveFrom.z) * e);
+    // look-target eases from the title's (0,6,0) to the spawn ground —
+    // starting identical to the title means the first frame doesn't jump
+    const lgy = heightAt(tx, tz) + 1.5;
+    camera.lookAt(0 + (tx - 0) * e, 6 + (lgy - 6) * e, 0 + (tz - 0) * e);
     camera.rotation.order = 'YXZ';
     const veil = document.getElementById('veil');
-    if (veil) veil.style.opacity = Math.max(0, (lp - 0.55) / 0.45);  // black in over the last ~45%
+    if (veil) veil.style.opacity = Math.max(0, (lp - 0.62) / 0.38);  // black in over the last ~38%
     if (lp >= 1) {                        // arrive → wake up
       launching = false;
       started = true; bow.visible = true; updateBowString(0);
@@ -4643,6 +4697,19 @@ function tickBody() {
   fireNear = atBase || (started && nearWildFire);   // a wild fire's ring keeps the predators back too
   // home has a voice: the jaw harp plays only while you're at the base
   if (audio.setBaseMusic) audio.setBaseMusic(atBase && !dead);
+
+  // ── learn by needing it ── on touch, controls reveal ONE at a time as
+  // you work your way out of the base. No buttons at the title or on wake.
+  if (started && !intro && IS_TOUCH && _revealStep < 3 && BASE_RING) {
+    const bc = document.body.classList;
+    const dB = Math.hypot(player.x - BASE_RING.x, player.z - BASE_RING.z);
+    if (_revealStep === 0) { bc.add('show-move'); _revealStep = 1;
+      setTimeout(() => cinematic('Get up. Look around.', 3600), 600); }
+    else if (_revealStep === 1 && dB > 7) { bc.add('show-jump'); _revealStep = 2;
+      cinematic('Jump the wall.', 3600); }
+    else if (_revealStep === 2 && dB > 11.5) { bc.add('show-bow'); _revealStep = 3;
+      cinematic('Now hunt.', 3200); }
+  }
   // kill-feel hitstop: a connected arrow holds the world at 5% speed
   // for a few real frames (0.04s flesh / 0.09s lethal). No setTimeout —
   // juiceT burns down on real dt, world dt gets scaled while it lasts.
@@ -4708,6 +4775,7 @@ loadAnimals().then(() => {
 function beginLaunch() {
   if (launching || started) return;
   launching = true; launchT = 0;
+  _diveFrom.copy(camera.position);    // freeze the dive origin — a clean dolly, no more orbit
   try { audio.start(); } catch (e) {}
   document.getElementById('title').style.opacity = 0;
   setTimeout(() => document.getElementById('title').style.display = 'none', 800);

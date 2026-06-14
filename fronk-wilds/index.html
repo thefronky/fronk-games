@@ -114,7 +114,11 @@
   /* jump: smaller, up-left of shoot — the classic reachable arc */
   #jumpBtn{right:128px;bottom:max(58px,calc(env(safe-area-inset-bottom) + 40px));
     width:66px;height:66px}
-  .touch #stickL,.touch #shootBtn,.touch #jumpBtn{display:flex}
+  /* controls reveal ONE at a time as you learn to leave the base */
+  .touch.show-move #stickL{display:flex;animation:ctlIn .7s ease both}
+  .touch.show-jump #jumpBtn{display:flex;animation:ctlIn .7s ease both}
+  .touch.show-bow #shootBtn{display:flex;animation:ctlIn .7s ease both}
+  @keyframes ctlIn{from{opacity:0;transform:scale(.8)}to{opacity:1;transform:none}}
   /* canoe mode: two big oar buttons across the bottom, hard to miss */
   #oarL,#oarR{bottom:max(28px,calc(env(safe-area-inset-bottom) + 16px));
     width:120px;height:96px;border-radius:20px;font-family:'Cinzel',serif;
