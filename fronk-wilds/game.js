@@ -43,11 +43,12 @@ const CFG = IS_TOUCH
 //   scale/tint = render overrides (bear: 1.8 scale, dark-brown 0x3a2616)
 const MENAGERIE = {
   // ── prey ──
-  Deer:  { n: 16, speed: 3.0, gallop: 12.8, hp: 2, flee: 26, r: 0.7,
-           keen: 1.45, aggroBias: 0.10, rear: 0.45, scale: 0.42, hpJit: true },
-           // the staple: EVERYWHERE, twitchy, fast — a small hard target, shoulder-high to a man at most
-  Stag:  { n: 4, speed: 2.7, gallop: 10.6, hp: 3, flee: 22, r: 0.95,
-           keen: 1.15, aggroBias: 0.30, rear: 0.70, scale: 0.52, hpJit: true },
+  Deer:  { n: 16, speed: 3.0, gallop: 10.5, hp: 2, flee: 19, r: 0.7,
+           keen: 1.2, aggroBias: 0.10, rear: 0.45, scale: 0.42, hpJit: true },
+           // the staple: EVERYWHERE — wary, but a patient stalk earns the shot.
+           // hard, not hopeless: stalk quiet to ~16m, stand still to ~8m.
+  Stag:  { n: 4, speed: 2.7, gallop: 10.0, hp: 3, flee: 17, r: 0.95,
+           keen: 1.05, aggroBias: 0.30, rear: 0.70, scale: 0.52, hpJit: true },
   Fox:   { n: 8, speed: 3.8, gallop: 12.2, hp: 1, flee: 18, r: 0.5,
            keen: 1.7, aggroBias: 0.05, rear: 0.2, scale: 0.45, darty: true },  // little critters — many, tiny, skittish, JUKE when fleeing — hard to hit
   Cow:   { n: 1, speed: 1.9, gallop: 7.4,  hp: 3, flee: 13, r: 1.6,
