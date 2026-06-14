@@ -2693,7 +2693,7 @@ window._player = player;
 player.y = heightAt(player.x, player.z);
 const score = {};
 const keys = {};
-let started = false, drawT = 0, holdT = 0, drawing = false, dead = false, bobPhase = 0, hapticT = 0;
+let started = false, drawT = 0, holdT = 0, raiseT = 0, drawing = false, dead = false, bobPhase = 0, hapticT = 0;
 let playerVy = 0, grounded = true, jumpQ = false;
 
 // ── the wake-up: a ~3.5s cinematic intro that plays on enter and on
@@ -3032,7 +3032,7 @@ function arrowUpdate(dt) {
 // bow viewmodel — a real recurve: curved limbs, leather grip, a
 // nocked arrow that appears as you draw, a string that pulls back
 const bow = new THREE.Group();
-let bowString1, bowString2, nockedArrow;
+let bowString1, bowString2, nockedArrow, drawHand;
 {
   // procedural wood grain — warm streaked figure painted to a canvas,
   // so the bow reads as real carved wood, not a flat brown tube.
@@ -3098,6 +3098,42 @@ let bowString1, bowString2, nockedArrow;
   nockedArrow.add(shaft, head);
   nockedArrow.visible = false;
   bow.add(nockedArrow);
+
+  // ── gloved string hand + sleeved forearm ──
+  // black leather glove gripping the string; a dark single-color
+  // rugged sleeve runs up the forearm out of frame. No skin, no face.
+  // Built once, parented to the bow so it inherits the whip-up; in the
+  // draw block it slides back along local +z as the power builds.
+  drawHand = new THREE.Group();
+  const gloveM = new THREE.MeshStandardMaterial({ color: 0x161412, roughness: 0.62, metalness: 0.04 });
+  const sleeveM = new THREE.MeshStandardMaterial({ color: 0x23201b, roughness: 0.95, metalness: 0.0 });
+  // palm — a chunky low-poly box, knuckles facing downrange
+  const palm = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.062, 0.034), gloveM);
+  palm.position.set(0, 0, 0.02);
+  drawHand.add(palm);
+  // three curled fingers hooking the string (boxes, splayed across the palm)
+  for (let i = 0; i < 3; i++) {
+    const fin = new THREE.Mesh(new THREE.BoxGeometry(0.014, 0.04, 0.018), gloveM);
+    fin.position.set(-0.016 + i * 0.016, 0.034, -0.002);
+    fin.rotation.x = -0.7;            // curled forward, gripping
+    drawHand.add(fin);
+  }
+  // thumb — a stubbier box on the near side, pinching the nock
+  const thumb = new THREE.Mesh(new THREE.BoxGeometry(0.016, 0.03, 0.016), gloveM);
+  thumb.position.set(0.024, 0.012, -0.006); thumb.rotation.z = 0.5; thumb.rotation.x = -0.4;
+  drawHand.add(thumb);
+  // forearm sleeve — a tapered cylinder running back out of frame
+  const sleeve = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.046, 0.32, 8), sleeveM);
+  sleeve.rotation.x = Math.PI / 2;     // lie along z, trailing toward the eye
+  sleeve.position.set(0.006, -0.006, 0.2);
+  drawHand.add(sleeve);
+  // wrist cuff — a slightly fatter band where glove meets sleeve
+  const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.032, 0.032, 0.03, 8), gloveM);
+  cuff.rotation.x = Math.PI / 2; cuff.position.set(0.003, -0.003, 0.05);
+  drawHand.add(cuff);
+  drawHand.visible = false;
+  bow.add(drawHand);
+
   bow.position.set(0.34, -0.4, -0.62);
   bow.rotation.set(0.05, -0.55, 0.21);   // canted at rest, archer-style
   bow.visible = false;            // hidden on the title screen
@@ -3125,11 +3161,15 @@ function updateBowString(draw) {
   // the arrow rests on the SHELF beside the riser, not through it —
   // offset to the side + up onto the rest like real archery
   nockedArrow.position.set(0.024, 0.012, _bsNock.z);
+  // the gloved hand grips the string AT the nock and rides it back to
+  // the cheek; it appears with the arrow and tracks the same pull.
+  drawHand.visible = draw > 0.03;
+  drawHand.position.set(0.024, 0.006, _bsNock.z + 0.012);
 }
 
 // dying mid-draw must not leave the camera zoomed / the bow drawn
 function resetDrawState() {
-  drawing = false; drawT = 0;
+  drawing = false; drawT = 0; raiseT = 0;
   if (camera.fov !== 70) { camera.fov = 70; camera.updateProjectionMatrix(); }
   updateBowString(0);
   document.getElementById('crosshair').classList.remove('drawn');
@@ -3581,7 +3621,7 @@ function tickBody() {
     noiseLevel = stickMag > 0.02 ? (sprinting ? 2 : 1) : 0;
     if (stickMag > 0.05 && !bflyUsed) releaseButterflies();   // first steps stir them up
     const sprint = sprinting ? 1.65 : 1;
-    const sp = 5.4 * sprint * (drawing ? 0.35 : 1) * (IS_TOUCH ? Math.max(stickMag, 0.25) : 1);
+    const sp = 5.4 * sprint * (drawing ? 0.5 : 1) * (IS_TOUCH ? Math.max(stickMag, 0.25) : 1);
     const sin = Math.sin(player.yaw), cos = Math.cos(player.yaw);
     let nx = player.x + (-sin * mz + cos * mx) * sp * dt;
     let nz = player.z + (-cos * mz - sin * mx) * sp * dt;
@@ -3609,10 +3649,17 @@ function tickBody() {
 
     // bow — at full draw it RAISES to your eye: grip near center,
     // nock at the cheek, slight zoom like focusing down the arrow
+    // two-phase draw: a FAST whip-up of the bow into aim pose (~0.12s),
+    // THEN a slow power build. Pressing snaps the bow up immediately;
+    // the power (drawT) then climbs at a longbow's deliberate pace.
     if (drawing) {
-      drawT = Math.min(1, drawT + dt / 1.6);    // a longbow takes its time
+      raiseT = Math.min(1, raiseT + dt / 0.12);  // whip up — ~0.12s to aim
+      drawT = Math.min(1, drawT + dt / 1.5);     // slow power build — ~1.5s to full
       if (drawT >= 1) holdT += dt; else holdT = 0;
-    } else { drawT = Math.max(0, drawT - dt * 4); holdT = 0; }
+    } else {
+      raiseT = Math.max(0, raiseT - dt * 6);     // bow drops back fast on release
+      drawT = Math.max(0, drawT - dt * 4); holdT = 0;
+    }
     if (drawing && drawT > 0 && audio.drawCreak) audio.drawCreak(Math.min(1, drawT + holdT * 0.12));
     if (drawing && IS_TOUCH && navigator.vibrate) {
       hapticT -= dt;
@@ -3630,21 +3677,25 @@ function tickBody() {
     const chy = (Math.cos(t * 2.3) * 0.8 + Math.sin(t * 5.1) * 0.4) * chDrift;
     _ch.style.transform = 'translate(calc(-50% + ' + chx.toFixed(1) +
       'px), calc(-50% + ' + chy.toFixed(1) + 'px))' + (drawT > 0.5 ? ' scale(2.2)' : '');
-    const e = drawT * drawT * (3 - 2 * drawT);  // smoothstep — weighty
+    const e = drawT * drawT * (3 - 2 * drawT);  // smoothstep — power/string pull
+    const r = raiseT * raiseT * (3 - 2 * raiseT); // smoothstep — the whip-up raise
+    // the bow POSE is driven by the whip (raiseT): it snaps up into the
+    // aim anchor in ~0.12s. The string PULL (e, from drawT) then builds
+    // slowly behind it. So you're aiming instantly, powering up after.
     // full draw = a real longbow anchor: the riser stands nearly
     // VERTICAL just left of the sight line, the arrow runs dead ahead
     // under the eye, the string is at the cheek. You look down the shaft.
-    bow.position.set(0.34 + (-0.028 - 0.34) * e,   // settles just off the eye-line
-                     -0.4 + (-0.052 + 0.4) * e,    // up to eye height
-                     -0.62 + (-0.44 + 0.62) * e);  // drawn in close to the face
-    bow.rotation.set(0.05 - 0.02 * e,              // limbs vertical
-                     -0.55 + 0.52 * e,             // face square downrange
-                     0.21 - 0.19 * e);             // lose the carry-cant
+    bow.position.set(0.34 + (-0.028 - 0.34) * r,   // settles just off the eye-line
+                     -0.4 + (-0.052 + 0.4) * r,    // up to eye height
+                     -0.62 + (-0.44 + 0.62) * r);  // drawn in close to the face
+    bow.rotation.set(0.05 - 0.02 * r,              // limbs vertical
+                     -0.55 + 0.52 * r,             // face square downrange
+                     0.21 - 0.19 * r);             // lose the carry-cant
     // walk bob + breath — you're holding it, not gliding with it
     bobPhase += dt * (mx || mz ? 7.5 : 1.6);
     bow.position.y += Math.sin(bobPhase) * (mx || mz ? 0.012 : 0.004);
     bow.position.x += Math.cos(bobPhase * 0.5) * (mx || mz ? 0.006 : 0.002);
-    let targetFov = 70 - e * 11;   // sighting focus
+    let targetFov = 70 - e * 4.5;   // gentle sighting focus — not a lockout
     // kill-feel: lethal hit = brief 0.96 punch-in, easing back out
     if (fovPunchT > 0) targetFov *= 0.96 + 0.04 * (1 - fovPunchT / PUNCH_DUR);
     if (Math.abs(camera.fov - targetFov) > 0.05) {
