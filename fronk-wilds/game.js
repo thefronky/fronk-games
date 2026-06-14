@@ -1869,6 +1869,53 @@ const fireflies = (() => {
   return p;
 })();
 
+// butterflies — a delight released the FIRST time you walk after waking.
+// a small pool of two-winged sprites that flutter up and scatter.
+const butterflies = [];
+{
+  const wingGeo = new THREE.PlaneGeometry(0.34, 0.46);
+  for (let i = 0; i < 16; i++) {
+    const col = new THREE.Color().setHSL(Math.random(), 0.7, 0.62);
+    const mat = new THREE.MeshStandardMaterial({ color: col, emissive: col,
+      emissiveIntensity: 0.45, side: THREE.DoubleSide, transparent: true, opacity: 1 });
+    const g = new THREE.Group();
+    const wl = new THREE.Mesh(wingGeo, mat); wl.position.x = -0.17;
+    const wr = new THREE.Mesh(wingGeo, mat); wr.position.x = 0.17;
+    g.add(wl, wr); g.visible = false; g.userData = { wl, wr, mat };
+    scene.add(g); butterflies.push(g);
+  }
+}
+let bflyUsed = false, bflyT = 0;
+function releaseButterflies() {
+  if (bflyUsed) return; bflyUsed = true; bflyT = 7;
+  for (const b of butterflies) {
+    const a = Math.random() * 6.283, r = 0.8 + Math.random() * 4;
+    b.position.set(player.x + Math.cos(a) * r,
+                   heightAt(player.x + Math.cos(a) * r, player.z + Math.sin(a) * r) + 0.3 + Math.random() * 0.6,
+                   player.z + Math.sin(a) * r);
+    const u = b.userData;
+    u.vx = (Math.random() - 0.5) * 1.3; u.vz = (Math.random() - 0.5) * 1.3;
+    u.vy = 0.7 + Math.random() * 0.9; u.ph = Math.random() * 6.283;
+    u.mat.opacity = 1; b.visible = true;
+  }
+}
+window._butterflies = releaseButterflies;   // test hook
+function updateButterflies(dt, t) {
+  if (bflyT <= 0) return;
+  bflyT -= dt;
+  for (const b of butterflies) {
+    if (!b.visible) continue;
+    const u = b.userData;
+    b.position.x += u.vx * dt; b.position.z += u.vz * dt;
+    b.position.y += u.vy * dt; u.vy = Math.max(-0.2, u.vy - dt * 0.3);
+    const fl = Math.sin(t * 17 + u.ph) * 0.95;   // wing flap
+    u.wl.rotation.y = fl; u.wr.rotation.y = -fl;
+    b.lookAt(player.x, b.position.y, player.z);
+    if (bflyT < 1.6) u.mat.opacity = Math.max(0, bflyT / 1.6);
+    if (bflyT <= 0) b.visible = false;
+  }
+}
+
 function updateFireflies(t, night) {
   fireflies.material.opacity = night * 0.95;
   if (night < 0.02) return;
@@ -2549,6 +2596,10 @@ let started = false, drawT = 0, holdT = 0, drawing = false, dead = false, bobPha
 // every respawn. Driven entirely by introT on the dt loop (no setTimeout),
 // so window._sim steps through it. Skippable by tap/click/key. ──
 const INTRO_DUR = 3.5;
+// the opening: a vast aerial of the whole valley; tap and the camera
+// dives toward the clearing, blacks out, and you wake there.
+let launching = false, launchT = 0; const LAUNCH_DUR = 2.6;
+const _aerial = new THREE.Vector3();   // scratch
 let intro = false, introT = 0, introSkip = false;
 window._intro = () => intro;          // test/inspection hook
 function beginIntro() {               // arm the wake-up for a fresh life
@@ -3310,6 +3361,7 @@ function tickBody() {
   moon.position.set(player.x + _moonDir.x * 820, _moonDir.y * 820, player.z + _moonDir.z * 820);
   moon.material.opacity = night * Math.max(0, Math.min(1, (_moonDir.y - 0.06) * 6)) * 0.9;
   updateFireflies(t, night);
+  updateButterflies(dt, t);
   updateMist(t, night);
   if (window._updateGrassField) window._updateGrassField();
   if (window._updateFlowerField) window._updateFlowerField();
@@ -3378,6 +3430,7 @@ function tickBody() {
     const sprinting = (!IS_TOUCH && keys.ShiftLeft && stickMag > 0)
       || (IS_TOUCH && stickMag > 0.92);
     noiseLevel = stickMag > 0.02 ? (sprinting ? 2 : 1) : 0;
+    if (stickMag > 0.05 && !bflyUsed) releaseButterflies();   // first steps stir them up
     const sprint = sprinting ? 1.65 : 1;
     const sp = 5.4 * sprint * (drawing ? 0.35 : 1) * (IS_TOUCH ? Math.max(stickMag, 0.25) : 1);
     const sin = Math.sin(player.yaw), cos = Math.cos(player.yaw);
@@ -3490,14 +3543,39 @@ function tickBody() {
     });
   }
 
-  if (!started) {
-    // title screen: slow drift over the meadow toward the lake, the
-    // world breathing behind the wordmark
-    const a = t * 0.021;
-    const cx = -20 + Math.cos(a) * 26, cz = 0 + Math.sin(a) * 26;
-    camera.position.set(cx, Math.max(heightAt(cx, cz), WATER_Y) + 7.5, cz);
-    camera.lookAt(70, heightAt(70, -90) + 14, -90);
+  // title/dive: open the fog so the aerial vista isn't washed to haze
+  if (!started) { scene.fog.far = 900; }
+  if (!started && !launching) {
+    // TITLE: a vast, high, slowly-orbiting aerial of the whole valley —
+    // the world should feel enormous before you're dropped into it.
+    const a = t * 0.012;
+    camera.position.set(Math.cos(a) * 150, 165, Math.sin(a) * 150);
+    camera.lookAt(0, 6, 0);
     camera.rotation.order = 'YXZ';
+  } else if (launching) {
+    // the dive: from the aerial down to the spawn eye, easing in, while
+    // a black veil rises — the last thing you see before you wake.
+    launchT += dt;
+    const lp = Math.min(1, launchT / LAUNCH_DUR);
+    const e = lp * lp;                    // accelerate downward (ease-in)
+    const a = t * 0.012;
+    _aerial.set(Math.cos(a) * 150, 165, Math.sin(a) * 150);
+    const tx = SPAWN.x, tz = SPAWN.z, ty = heightAt(tx, tz) + EYE;
+    camera.position.set(
+      _aerial.x + (tx - _aerial.x) * e,
+      _aerial.y + (ty - _aerial.y) * e,
+      _aerial.z + (tz - _aerial.z) * e);
+    camera.lookAt(tx, heightAt(tx, tz) + 2 - e * 2, tz);
+    camera.rotation.order = 'YXZ';
+    const veil = document.getElementById('veil');
+    if (veil) veil.style.opacity = Math.max(0, (lp - 0.55) / 0.45);  // black in over the last ~45%
+    if (lp >= 1) {                        // arrive → wake up
+      launching = false;
+      started = true; bow.visible = true; updateBowString(0);
+      document.getElementById('hud').style.opacity = 1;
+      beginIntro();                       // lids shut → eyes open in the grass
+      if (veil) veil.style.opacity = 0;   // the eyelids take over the black
+    }
   } else if (intro) {
     // waking: camera starts LOW in the grass, pitched up at the sky,
     // then rises and levels to standing eye height with a slight sway.
@@ -3601,20 +3679,19 @@ loadAnimals().then(() => {
   }
 }
 
-document.getElementById('play').addEventListener('click', () => {
-  started = true;
-  bow.visible = true;
-  updateBowString(0);
-  beginIntro();                         // wake up before you hunt
-  document.getElementById('hud').style.opacity = 1;
-  try { audio.start(); } catch (e) { console.warn('audio unavailable:', e); }
-  // no tutorial, no informing HUD — they learn the hard way.
-  setTimeout(() => toast('You are hungry. So is everything else here.', 6200), 1200);
+function beginLaunch() {
+  if (launching || started) return;
+  launching = true; launchT = 0;
+  try { audio.start(); } catch (e) {}
   document.getElementById('title').style.opacity = 0;
-  setTimeout(() => document.getElementById('title').style.display = 'none', 650);
+  setTimeout(() => document.getElementById('title').style.display = 'none', 800);
   if (!IS_TOUCH) canvas.requestPointerLock();
   else if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => {});
-});
+}
+// tap ANYWHERE to begin — no button, no instructions
+document.getElementById('play').addEventListener('click', beginLaunch);
+document.getElementById('title').addEventListener('click', beginLaunch);
+document.getElementById('title').addEventListener('touchstart', (e) => { e.preventDefault(); beginLaunch(); }, { passive: false });
 canvas.addEventListener('click', () => {
   if (started && !IS_TOUCH && !document.pointerLockElement) canvas.requestPointerLock();
 });

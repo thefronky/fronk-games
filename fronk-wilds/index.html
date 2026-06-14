@@ -35,7 +35,7 @@
     opacity:0;transition:opacity .25s;pointer-events:none}
 
   /* ── title screen — the world itself is the backdrop, gone wrong ── */
-  #title{position:fixed;inset:0;z-index:10;display:flex;flex-direction:column;
+  #title{position:fixed;inset:0;z-index:10;cursor:pointer;display:flex;flex-direction:column;
     align-items:center;justify-content:center;color:#d9cfc0;text-align:center;
     padding:24px;transition:opacity 1.2s;
     background:radial-gradient(ellipse at center,transparent 24%,rgba(4,2,2,.78) 100%)}
@@ -64,6 +64,7 @@
   @keyframes breathe{0%,100%{opacity:.22}50%{opacity:.82}}
   #loadmsg{position:absolute;bottom:max(26px,env(safe-area-inset-bottom));
     font-size:11px;letter-spacing:.18em;opacity:.45}
+  #veil{position:fixed;inset:0;z-index:18;background:#050302;opacity:0;pointer-events:none;transition:opacity .25s linear}
   #vignette{position:fixed;inset:0;pointer-events:none;z-index:5;
     background:radial-gradient(ellipse at center,transparent 52%,rgba(5,3,2,.52) 100%)}
 
@@ -114,6 +115,7 @@
     font-size:20px;pointer-events:auto;cursor:pointer;opacity:.8">🔊</div>
 </div>
 <div id="hurt"></div>
+<div id="veil"></div>
 <div id="eyelids"><div class="lid" id="lidTop"></div><div class="lid" id="lidBot"></div></div>
 
 <div id="stickL" class="stick"><div class="knob" id="knobL"></div></div>
@@ -123,8 +125,8 @@
 <div id="title">
   <h1><span>C</span><span>O</span><span>N</span><span>S</span><span>U</span><span>M</span><span>E</span></h1>
   <div class="sub">eat. or be eaten.</div>
-  <button id="play">— enter —</button>
-  <div id="loadmsg">it is loading. stay quiet.</div>
+  <button id="play" aria-label="begin" style="opacity:0;height:1px;padding:0;margin:0"></button>
+  <div id="loadmsg">it is loading.</div>
 </div>
 
 <script type="importmap">
