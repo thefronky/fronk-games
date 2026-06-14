@@ -49,7 +49,7 @@ const MENAGERIE = {
   Stag:  { n: 4, speed: 2.7, gallop: 10.6, hp: 3, flee: 22, r: 1.5,
            keen: 1.15, aggroBias: 0.30, rear: 0.70, scale: 1.18, hpJit: true },
   Fox:   { n: 8, speed: 3.8, gallop: 12.2, hp: 1, flee: 18, r: 0.5,
-           keen: 1.7, aggroBias: 0.05, rear: 0.2, scale: 0.45 },  // little critters — many, tiny, skittish, hard to hit
+           keen: 1.7, aggroBias: 0.05, rear: 0.2, scale: 0.45, darty: true },  // little critters — many, tiny, skittish, JUKE when fleeing — hard to hit
   Cow:   { n: 1, speed: 1.9, gallop: 7.4,  hp: 3, flee: 13, r: 1.6,
            keen: 0.5, aggroBias: 0.05, rear: 0.2, gait: 'sway', scale: 1.22, hpJit: true }, // RARE now — rarer than bears
   Horse: { n: 2, speed: 3.2, gallop: 13.8, hp: 9, flee: 20, r: 1.6,
@@ -2858,6 +2858,14 @@ function animalUpdate(a, dt) {
     } else if (a.state === 'flee') {
       a.t -= dt;
       setAnim(a, 'Gallop');
+      // darty critters (foxes) JUKE — sharp lateral cuts a few times a
+      // second over the away-vector, so they're a real pain to hit on the run
+      if (a.cfg.darty) {
+        a._jukeT = (a._jukeT ?? 0) - dt;
+        if (a._jukeT <= 0) { a._jukeT = 0.18 + Math.random() * 0.22;
+          a._juke = (Math.random() - 0.5) * 1.7; }
+        a.dir = Math.atan2(-dx, -dz) + a._juke;
+      }
       stepAnimal(a, a.cfg.gallop, dt);
       if (a.bleeding) {
         dropBlood(a);
