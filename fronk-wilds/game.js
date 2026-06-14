@@ -1323,6 +1323,109 @@ function mergeGeoms(list) {
   });
 }
 
+// ───────────────────────── the corruption ─────────────────────────
+// Some trees are WRONG. A blighted trunk crowned with a knot of sharp
+// stingers — sickly, twitching, faintly glowing at the barbs. Get close
+// and it stings you. (Lies-Beneath energy: stylized but genuinely off.)
+const CORRUPT = []; window.CORRUPT = CORRUPT;
+const STING_R = 3.4;
+let _corruptMat = null;
+{
+  const _M = new THREE.Matrix4(), _Q = new THREE.Quaternion(),
+        _P = new THREE.Vector3(), _S = new THREE.Vector3(), _E = new THREE.Euler();
+  // blighted trunk
+  const trunk = new THREE.CylinderGeometry(0.18, 0.4, 4.2, 6);
+  trunk.translate(0, 2.1, 0);
+  // a knot of radiating stingers — sharp cones, irregular, NOT bubbly
+  const parts = [trunk];
+  const core = new THREE.IcosahedronGeometry(0.95, 0); core.translate(0, 5.0, 0);
+  parts.push(core);
+  const tipIdx = [];                       // track which verts are barb tips (for color)
+  for (let i = 0; i < 17; i++) {
+    const len = 1.1 + Math.random() * 1.6;
+    const sp = new THREE.ConeGeometry(0.12 + Math.random() * 0.06, len, 4);
+    sp.translate(0, len / 2, 0);           // base at origin
+    // aim outward in a rough sphere (bias upward/outward, not down)
+    const az = Math.random() * Math.PI * 2;
+    const el = (Math.random() * 0.9 - 0.15);
+    _E.set(Math.PI / 2 - el, az, 0); _Q.setFromEuler(_E);
+    _P.set(0, 5.0, 0); _S.set(1, 1, 1);
+    sp.applyMatrix4(_M.compose(_P, _Q, _S));
+    parts.push(sp);
+  }
+  const cgeo = mergeGeoms(parts);
+  // vertex colors: near-black blighted base, sickly crimson at the barb
+  // TIPS (highest-from-core points read as the glowing stinger points)
+  const pos = cgeo.attributes.position, col = new Float32Array(pos.count * 3);
+  const base = new THREE.Color(0x140a12), barb = new THREE.Color(0x6e0c1e);
+  for (let i = 0; i < pos.count; i++) {
+    const dy = pos.getY(i) - 5.0;
+    const rad = Math.hypot(pos.getX(i), dy, pos.getZ(i));
+    const tip = Math.max(0, Math.min(1, (rad - 1.0) / 1.6));   // far from core = barb tip
+    const c = base.clone().lerp(barb, tip * tip);
+    col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
+  }
+  cgeo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+
+  _corruptMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1,
+    emissive: 0x5a0a18, emissiveIntensity: 0.5, flatShading: true });
+  // WRITHE: a wrong, twitchy quiver — higher freq, small amp, per-instance
+  // phase, scaled hard toward the barbs so the stingers shiver.
+  _corruptMat.onBeforeCompile = (sh) => {
+    sh.uniforms.uTime = windUniforms.uTime;
+    sh.vertexShader = 'uniform float uTime;\n' + sh.vertexShader.replace('#include <begin_vertex>',
+      `#include <begin_vertex>
+       float cw = clamp((position.y - 3.5) / 2.5, 0.0, 1.0);
+       float cph = instanceMatrix[3][0]*0.5 + instanceMatrix[3][2]*0.37;
+       float tw = sin(uTime*3.1 + cph) + 0.5*sin(uTime*7.3 + cph*2.1);
+       transformed.x += tw * cw * 0.13;
+       transformed.z += cos(uTime*2.6 + cph*1.4) * cw * 0.11;
+       transformed.y += sin(uTime*1.7 + cph) * cw * 0.05;`);
+  };
+
+  const N_CORRUPT = IS_TOUCH ? 12 : 18;
+  const inst = new THREE.InstancedMesh(cgeo, _corruptMat, N_CORRUPT);
+  inst.castShadow = true;
+  let placed = 0, guard = 0;
+  while (placed < N_CORRUPT && guard++ < N_CORRUPT * 60) {
+    const x = (Math.random() - 0.5) * WORLD * 0.9,
+          z = (Math.random() - 0.5) * WORLD * 0.9,
+          y = heightAt(x, z);
+    if (y < WATER_Y + 1.5 || y > 22) continue;
+    if (Math.hypot(x, z) < 55) continue;          // never near the wake clearing
+    _P.set(x, y - 0.1, z);
+    _E.set(0, Math.random() * Math.PI * 2, 0); _Q.setFromEuler(_E);
+    const sc = 1.0 + Math.random() * 0.8; _S.set(sc, sc, sc);
+    inst.setMatrixAt(placed++, _M.compose(_P, _Q, _S));
+    CORRUPT.push({ x, z });
+    TREES.push({ x, z, r: 1.0 * sc });            // the trunk is solid
+  }
+  inst.count = placed;
+  scene.add(inst);
+}
+let _stingThudT = 0, _stingSayT = 0;
+function corruptionUpdate(dt, t) {
+  if (_corruptMat) _corruptMat.emissiveIntensity = 0.42 + 0.28 * Math.sin(t * 2.2);  // sick pulse
+  if (!started || dead) return;
+  let near = 1e9;
+  for (const c of CORRUPT) {
+    const d = Math.hypot(c.x - player.x, c.z - player.z);
+    if (d < near) near = d;
+  }
+  _stingThudT -= dt; _stingSayT -= dt;
+  if (near < STING_R) {
+    player.hp -= dt * 13; renderHP();             // it drinks from you
+    document.getElementById('hurt').style.opacity = String(0.3 + 0.3 * Math.sin(t * 9));
+    if (_stingThudT <= 0) { _stingThudT = 0.5; if (audio.thud) audio.thud(); }
+    if (_stingSayT <= 0) { _stingSayT = 6; say('corrupt'); }
+    if (player.hp <= 0 && !dead) { dead = true; say('death', 4200);
+      setTimeout(() => { player.hp = 100; player.x = SPAWN.x; player.z = SPAWN.z;
+        player.y = heightAt(SPAWN.x, SPAWN.z); dead = false; renderHP(); beginIntro(); }, 3500); }
+  } else if (_stingThudT < 0.4) {
+    document.getElementById('hurt').style.opacity = '0';
+  }
+}
+
 // drifting clouds
 const clouds = [];
 {
@@ -3124,6 +3227,10 @@ if (!IS_TOUCH) {
 
 // ───────────────────────── HUD ─────────────────────────
 const LINES2 = {
+"corrupt": ["Something here is wrong. It wants in.",
+            "Those barbs are weeping. Don't touch the weeping ones.",
+            "The tree breathed. Trees don't breathe.",
+            "It drinks. I felt it take a sip of me."],
 "wake": [
 "Still here. The woods didn't take me in my sleep.",
 "Eyes open. The grass let me keep them this time.",
@@ -3403,6 +3510,7 @@ function tickBody() {
   moon.material.opacity = night * Math.max(0, Math.min(1, (_moonDir.y - 0.06) * 6)) * 0.9;
   updateFireflies(t, night);
   updateButterflies(dt, t);
+  corruptionUpdate(dt, t);
   updateMist(t, night);
   if (window._updateGrassField) window._updateGrassField();
   if (window._updateFlowerField) window._updateFlowerField();
