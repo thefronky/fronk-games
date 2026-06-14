@@ -127,6 +127,7 @@
   #oarL svg,#oarR svg{width:34px;height:34px}
   /* in the canoe: show oars, hide the land controls */
   .touch.canoe #oarL,.touch.canoe #oarR{display:flex}
+  #oarL.rowing,#oarR.rowing{background:rgba(60,110,150,.34);border-color:rgba(150,210,255,.6)}
   .touch.canoe #stickL,.touch.canoe #jumpBtn{display:none}
 </style>
 </head>
@@ -168,15 +169,15 @@
     <circle cx="4.5" cy="21" r="1.7" fill="currentColor" stroke="none"/>
     <path d="M6 24.5 H22"/></svg>
 </button>
-<button id="oarL" class="abtn" aria-label="left oar">
-  <svg viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M19 4 L9 18"/><ellipse cx="6.5" cy="21.5" rx="4" ry="5.5" transform="rotate(-38 6.5 21.5)"/></svg>
-  <span>left</span>
+<button id="oarL" class="abtn" aria-label="left oar — circle to row">
+  <svg viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M22 14 a8 8 0 1 1 -3.2 -6.4"/><path d="M22 5 l0 4 l-4 0"/></svg>
+  <span>row</span>
 </button>
-<button id="oarR" class="abtn" aria-label="right oar">
-  <svg viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M9 4 L19 18"/><ellipse cx="21.5" cy="21.5" rx="4" ry="5.5" transform="rotate(38 21.5 21.5)"/></svg>
-  <span>right</span>
+<button id="oarR" class="abtn" aria-label="right oar — circle to row">
+  <svg viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M6 14 a8 8 0 1 0 3.2 -6.4"/><path d="M6 5 l0 4 l4 0"/></svg>
+  <span>row</span>
 </button>
 
 <div id="vignette"></div>

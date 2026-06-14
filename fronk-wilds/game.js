@@ -43,15 +43,16 @@ const CFG = IS_TOUCH
 //   scale/tint = render overrides (bear: 1.8 scale, dark-brown 0x3a2616)
 const MENAGERIE = {
   // ── prey ──
-  Deer:  { n: 8, speed: 3.0, gallop: 10.5, hp: 2, flee: 20, r: 1.3,
-           keen: 1.15, aggroBias: 0.10, rear: 0.55, scale: 1.0, hpJit: true },
-  Stag:  { n: 4, speed: 2.7, gallop: 10.0, hp: 3, flee: 18, r: 1.5,
-           keen: 1.05, aggroBias: 0.30, rear: 0.70, scale: 1.18, hpJit: true },
-  Fox:   { n: 5, speed: 3.6, gallop: 11.8, hp: 1, flee: 19, r: 0.55,
-           keen: 1.6, aggroBias: 0.05, rear: 0.2, scale: 0.45 },  // small, skittish, keen — dies fast, runs fast
-  Cow:   { n: 4, speed: 1.9, gallop: 7.4,  hp: 3, flee: 13, r: 1.6,
-           keen: 0.5, aggroBias: 0.05, rear: 0.2, gait: 'sway', scale: 1.22, hpJit: true }, // docile, dull
-  Horse: { n: 3, speed: 3.2, gallop: 13.8, hp: 9, flee: 18, r: 1.6,
+  Deer:  { n: 16, speed: 3.0, gallop: 12.8, hp: 2, flee: 26, r: 1.1,
+           keen: 1.45, aggroBias: 0.10, rear: 0.45, scale: 1.0, hpJit: true },
+           // the staple: EVERYWHERE, twitchy, fast, a small hard target
+  Stag:  { n: 4, speed: 2.7, gallop: 10.6, hp: 3, flee: 22, r: 1.5,
+           keen: 1.15, aggroBias: 0.30, rear: 0.70, scale: 1.18, hpJit: true },
+  Fox:   { n: 8, speed: 3.8, gallop: 12.2, hp: 1, flee: 18, r: 0.5,
+           keen: 1.7, aggroBias: 0.05, rear: 0.2, scale: 0.45 },  // little critters — many, tiny, skittish, hard to hit
+  Cow:   { n: 1, speed: 1.9, gallop: 7.4,  hp: 3, flee: 13, r: 1.6,
+           keen: 0.5, aggroBias: 0.05, rear: 0.2, gait: 'sway', scale: 1.22, hpJit: true }, // RARE now — rarer than bears
+  Horse: { n: 2, speed: 3.2, gallop: 13.8, hp: 9, flee: 20, r: 1.6,
            keen: 1.2, aggroBias: 0.25, rear: 0.65, gait: 'smooth',
            hpJit: true, tanky: true, scale: 1.3 },        // 8-10 hits, impressive bolt
   // ── predator / territorial ──
@@ -59,11 +60,11 @@ const MENAGERIE = {
            keen: 1.6,  aggroBias: 0.45, scale: 0.8,
            hunts: true, aggroR: 38, dmg: 22, packR: 80 },
            // circles before committing; after dark the whole pack answers
-  Bull:  { n: 3, speed: 2.2, gallop: 9.6,  hp: 4, flee: 0,  r: 1.6,
+  Bull:  { n: 2, speed: 2.2, gallop: 9.6,  hp: 4, flee: 0,  r: 1.6,
            keen: 0.8,  aggroBias: 0.6, scale: 1.15, hpJit: true,
            territorial: 16, dmg: 30 },
            // wanders calm — gives ONE warning stomp, then it's a freight train
-  Bear:  { n: 2, speed: 2.6, gallop: 9.4,  hp: 9, flee: 0,  r: 2.0,
+  Bear:  { n: 3, speed: 2.6, gallop: 9.4,  hp: 9, flee: 0,  r: 2.0,
            keen: 1.0,  aggroBias: 0.7,
            hpJit: true, gait: 'bound', bearish: true,
            aggroR: 24, dmg: 42, scale: 2.1, tint: 0x2c1d12, nightStalk: true },  // RARE, 8-10 hits
@@ -2654,12 +2655,13 @@ function spookRadius(a, dist) {
   if (dist < 60 && losBlocked(a)) r *= 0.42;       // cover buys you closer
   return Math.max(r, noiseLevel === 2 ? 20 : 7);
 }
-// crowding panic: inside this and prey bolts no matter how quiet. The
-// close approach is the hard part; the long pot-shot is the reward.
-// Scaled by keen so a dull cow tolerates you closer, a fox bolts sooner.
+// crowding panic: the TIGHT inner ring — get this close and prey bolts no
+// matter how quiet. Kept well inside spookRadius (flee*0.4 when still) so
+// the alert "it looks at you" band above it always survives. A touch of
+// keen so a fox bolts a hair sooner than a dull cow.
 function panicRadius(a) {
   const keen = (a.cfg.keen || 1) * (a.hearJit || 1);
-  return (a.cfg.flee * 0.42) * keen * (noiseLevel === 0 ? 0.85 : 1);
+  return a.cfg.flee * 0.30 * (0.9 + (keen - 1) * 0.18);
 }
 
 function animalUpdate(a, dt) {
@@ -2845,18 +2847,20 @@ function animalUpdate(a, dt) {
           else a.bleeding = 0;   // shallow wound — it clots, it remembers
         }
       }
-      if (a.t <= 0 && dist > a.cfg.flee * 1.5) a.state = 'idle', a.t = 1 + Math.random() * 3;
+      if (a.t <= 0 && dist > a.cfg.flee * 1.2) a.state = 'idle', a.t = 1 + Math.random() * 3;
     } else if (a.state === 'alert') {
-      // it caught something — head up, turned your way, weighing it.
+      // it caught something — head up, turned your way, weighing it. This
+      // is the OUTER ring of the dartboard: cross it and it looks; hold or
+      // back off and it goes back to grazing; push closer and it bolts.
       a.t -= dt;
       setAnim(a, 'Idle');
-      a.dir = lerpAngle(a.dir, Math.atan2(dx, dz), dt * 4);   // turn to look
+      a.dir = lerpAngle(a.dir, Math.atan2(dx, dz), dt * 4);   // turn to look right at you
       if (dist < spookRadius(a, dist)
-          || (noiseLevel >= 2 && dist < spookRadius(a, dist) * 1.45)) {
+          || (noiseLevel >= 2 && dist < spookRadius(a, dist) * 1.3)) {
         a.state = 'flee'; a.t = 3 + Math.random() * 2.5;
         a.dir = Math.atan2(-dx, -dz) + (Math.random() - 0.5) * 0.7;
         spookHerd(a);
-      } else if (a.t <= 0) { a.state = 'idle'; a.t = 1 + Math.random() * 2; }
+      } else if (a.t <= 0) { a.state = 'idle'; a.t = 1.5 + Math.random() * 2; }  // back to grazing
     } else if (dist < panicRadius(a) || dist < spookRadius(a, dist)) {
       // crowded hard AND bold AND able to kick → it may turn and fight
       // instead of running. A stag/horse that's had enough rears up.
@@ -2872,8 +2876,10 @@ function animalUpdate(a, dt) {
         a.dir = Math.atan2(-dx, -dz) + (Math.random() - 0.5) * 0.7;
         spookHerd(a);                     // one spooks, the herd spooks
       }
-    } else if (dist < spookRadius(a, dist) * 1.7) {
-      a.state = 'alert'; a.t = 1.0 + Math.random() * 1.4;   // it stares
+    } else if (dist < spookRadius(a, dist) + 9) {
+      // the notable outer ring — a clear ~10-step band where it lifts its
+      // head and stares before the inner ring makes it run
+      a.state = 'alert'; a.t = 1.8 + Math.random() * 2.0;   // it stares a good beat
     } else wander(a, dt);
   }
   a.obj.rotation.y = lerpAngle(a.obj.rotation.y, a.dir, Math.min(1, dt * 6));
@@ -3396,7 +3402,10 @@ window._jump = () => { jumpQ = true; };   // test hook: queue a jump in window._
 let started = false, drawT = 0, holdT = 0, raiseT = 0, drawing = false, dead = false, bobPhase = 0, hapticT = 0;
 let _moveLvl = 0;   // 0..1 gait level — drives footstep audio + camera head-bob
 let playerVy = 0, grounded = true, jumpQ = false;
-let inCanoe = false, canoeSpd = 0, oarLStroke = false, oarRStroke = false, _wasCanoe = false;
+let inCanoe = false, canoeSpd = 0, _wasCanoe = false;
+// rowing is a CIRCULAR motion: each oar accumulates the radians of arc your
+// finger sweeps this frame (touch) — keep circling smoothly to keep moving.
+let oarLDrive = 0, oarRDrive = 0;
 
 // ── the wake-up: a ~3.5s cinematic intro that plays on enter and on
 // every respawn. Driven entirely by introT on the dt loop (no setTimeout),
@@ -3421,15 +3430,13 @@ function beginIntro() {               // arm the wake-up for a fresh life
   bow.position.set(0.34, -1.35, -0.62);   // off the bottom of the screen
   if (camera.fov !== 70) { camera.fov = 70; camera.updateProjectionMatrix(); }
 }
-let _saidLeave = false;
 function endIntro() {                  // hand control to the player
   intro = false;
   setLids(-100, 0);                   // eyes fully open, glow gone
-  player.pitch = SPAWN.pitch;         // wake looking at the sky
+  player.pitch = SPAWN.pitch;         // wake looking at the sky — and STAY there
   if (audio.breath) audio.breath();   // the breath-in of waking
-  say('wake', 4200);                  // no-ops cleanly if 'wake' isn't in LINES2
-  // the one cinematic line — only the first wake of a session
-  if (!_saidLeave) { _saidLeave = true; setTimeout(() => cinematic('Leave base.', 4200), 2600); }
+  // NO text, NO buttons yet. Just the sky. The reveal waits for the
+  // player to look around on their own (handled in the reveal block).
 }
 // big centered line, no box — fades in slow, holds, fades out
 function cinematic(text, ms = 4000) {
@@ -3976,7 +3983,7 @@ addEventListener('keydown', e => { keys[e.code] = true;
   if (e.code === 'Space' && !intro && !arrowCam) jumpQ = true;
   if (e.code === 'Escape' && drawing) {      // back out of the shot
     drawing = false; drawT = 0; holdT = 0; if (audio.drawCreak) audio.drawCreak(0); }
-  if (inCanoe && !e.repeat) { if (e.code === 'KeyA') oarLStroke = true; if (e.code === 'KeyD') oarRStroke = true; } });
+  });
 addEventListener('keyup', e => keys[e.code] = false);
 addEventListener('keydown', skipIntro);
 addEventListener('mousedown', skipIntro);
@@ -4078,10 +4085,38 @@ if (!IS_TOUCH) {
     shootId = t.identifier; lastShoot = { x: t.clientX, y: t.clientY };
     drawing = true; btn.classList.add('drawing');
   }, { passive: false });
-  // jump button
+  // ── oars: circular-drag rowing pads. Track the angle your finger sweeps
+  // around the pad center; the arc per frame becomes that oar's drive. ──
   const oL = document.getElementById('oarL'), oR = document.getElementById('oarR');
-  oL.addEventListener('touchstart', e => { e.preventDefault(); if (inCanoe) oarLStroke = true; }, { passive: false });
-  oR.addEventListener('touchstart', e => { e.preventDefault(); if (inCanoe) oarRStroke = true; }, { passive: false });
+  function setupOar(el, side) {                 // side: 'L' | 'R'
+    let id = null, lastAng = 0;
+    const center = () => { const r = el.getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; };
+    el.addEventListener('touchstart', e => { e.preventDefault();
+      if (!inCanoe || id !== null) return;
+      const t = e.changedTouches[0]; id = t.identifier;
+      const c = center(); lastAng = Math.atan2(t.clientY - c.y, t.clientX - c.x);
+      el.classList.add('rowing');
+    }, { passive: false });
+    document.addEventListener('touchmove', e => {
+      if (id === null) return;
+      for (const t of e.changedTouches) {
+        if (t.identifier !== id) continue;
+        const c = center();
+        const a = Math.atan2(t.clientY - c.y, t.clientX - c.x);
+        let d = a - lastAng;
+        while (d > Math.PI) d -= 2 * Math.PI;
+        while (d < -Math.PI) d += 2 * Math.PI;
+        if (side === 'L') oarLDrive += Math.abs(d); else oarRDrive += Math.abs(d);
+        lastAng = a;
+      }
+    }, { passive: false });
+    const end = e => { for (const t of e.changedTouches)
+      if (t.identifier === id) { id = null; el.classList.remove('rowing'); } };
+    document.addEventListener('touchend', end);
+    document.addEventListener('touchcancel', end);
+  }
+  setupOar(oL, 'L'); setupOar(oR, 'R');
   const jb = document.getElementById('jumpBtn');
   jb.addEventListener('touchstart', e => { e.preventDefault();
     if (!intro && !arrowCam) jumpQ = true; }, { passive: false });
@@ -4440,13 +4475,20 @@ function tickBody() {
     let nx = player.x + (-sin * mz + cos * mx) * sp * dt;
     let nz = player.z + (-cos * mz - sin * mx) * sp * dt;
     if (inCanoe) {
-      // ── canoe paddling: two oars, awkward on purpose ──
-      // each stroke shoves forward AND yaws away from that side, so
-      // paddling only the left oar curls you right; alternate for straight.
-      if (oarLStroke) { canoeSpd += 4.6; player.yaw += 0.17; oarLStroke = false;
-        if (audio.impact) audio.impact('ground', 0.45); }
-      if (oarRStroke) { canoeSpd += 4.6; player.yaw -= 0.17; oarRStroke = false;
-        if (audio.impact) audio.impact('ground', 0.45); }
+      // ── canoe rowing: a CIRCULAR motion, one oar each side ──
+      // each oar feeds the arc your finger swept this frame; the motion
+      // pushes forward AND yaws away from that side, so circling only the
+      // left oar curls you right. Keep both going, smooth, to track straight.
+      if (!IS_TOUCH) { if (keys.KeyA) oarLDrive += 5.0 * dt; if (keys.KeyD) oarRDrive += 5.0 * dt; }
+      const THRUST = 0.95, YAWK = 0.085;
+      if (oarLDrive > 0) { canoeSpd += oarLDrive * THRUST; player.yaw += oarLDrive * YAWK; }
+      if (oarRDrive > 0) { canoeSpd += oarRDrive * THRUST; player.yaw -= oarRDrive * YAWK; }
+      // a soft, throttled paddle-dip while actually rowing
+      tickBody._rowSnd = (tickBody._rowSnd || 0) - dt;
+      if (oarLDrive + oarRDrive > 0.5 && tickBody._rowSnd <= 0) {
+        tickBody._rowSnd = 0.45; if (audio.impact) audio.impact('water', 0.55);
+      }
+      oarLDrive = 0; oarRDrive = 0;
       canoeSpd = Math.min(7, canoeSpd) * Math.pow(0.42, dt);   // glide + drag
       const cs = Math.sin(player.yaw), cc = Math.cos(player.yaw);
       const lim2 = WORLD * 0.47;
@@ -4748,17 +4790,25 @@ function tickBody() {
   // home has a voice: the jaw harp plays only while you're at the base
   if (audio.setBaseMusic) audio.setBaseMusic(atBase && !dead);
 
-  // ── learn by needing it ── on touch, controls reveal ONE at a time as
-  // you work your way out of the base. No buttons at the title or on wake.
-  if (started && !intro && IS_TOUCH && _revealStep < 3 && BASE_RING) {
+  // ── learn by needing it ── you wake staring at the sky with NOTHING on
+  // screen. Only when YOU choose to look around / move does the left stick
+  // fade in, with the single quote. After that, jump + bow reveal silently
+  // as you work out of the base. (Buttons are touch-only; the quote is for all.)
+  if (started && !intro && !dead && _revealStep < 3 && BASE_RING) {
     const bc = document.body.classList;
     const dB = Math.hypot(player.x - BASE_RING.x, player.z - BASE_RING.z);
-    if (_revealStep === 0) { bc.add('show-move'); _revealStep = 1;
-      setTimeout(() => cinematic('Get up. Look around.', 3600), 600); }
-    else if (_revealStep === 1 && dB > 7) { bc.add('show-jump'); _revealStep = 2;
-      cinematic('Jump the wall.', 3600); }
-    else if (_revealStep === 2 && dB > 11.5) { bc.add('show-bow'); _revealStep = 3;
-      cinematic('Now hunt.', 3200); }
+    if (_revealStep === 0) {
+      const looked = Math.abs(player.yaw - SPAWN.yaw) > 0.08
+                  || Math.abs(player.pitch - SPAWN.pitch) > 0.08
+                  || (window.moveVec && (window.moveVec.x || window.moveVec.y))
+                  || keys.KeyW || keys.KeyA || keys.KeyS || keys.KeyD;
+      if (looked) {
+        _revealStep = 1;
+        if (IS_TOUCH) bc.add('show-move');
+        cinematic("I'm getting hungry.", 4600);   // the one and only opening line
+      }
+    } else if (_revealStep === 1 && dB > 7) { _revealStep = 2; if (IS_TOUCH) bc.add('show-jump'); }
+    else if (_revealStep === 2 && dB > 11.5) { _revealStep = 3; if (IS_TOUCH) bc.add('show-bow'); }
   }
   // kill-feel hitstop: a connected arrow holds the world at 5% speed
   // for a few real frames (0.04s flesh / 0.09s lethal). No setTimeout —
