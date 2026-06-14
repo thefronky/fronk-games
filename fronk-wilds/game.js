@@ -21,8 +21,10 @@ const WORLD = 860;            // square world size
 const WATER_Y = 2.1;          // lake level
 const EYE = 1.7;
 const CFG = IS_TOUCH
-  ? { grass: 22000, trees: 620, bushes: 380, rocks: 90, px: 2, shadow: 1536, segs: 230 }
-  : { grass: 50000, trees: 1100, bushes: 620, rocks: 130, px: 2.5, shadow: 3072, segs: 360 };
+  ? { grass: 22000, trees: 620, bushes: 380, rocks: 90, px: 2, shadow: 1536, segs: 230,
+      flowers: 2200, tufts: 1400, mushrooms: 260, bedFlowers: 520 }
+  : { grass: 50000, trees: 1100, bushes: 620, rocks: 130, px: 2.5, shadow: 3072, segs: 360,
+      flowers: 4000, tufts: 2600, mushrooms: 420, bedFlowers: 760 };
 
 const SPECIES = {
   Deer: { n: 8,  speed: 3.0, gallop: 10.5, hp: 1, flee: 34, r: 1.5 },
@@ -484,6 +486,231 @@ const windUniforms = { uTime: { value: 0 } };
   };
 }
 
+// ───────────────────── flowers + ground detail ──────────────────────
+// Three instanced layers, all pre-built once, zero per-frame allocation:
+//   • wildflowers  — player-following toroidal field (reuses grass pattern)
+//   • ground tufts — fern/clover follow-field, low + dark green
+//   • mushrooms    — static, scattered near tree bases (placed once)
+// Plus a dense STATIC bed of bright flowers at the wake/spawn clearing.
+// Wind sway shares windUniforms.uTime (one uniform, no extra cost).
+const FLOWER_PALETTE = [
+  0xff4d5a, 0xff7a3c, 0xffd23f, 0xfff4e0,   // reds / orange / gold / cream
+  0xff5fa2, 0xb05cff, 0x6f7bff, 0xff9bd0,   // pink / violet / periwinkle / blush
+];
+{
+  const mkFlower = () => {
+    const stem = new THREE.CylinderGeometry(0.018, 0.03, 0.62, 4, 1);
+    stem.translate(0, 0.31, 0);
+    const head = new THREE.IcosahedronGeometry(0.13, 0);
+    head.translate(0, 0.66, 0);
+    const petals = [];
+    for (let p = 0; p < 3; p++) {
+      const pl = new THREE.PlaneGeometry(0.22, 0.1, 1, 1);
+      pl.translate(0, 0.06, 0); pl.rotateX(-0.9); pl.rotateY(p * 2.094); pl.translate(0, 0.6, 0);
+      petals.push(pl);
+    }
+    return mergeGeoms([stem, head, ...petals]);
+  };
+  const tintFlower = (geo) => {
+    const p = geo.attributes.position, col = new Float32Array(p.count * 3);
+    const stemC = new THREE.Color(0x35591f);
+    for (let i = 0; i < p.count; i++) {
+      const y = p.getY(i); const c = y < 0.55 ? stemC : { r: 1, g: 1, b: 1 };
+      col[i*3]=c.r; col[i*3+1]=c.g; col[i*3+2]=c.b;
+    }
+    geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  };
+  const mkTuft = () => {
+    const blades = [];
+    for (let b = 0; b < 3; b++) {
+      const g = new THREE.PlaneGeometry(0.4, 0.34, 1, 1); g.translate(0, 0.16, 0);
+      const pp = g.attributes.position;
+      for (let i = 0; i < pp.count; i++) pp.setX(i, pp.getX(i) * (0.4 + pp.getY(i)));
+      g.rotateY(b * 1.05); blades.push(g);
+    }
+    return mergeGeoms(blades);
+  };
+  const mkMushroom = () => {
+    const stem = new THREE.CylinderGeometry(0.03, 0.05, 0.22, 5, 1); stem.translate(0, 0.11, 0);
+    const cap = new THREE.SphereGeometry(0.11, 6, 4, 0, Math.PI*2, 0, Math.PI*0.5);
+    cap.scale(1, 0.7, 1); cap.translate(0, 0.22, 0);
+    return mergeGeoms([stem, cap]);
+  };
+  const windHead = (intensity) => (sh) => {
+    sh.uniforms.uTime = windUniforms.uTime;
+    sh.vertexShader = 'uniform float uTime;\n' + sh.vertexShader.replace('#include <begin_vertex>',
+      `#include <begin_vertex>
+       float bendY = position.y * position.y * ${intensity.toFixed(2)};
+       float ph = instanceMatrix[3][0]*0.23 + instanceMatrix[3][2]*0.19;
+       transformed.x += (sin(uTime*1.7+ph)+0.35*sin(uTime*3.3+ph*1.6))*bendY;
+       transformed.z += cos(uTime*1.3+ph)*bendY*0.6;`);
+  };
+  const M=new THREE.Matrix4(), Q=new THREE.Quaternion(), S=new THREE.Vector3(), P=new THREE.Vector3(), E=new THREE.Euler();
+  const SPAWN = { x: 0, z: 26 };
+
+  // shared vertex-colored, wind-swayed materials (one uniform each, prebuilt)
+  const flowerMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1,
+    emissive: 0x101006, emissiveIntensity: 0.3, side: THREE.DoubleSide });
+  flowerMat.onBeforeCompile = windHead(0.20);
+  const tuftMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1,
+    emissive: 0x0a1206, emissiveIntensity: 0.25, side: THREE.DoubleSide });
+  tuftMat.onBeforeCompile = windHead(0.16);
+  const mushMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1,
+    emissive: 0x140a06, emissiveIntensity: 0.2 });
+
+  // --- per-instance color helper: vary the white head toward palette ---
+  const flowerGeoBase = mkFlower(); tintFlower(flowerGeoBase);
+  const tuftGeo = mkTuft();
+  // tint tufts dark green per-vertex (all of it foliage)
+  {
+    const p = tuftGeo.attributes.position, col = new Float32Array(p.count * 3);
+    for (let i = 0; i < p.count; i++) { col[i*3]=0.16; col[i*3+1]=0.28; col[i*3+2]=0.10; }
+    tuftGeo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  }
+  const mushGeo = mkMushroom();
+  {
+    const p = mushGeo.attributes.position, col = new Float32Array(p.count * 3);
+    for (let i = 0; i < p.count; i++) {
+      const y = p.getY(i);
+      // stem cream, cap dusty red-brown
+      if (y < 0.2) { col[i*3]=0.86; col[i*3+1]=0.82; col[i*3+2]=0.70; }
+      else { col[i*3]=0.55; col[i*3+1]=0.18; col[i*3+2]=0.14; }
+    }
+    mushGeo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  }
+
+  // ── 1. WILDFLOWER follow-field (mirrors the grass ±R box) ──
+  const FR = 46;
+  const flowersM = new THREE.InstancedMesh(flowerGeoBase, flowerMat, CFG.flowers);
+  flowersM.frustumCulled = false; flowersM.castShadow = false;
+  const fPos = [];
+  const setFlower = (i) => {
+    const g = fPos[i];
+    const y = heightAt(g.x, g.z);
+    const pc = window._player || SPAWN;
+    const dEdge = Math.max(Math.abs(g.x - pc.x), Math.abs(g.z - pc.z));
+    const fade = Math.max(0, Math.min(1, (FR - dEdge) / 10));
+    if (y < WATER_Y + 0.6 || y > 17 || fade <= 0) S.set(0, 0, 0);
+    else S.set(g.s * fade, g.s * fade, g.s * fade);
+    P.set(g.x, y - 0.04, g.z);
+    E.set(0, g.rot, 0); Q.setFromEuler(E);
+    flowersM.setMatrixAt(i, M.compose(P, Q, S));
+  };
+  for (let i = 0; i < CFG.flowers; i++) {
+    fPos.push({ x: (Math.random() - 0.5) * 2 * FR, z: SPAWN.z + (Math.random() - 0.5) * 2 * FR,
+                rot: Math.random() * Math.PI * 2, s: 0.7 + Math.random() * 0.8 });
+    setFlower(i);
+    const c = new THREE.Color(FLOWER_PALETTE[(Math.random() * FLOWER_PALETTE.length) | 0]);
+    flowersM.setColorAt(i, c);
+  }
+  flowersM.count = CFG.flowers;
+  flowersM.instanceColor.needsUpdate = true;
+  flowersM.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  scene.add(flowersM);
+
+  // ── 2. GROUND TUFT follow-field (fern/clover, low + dark) ──
+  const TR = 40;
+  const tuftsM = new THREE.InstancedMesh(tuftGeo, tuftMat, CFG.tufts);
+  tuftsM.frustumCulled = false; tuftsM.castShadow = false;
+  const tPos = [];
+  const setTuft = (i) => {
+    const g = tPos[i];
+    const y = heightAt(g.x, g.z);
+    const pc = window._player || SPAWN;
+    const dEdge = Math.max(Math.abs(g.x - pc.x), Math.abs(g.z - pc.z));
+    const fade = Math.max(0, Math.min(1, (TR - dEdge) / 9));
+    if (y < WATER_Y + 0.4 || y > 22 || fade <= 0) S.set(0, 0, 0);
+    else S.set(g.s * fade, g.s * g.sy * fade, g.s * fade);
+    P.set(g.x, y - 0.03, g.z);
+    E.set(0, g.rot, 0); Q.setFromEuler(E);
+    tuftsM.setMatrixAt(i, M.compose(P, Q, S));
+  };
+  for (let i = 0; i < CFG.tufts; i++) {
+    tPos.push({ x: (Math.random() - 0.5) * 2 * TR, z: SPAWN.z + (Math.random() - 0.5) * 2 * TR,
+                rot: Math.random() * Math.PI * 2, s: 0.7 + Math.random() * 0.7,
+                sy: 0.7 + Math.random() * 0.5 });
+    setTuft(i);
+  }
+  tuftsM.count = CFG.tufts;
+  tuftsM.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  scene.add(tuftsM);
+
+  // ── 3. MUSHROOMS — STATIC scatter, placed once across the world ──
+  const mushM = new THREE.InstancedMesh(mushGeo, mushMat, CFG.mushrooms);
+  mushM.frustumCulled = false; mushM.castShadow = false;
+  {
+    let placed = 0, guard = 0;
+    while (placed < CFG.mushrooms && guard++ < CFG.mushrooms * 40) {
+      const x = (Math.random() - 0.5) * WORLD * 0.9,
+            z = (Math.random() - 0.5) * WORLD * 0.9,
+            y = heightAt(x, z);
+      if (y < WATER_Y + 0.8 || y > 22) continue;
+      const s = 0.7 + Math.random() * 1.1;
+      P.set(x, y - 0.02, z);
+      E.set(0, Math.random() * Math.PI * 2, 0); Q.setFromEuler(E);
+      S.set(s, s, s);
+      mushM.setMatrixAt(placed++, M.compose(P, Q, S));
+    }
+    mushM.count = placed;
+  }
+  scene.add(mushM);
+
+  // ── 4. STATIC DENSE WAKE-BED — a bright flower disc at SPAWN ──
+  const bedM = new THREE.InstancedMesh(flowerGeoBase, flowerMat, CFG.bedFlowers);
+  bedM.frustumCulled = false; bedM.castShadow = false;
+  {
+    let placed = 0, guard = 0;
+    const BED_R = 11;
+    while (placed < CFG.bedFlowers && guard++ < CFG.bedFlowers * 30) {
+      const a = Math.random() * Math.PI * 2, rr = Math.sqrt(Math.random()) * BED_R;
+      const x = SPAWN.x + Math.cos(a) * rr, z = SPAWN.z + Math.sin(a) * rr,
+            y = heightAt(x, z);
+      if (y < WATER_Y + 0.6 || y > 17) continue;
+      const s = 0.8 + Math.random() * 0.9;
+      P.set(x, y - 0.04, z);
+      E.set(0, Math.random() * Math.PI * 2, 0); Q.setFromEuler(E);
+      S.set(s, s, s);
+      bedM.setMatrixAt(placed, M.compose(P, Q, S));
+      bedM.setColorAt(placed, new THREE.Color(
+        FLOWER_PALETTE[(Math.random() * FLOWER_PALETTE.length) | 0]));
+      placed++;
+    }
+    bedM.count = placed;
+    if (bedM.instanceColor) bedM.instanceColor.needsUpdate = true;
+  }
+  scene.add(bedM);
+
+  // ── follow-field stepper — amortized like the grass field, no allocs ──
+  let fCursor = 0, tCursor = 0;
+  window._updateFlowerField = () => {
+    const fSlice = Math.ceil(CFG.flowers / 6);
+    let fTouched = false;
+    for (let k = 0; k < fSlice; k++) {
+      const i = (fCursor + k) % CFG.flowers; const g = fPos[i]; let moved = false;
+      while (g.x - player.x > FR) { g.x -= 2 * FR; moved = true; }
+      while (player.x - g.x > FR) { g.x += 2 * FR; moved = true; }
+      while (g.z - player.z > FR) { g.z -= 2 * FR; moved = true; }
+      while (player.z - g.z > FR) { g.z += 2 * FR; moved = true; }
+      if (moved) { setFlower(i); fTouched = true; }
+    }
+    fCursor = (fCursor + fSlice) % CFG.flowers;
+    if (fTouched) flowersM.instanceMatrix.needsUpdate = true;
+
+    const tSlice = Math.ceil(CFG.tufts / 6);
+    let tTouched = false;
+    for (let k = 0; k < tSlice; k++) {
+      const i = (tCursor + k) % CFG.tufts; const g = tPos[i]; let moved = false;
+      while (g.x - player.x > TR) { g.x -= 2 * TR; moved = true; }
+      while (player.x - g.x > TR) { g.x += 2 * TR; moved = true; }
+      while (g.z - player.z > TR) { g.z -= 2 * TR; moved = true; }
+      while (player.z - g.z > TR) { g.z += 2 * TR; moved = true; }
+      if (moved) { setTuft(i); tTouched = true; }
+    }
+    tCursor = (tCursor + tSlice) % CFG.tufts;
+    if (tTouched) tuftsM.instanceMatrix.needsUpdate = true;
+  };
+}
+
 function mergeGeoms(list) {
   // minimal non-indexed merge (avoids importing BufferGeometryUtils)
   const out = new THREE.BufferGeometry();
@@ -713,6 +940,171 @@ function mergeGeoms(list) {
   }
   rocks.count = placed;
   scene.add(rocks);
+
+  // ───────────── prop scatter — fill the world with THINGS ─────────────
+  // All instanced, placed once, vertex-colored. Big solid props (logs,
+  // boulders) push into TREES[] so they read as cover for the hunt.
+  // Reuses M/Q/S/P/E + heightAt + mergeGeoms from above.
+  const paintGeo = (geo, fn) => {
+    const n = geo.attributes.position.count, col = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) {
+      const c = fn(i); col[i*3] = c.r; col[i*3+1] = c.g; col[i*3+2] = c.b;
+    }
+    geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    return geo;
+  };
+  const propMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1,
+    emissive: 0x14160e, emissiveIntensity: 0.35 });
+  const stoneMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1,
+    emissive: 0x0a0b0d, emissiveIntensity: 0.25 });
+
+  // --- geometry builders (each merged ONCE, then instanced) ---
+  // FALLEN LOG — long cylinder on its side, mossy top.
+  const logBark = new THREE.CylinderGeometry(0.55, 0.7, 7.0, 8);
+  logBark.rotateZ(Math.PI / 2); logBark.translate(0, 0.62, 0);
+  const moss1 = new THREE.IcosahedronGeometry(0.62, 0); moss1.translate(-1.6, 1.1, 0.1);
+  const moss2 = new THREE.IcosahedronGeometry(0.55, 0); moss2.translate(1.3, 1.05, -0.15);
+  const moss3 = new THREE.IcosahedronGeometry(0.5, 0); moss3.translate(0.0, 1.12, 0.2);
+  const logBarkN = logBark.toNonIndexed().attributes.position.count;
+  const logGeo = paintGeo(mergeGeoms([logBark, moss1, moss2, moss3]), (i) =>
+    i < logBarkN
+      ? new THREE.Color().setHSL(0.08, 0.32, 0.18 + Math.random() * 0.05)
+      : new THREE.Color().setHSL(0.26, 0.45, 0.26 + Math.random() * 0.07));
+
+  // TREE STUMP — short fat tapered cylinder + brighter sawn-face disc.
+  const stumpBody = new THREE.CylinderGeometry(0.55, 0.78, 1.15, 9);
+  stumpBody.translate(0, 0.55, 0);
+  const stumpTop = new THREE.CylinderGeometry(0.5, 0.5, 0.12, 9);
+  stumpTop.translate(0, 1.12, 0);
+  const stumpBodyN = stumpBody.toNonIndexed().attributes.position.count;
+  const stumpGeo = paintGeo(mergeGeoms([stumpBody, stumpTop]), (i) =>
+    i < stumpBodyN
+      ? new THREE.Color().setHSL(0.07, 0.3, 0.16 + Math.random() * 0.04)
+      : new THREE.Color().setHSL(0.09, 0.34, 0.34 + Math.random() * 0.05));
+
+  // BOULDER CLUSTER — big dodec + two seated smaller. cool grey.
+  const bld1 = new THREE.DodecahedronGeometry(2.0, 0); bld1.translate(0, 1.5, 0);
+  const bld2 = new THREE.DodecahedronGeometry(1.15, 0); bld2.scale(1, 0.8, 1); bld2.translate(2.1, 0.7, 0.6);
+  const bld3 = new THREE.DodecahedronGeometry(0.85, 0); bld3.translate(-1.6, 0.55, -0.7);
+  const boulderGeo = paintGeo(mergeGeoms([bld1, bld2, bld3]), () =>
+    new THREE.Color().setHSL(0.6, 0.04, 0.40 + Math.random() * 0.12));
+
+  // DEAD SNAG — bare angular trunk + 2 broken stubs.
+  const snagTrunk = new THREE.CylinderGeometry(0.18, 0.42, 6.0, 6);
+  snagTrunk.translate(0, 3.0, 0);
+  const snagStub1 = new THREE.CylinderGeometry(0.06, 0.16, 1.2, 5);
+  snagStub1.rotateZ(0.9); snagStub1.translate(0.7, 3.6, 0.1);
+  const snagStub2 = new THREE.CylinderGeometry(0.05, 0.13, 0.9, 5);
+  snagStub2.rotateZ(-1.1); snagStub2.rotateY(1.2); snagStub2.translate(-0.6, 4.4, -0.2);
+  const snagGeo = paintGeo(mergeGeoms([snagTrunk, snagStub1, snagStub2]), () =>
+    new THREE.Color().setHSL(0.09, 0.12, 0.30 + Math.random() * 0.1));
+
+  // CATTAIL CLUMP — thin blades + brown seed-head tips, lakeside reeds.
+  const reedParts = [];
+  for (let k = 0; k < 5; k++) {
+    const a = k / 5 * Math.PI * 2, rr2 = 0.12 + Math.random() * 0.18;
+    const blade = new THREE.CylinderGeometry(0.02, 0.04, 1.6 + Math.random() * 0.6, 4);
+    blade.translate(0, 0.8, 0);
+    blade.rotateZ((Math.random() - 0.5) * 0.25);
+    blade.translate(Math.cos(a) * rr2, 0, Math.sin(a) * rr2);
+    reedParts.push(blade);
+  }
+  const reedBladeCount = reedParts.reduce((s, g) =>
+    s + g.toNonIndexed().attributes.position.count, 0);
+  const head1 = new THREE.CylinderGeometry(0.07, 0.07, 0.45, 5); head1.translate(0.13, 1.55, 0.05);
+  const head2 = new THREE.CylinderGeometry(0.06, 0.06, 0.4, 5); head2.translate(-0.1, 1.4, -0.08);
+  const cattailGeo = paintGeo(mergeGeoms([...reedParts, head1, head2]), (i) =>
+    i < reedBladeCount
+      ? new THREE.Color().setHSL(0.22, 0.5, 0.34 + Math.random() * 0.08)
+      : new THREE.Color().setHSL(0.07, 0.55, 0.22));
+
+  // STANDING STONE — tall monolith leaning slightly + cap box.
+  const monolith = new THREE.BoxGeometry(1.6, 7.0, 1.1);
+  monolith.translate(0, 3.5, 0);
+  const monoCap = new THREE.BoxGeometry(1.3, 0.5, 0.85); monoCap.translate(0.1, 7.0, 0);
+  const standingStoneGeo = paintGeo(mergeGeoms([monolith, monoCap]), () =>
+    new THREE.Color().setHSL(0.62, 0.05, 0.26 + Math.random() * 0.08));
+
+  // --- instanced meshes ---
+  const N_LOGS = IS_TOUCH ? 90 : 150;
+  const N_STUMPS = IS_TOUCH ? 70 : 120;
+  const N_BOULDERS = IS_TOUCH ? 80 : 130;
+  const N_SNAGS = IS_TOUCH ? 60 : 100;
+  const N_CATTAILS = IS_TOUCH ? 120 : 200;
+  const N_STONES = 22;
+
+  const logsM = new THREE.InstancedMesh(logGeo, propMat, N_LOGS);
+  const stumpsM = new THREE.InstancedMesh(stumpGeo, propMat, N_STUMPS);
+  const bouldersM = new THREE.InstancedMesh(boulderGeo, stoneMat, N_BOULDERS);
+  const snagsM = new THREE.InstancedMesh(snagGeo, propMat, N_SNAGS);
+  const cattailsM = new THREE.InstancedMesh(cattailGeo, propMat, N_CATTAILS);
+  const stonesM = new THREE.InstancedMesh(standingStoneGeo, stoneMat, N_STONES);
+  [logsM, stumpsM, bouldersM, snagsM, cattailsM, stonesM].forEach(m => {
+    m.castShadow = true; scene.add(m);
+  });
+
+  const scatter = (mesh, count, fn) => {
+    let p = 0, g2 = 0;
+    while (p < count && g2++ < count * 40) {
+      const x = (Math.random() - 0.5) * WORLD * 0.92,
+            z = (Math.random() - 0.5) * WORLD * 0.92,
+            y = heightAt(x, z);
+      const r = fn(x, z, y, p);
+      if (!r) continue;
+      P.set(r.x !== undefined ? r.x : x, r.y, r.z !== undefined ? r.z : z);
+      E.set(r.tilt || 0, r.yaw !== undefined ? r.yaw : Math.random() * Math.PI * 2, r.roll || 0);
+      Q.setFromEuler(E);
+      S.set(r.sx, r.sy, r.sz);
+      mesh.setMatrixAt(p++, M.compose(P, Q, S));
+      if (r.collide) TREES.push({ x, z, r: r.cr });
+    }
+    mesh.count = p;
+  };
+
+  scatter(logsM, N_LOGS, (x, z, y) => {
+    if (y < WATER_Y + 1.2 || y > 24) return null;
+    if (Math.hypot(x, z) < 16) return null;
+    const s = 0.8 + Math.random() * 0.9;
+    return { y: y + 0.15, sx: s, sy: s, sz: s, collide: true, cr: 1.3 * s };
+  });
+
+  scatter(stumpsM, N_STUMPS, (x, z, y) => {
+    if (y < WATER_Y + 1.0 || y > 24) return null;
+    if (Math.hypot(x, z) < 12) return null;
+    const s = 0.8 + Math.random() * 0.8;
+    return { y: y - 0.05, sx: s, sy: s * (0.8 + Math.random() * 0.5), sz: s };
+  });
+
+  scatter(bouldersM, N_BOULDERS, (x, z, y) => {
+    if (y < WATER_Y + 0.4) return null;
+    if (Math.hypot(x, z) < 14) return null;
+    const s = 0.7 + Math.random() * 1.2;
+    return { y: y + 0.2, tilt: (Math.random() - 0.5) * 0.3, roll: (Math.random() - 0.5) * 0.3,
+             sx: s, sy: s * (0.8 + Math.random() * 0.4), sz: s, collide: true, cr: 2.2 * s };
+  });
+
+  scatter(snagsM, N_SNAGS, (x, z, y) => {
+    if (y < WATER_Y + 0.5 || y > 30) return null;
+    if (Math.hypot(x, z) < 18) return null;
+    const s = 0.7 + Math.random() * 0.9;
+    return { tilt: (Math.random() - 0.5) * 0.18, roll: (Math.random() - 0.5) * 0.18,
+             y: y - 0.1, sx: s, sy: s * (0.9 + Math.random() * 0.5), sz: s };
+  });
+
+  scatter(cattailsM, N_CATTAILS, (x, z, y) => {
+    if (y < WATER_Y - 0.1 || y > WATER_Y + 1.3) return null;
+    const s = 0.8 + Math.random() * 0.8;
+    return { y: y - 0.05, tilt: (Math.random() - 0.5) * 0.12, roll: (Math.random() - 0.5) * 0.12,
+             sx: s, sy: s * (0.8 + Math.random() * 0.6), sz: s };
+  });
+
+  scatter(stonesM, N_STONES, (x, z, y) => {
+    if (y < 22 || y > 48) return null;
+    const s = 0.8 + Math.random() * 0.7;
+    return { tilt: (Math.random() - 0.5) * 0.22, roll: (Math.random() - 0.5) * 0.22,
+             y: y - 0.3, sx: s, sy: s * (0.9 + Math.random() * 0.5), sz: s,
+             collide: true, cr: 1.0 * s };
+  });
 }
 
 // drifting clouds
@@ -1697,13 +2089,41 @@ function cryptidUpdate(night) {
 }
 
 // ───────────────────────── player ─────────────────────────
-const player = { x: 0, z: 26, yaw: Math.PI, pitch: -0.04, hp: 100, lastHit: -99,
-                 meat: 0, lastAte: 0 };
+// the calm clearing you wake in — every life starts and respawns here
+const SPAWN = { x: 0, z: 26, yaw: Math.PI, pitch: -0.04 };
+const player = { x: SPAWN.x, z: SPAWN.z, yaw: SPAWN.yaw, pitch: SPAWN.pitch,
+                 hp: 100, lastHit: -99, meat: 0, lastAte: 0 };
 window._player = player;
 player.y = heightAt(player.x, player.z);
 const score = {};
 const keys = {};
 let started = false, drawT = 0, holdT = 0, drawing = false, dead = false, bobPhase = 0;
+
+// ── the wake-up: a ~3.5s cinematic intro that plays on enter and on
+// every respawn. Driven entirely by introT on the dt loop (no setTimeout),
+// so window._sim steps through it. Skippable by tap/click/key. ──
+const INTRO_DUR = 3.5;
+let intro = false, introT = 0, introSkip = false;
+window._intro = () => intro;          // test/inspection hook
+function beginIntro() {               // arm the wake-up for a fresh life
+  intro = true; introT = 0; introSkip = false;
+  // lids slam shut, bow drops out of frame — they rise together below
+  setLids(0, 0);
+  bow.position.set(0.34, -1.35, -0.62);   // off the bottom of the screen
+  if (camera.fov !== 70) { camera.fov = 70; camera.updateProjectionMatrix(); }
+}
+function endIntro() {                  // hand control to the player
+  intro = false;
+  setLids(-100, 0);                   // eyes fully open, glow gone
+  say('wake', 4200);                  // no-ops cleanly if 'wake' isn't in LINES2
+}
+// CSS-var driver for the eyelids (DOM lives in index.html)
+const _eyelids = document.getElementById('eyelids');
+function setLids(openPct, glow) {     // openPct: 0 = shut, -100 = wide open
+  if (!_eyelids) return;
+  _eyelids.style.setProperty('--lid', openPct + '%');
+  _eyelids.style.setProperty('--lidGlow', glow);
+}
 
 // ── what you carry, carries — meat and blood ride the wind ─────────
 // Packed meat (+6m per ◆) and fresh harvest-blood (+6m for 90s) widen
@@ -1760,9 +2180,12 @@ function hurtPlayer(dmg) {
     sawNight = false;              // no dawn credit for the dead
     toast(LINES.death, 4000);
     setTimeout(() => {
-      player.hp = 100; player.x = 0; player.z = 26; dead = false;
+      player.hp = 100; player.x = SPAWN.x; player.z = SPAWN.z;
+      player.yaw = SPAWN.yaw; player.pitch = SPAWN.pitch;
+      player.y = heightAt(player.x, player.z); dead = false;
       player.lastAte = clock.elapsedTime;   // restarted, not starved
       renderHP();
+      beginIntro();                         // wake again in the clearing
     }, 3500);
   }
   renderHP();
@@ -2054,11 +2477,16 @@ function resetDrawState() {
 }
 
 // ───────────────────────── input ─────────────────────────
+// the wake-up is skippable — any input fast-forwards it to the end
+function skipIntro() { if (intro) introSkip = true; }
 addEventListener('keydown', e => keys[e.code] = true);
 addEventListener('keyup', e => keys[e.code] = false);
+addEventListener('keydown', skipIntro);
+addEventListener('mousedown', skipIntro);
+addEventListener('touchstart', skipIntro, { passive: true });
 
 if (!IS_TOUCH) {
-  canvas.addEventListener('mousedown', () => { if (started && document.pointerLockElement) drawing = true; });
+  canvas.addEventListener('mousedown', () => { if (started && !intro && document.pointerLockElement) drawing = true; });
   addEventListener('mouseup', () => { if (drawing) { drawing = false; loose(); } });
   addEventListener('mousemove', e => {
     if (!document.pointerLockElement) return;
@@ -2127,7 +2555,7 @@ if (!IS_TOUCH) {
   const btn = document.getElementById('shootBtn');
   btn.addEventListener('touchstart', e => {
     e.preventDefault();
-    if (shootId !== null) return;     // second finger on the button — ignore
+    if (shootId !== null || intro) return;  // ignore 2nd finger / during wake-up
     const t = e.changedTouches[0];
     shootId = t.identifier; lastShoot = { x: t.clientX, y: t.clientY };
     drawing = true;
@@ -2136,6 +2564,13 @@ if (!IS_TOUCH) {
 
 // ───────────────────────── HUD ─────────────────────────
 const LINES2 = {
+"wake": [
+"Still here. The woods didn't take me in my sleep.",
+"Eyes open. The grass let me keep them this time.",
+"Awake. The hunger beat the sun to it, like always.",
+"Another morning I wasn't owed. I'll spend it anyway.",
+"Up again. The forest counted me out. The forest can wait."
+],
 "killClean": [
 "He dropped before the sound did. Mercy travels faster than noise.",
 "One breath in, none out. That's as clean as this work gets.",
@@ -2409,6 +2844,7 @@ function tickBody() {
   updateFireflies(t, night);
   updateMist(t, night);
   if (window._updateGrassField) window._updateGrassField();
+  if (window._updateFlowerField) window._updateFlowerField();
   if (started) cryptidUpdate(night);
   farDisc.material.color.copy(scene.fog.color);
   farDisc.position.x = player.x; farDisc.position.z = player.z;
@@ -2423,8 +2859,27 @@ function tickBody() {
     g.position.x = Math.sin(t * 0.4) * 0.8;   // shimmer drift
   }
   window._night = night;
+
+  // ── the wake-up state machine — runs while intro is armed ──
+  if (started && intro) {
+    introT += dt;
+    if (introSkip) introT = INTRO_DUR;        // a tap fast-forwards to the end
+    let open;            // 0..1, 1 = fully open
+    if (introT < 0.55)      open = 0.62 * (introT / 0.55);
+    else if (introT < 0.95) open = 0.62 - 0.42 * ((introT - 0.55) / 0.40);
+    else if (introT < 1.55) open = 0.20 + 0.80 * ((introT - 0.95) / 0.60);
+    else if (introT < 1.85) open = 1.0 - 0.30 * ((introT - 1.55) / 0.30);
+    else                    open = 0.70 + 0.30 * Math.min(1, (introT - 1.85) / 0.55);
+    setLids(-100 * open, (1 - open) * 0.55);
+    const bp = Math.max(0, Math.min(1, (introT - 0.9) / 1.7));
+    const be = bp * bp * (3 - 2 * bp);        // smoothstep — a deliberate reach
+    bow.position.set(0.34, -1.35 + (-0.4 - -1.35) * be, -0.62);
+    bow.rotation.set(0.05 + (1 - be) * 0.25, -0.55, 0.21 + (1 - be) * 0.18);
+    if (introT >= INTRO_DUR) endIntro();
+  }
+
   // ── the hunter talks to himself, sparingly ──
-  if (started && !dead) {
+  if (started && !dead && !intro) {
     const M = tickBody;
     if (night > 0.6 && !M._saidNight) { M._saidNight = true; M._saidDawn = false; say('nightFall', 4200); }
     if (night < 0.15 && M._saidNight && !M._saidDawn) { M._saidDawn = true; M._saidNight = false; say('dawn', 4200); }
@@ -2443,7 +2898,7 @@ function tickBody() {
     } else M._trailT = 2;
   }
 
-  if (started && !dead) {
+  if (started && !dead && !intro) {
     // movement
     let mx = 0, mz = 0;
     if (!IS_TOUCH) {
@@ -2515,8 +2970,10 @@ function tickBody() {
         resetDrawState();
         say('death', 4200);
         setTimeout(() => { player.hp = 100; player.meat = 0;
-          player.lastAte = clock.elapsedTime; player.x = 0; player.z = 26;
-          dead = false; renderHP(); }, 3500);
+          player.lastAte = clock.elapsedTime; player.x = SPAWN.x; player.z = SPAWN.z;
+          player.yaw = SPAWN.yaw; player.pitch = SPAWN.pitch;
+          player.y = heightAt(player.x, player.z);
+          dead = false; renderHP(); beginIntro(); }, 3500);
       }
     }
     // packed meat saves you automatically when it gets bad
@@ -2565,6 +3022,20 @@ function tickBody() {
     camera.position.set(cx, Math.max(heightAt(cx, cz), WATER_Y) + 7.5, cz);
     camera.lookAt(70, heightAt(70, -90) + 14, -90);
     camera.rotation.order = 'YXZ';
+  } else if (intro) {
+    // waking: camera starts LOW in the grass, pitched up at the sky,
+    // then rises and levels to standing eye height with a slight sway.
+    const rp = Math.max(0, Math.min(1, (introT - 0.6) / 2.0));
+    const re = rp * rp * (3 - 2 * rp);            // smoothstep stand-up
+    const ground = player.y;
+    const lowEye = 0.35, eyeH = EYE;
+    camera.position.set(player.x, ground + lowEye + (eyeH - lowEye) * re, player.z);
+    camera.rotation.order = 'YXZ';
+    const pitchUp = 0.9;
+    const sway = (1 - re) * 0.05 + 0.012;
+    camera.rotation.x = (pitchUp + (player.pitch - pitchUp) * re)
+      + Math.sin(t * 1.3) * sway * 0.6;
+    camera.rotation.y = player.yaw + Math.sin(t * 0.9) * sway;
   } else {
     camera.position.set(player.x, player.y + EYE, player.z);
     camera.rotation.order = 'YXZ';
@@ -2640,6 +3111,8 @@ loadAnimals().then(() => {
       started = true;
       bow.visible = true;
       updateBowString(0);
+      // dev/screenshot path skips the wake-up unless ?intro=1 asks for it
+      if (q.get('intro')) beginIntro(); else { intro = false; setLids(-100, 0); }
       document.getElementById('hud').style.opacity = 1;
       document.getElementById('title').style.display = 'none';
       if (q.get('t')) clock.elapsedTime = parseFloat(q.get('t'));
@@ -2656,6 +3129,7 @@ document.getElementById('play').addEventListener('click', () => {
   started = true;
   bow.visible = true;
   updateBowString(0);
+  beginIntro();                         // wake up before you hunt
   document.getElementById('hud').style.opacity = 1;
   try { audio.start(); } catch (e) { console.warn('audio unavailable:', e); }
   // no tutorial, no informing HUD — they learn the hard way.

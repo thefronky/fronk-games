@@ -67,6 +67,19 @@
   #vignette{position:fixed;inset:0;pointer-events:none;z-index:5;
     background:radial-gradient(ellipse at center,transparent 52%,rgba(5,3,2,.52) 100%)}
 
+  /* ── eyelids — the wake-up. two black bars that retract like opening eyes.
+       transform driven by a CSS var set from game.js (intro owns timing). ── */
+  /* default OPEN (lids off-screen) so the title screen is never covered;
+     beginIntro() slams --lid to 0% to start the wake-up */
+  #eyelids{position:fixed;inset:0;z-index:20;pointer-events:none;--lid:-100%;--lidGlow:0}
+  #eyelids .lid{position:absolute;left:0;right:0;height:52%;background:#050302;
+    transition:transform .18s ease-out}
+  #lidTop{top:0;transform-origin:top;transform:translateY(var(--lid,0%))}
+  #lidBot{bottom:0;transform-origin:bottom;transform:translateY(calc(-1 * var(--lid,0%)))}
+  #eyelids::after{content:"";position:absolute;inset:0;pointer-events:none;
+    opacity:var(--lidGlow,0);background:radial-gradient(ellipse at center,
+      transparent 30%,rgba(5,3,2,.6) 100%)}
+
   /* ── touch controls ── */
   .stick{position:fixed;bottom:max(26px,env(safe-area-inset-bottom));width:118px;height:118px;
     border-radius:50%;border:2px solid rgba(245,234,216,.35);background:rgba(0,0,0,.18);
@@ -101,6 +114,7 @@
     font-size:20px;pointer-events:auto;cursor:pointer;opacity:.8">🔊</div>
 </div>
 <div id="hurt"></div>
+<div id="eyelids"><div class="lid" id="lidTop"></div><div class="lid" id="lidBot"></div></div>
 
 <div id="stickL" class="stick"><div class="knob" id="knobL"></div></div>
 <div id="shootBtn">HOLD<br>→ LOOSE</div>
