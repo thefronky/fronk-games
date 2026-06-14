@@ -2599,6 +2599,11 @@ const INTRO_DUR = 3.5;
 // the opening: a vast aerial of the whole valley; tap and the camera
 // dives toward the clearing, blacks out, and you wake there.
 let launching = false, launchT = 0; const LAUNCH_DUR = 2.6;
+// arrow-cam: a brief cinematic chase that rides each loosed arrow
+let arrowCam = null;        // { rec, mode:'follow'|'return', rt }
+window._acState = () => arrowCam ? arrowCam.mode : 'none';
+window._camPos = () => camera.position.toArray().map(n=>Math.round(n));
+const _acTmp = new THREE.Vector3(), _acLook = new THREE.Vector3();
 const _aerial = new THREE.Vector3();   // scratch
 let intro = false, introT = 0, introSkip = false;
 window._intro = () => intro;          // test/inspection hook
@@ -2772,9 +2777,11 @@ function loose() {
   streak.position.z = -1.9;          // trails behind (arrow forward = +z)
   m.add(streak); m.userData.streak = streak;
   scene.add(m);
-  arrows.push({ m, v: dir.multiplyScalar(ARROW_SPEED_BASE + power * ARROW_SPEED_DRAW),
+  const rec = { m, v: dir.multiplyScalar(ARROW_SPEED_BASE + power * ARROW_SPEED_DRAW),
                 t: ARROW_LIFE, power,
-                ox: m.position.x, oy: m.position.y, oz: m.position.z });
+                ox: m.position.x, oy: m.position.y, oz: m.position.z };
+  arrows.push(rec);
+  arrowCam = { rec, mode: 'follow', rt: 0 };   // ride this one
   audio.twang();
   kickT = KICK_DUR;        // kill-feel: the string snaps your aim up a hair
   drawT = 0;
@@ -3005,7 +3012,7 @@ addEventListener('mousedown', skipIntro);
 addEventListener('touchstart', skipIntro, { passive: true });
 
 if (!IS_TOUCH) {
-  canvas.addEventListener('mousedown', () => { if (started && !intro && document.pointerLockElement) drawing = true; });
+  canvas.addEventListener('mousedown', () => { if (started && !intro && !arrowCam && document.pointerLockElement) drawing = true; });
   addEventListener('mouseup', () => { if (drawing) { drawing = false; loose(); } });
   addEventListener('mousemove', e => {
     if (!document.pointerLockElement) return;
@@ -3074,7 +3081,7 @@ if (!IS_TOUCH) {
   const btn = document.getElementById('shootBtn');
   btn.addEventListener('touchstart', e => {
     e.preventDefault();
-    if (shootId !== null || intro) return;  // ignore 2nd finger / during wake-up
+    if (shootId !== null || intro || arrowCam) return;  // 2nd finger / wake-up / mid-chase
     const t = e.changedTouches[0];
     shootId = t.identifier; lastShoot = { x: t.clientX, y: t.clientY };
     drawing = true;
@@ -3590,6 +3597,27 @@ function tickBody() {
     camera.rotation.x = (pitchUp + (player.pitch - pitchUp) * re)
       + Math.sin(t * 1.3) * sway * 0.6;
     camera.rotation.y = player.yaw + Math.sin(t * 0.9) * sway;
+  } else if (arrowCam && arrowCam.mode === 'follow'
+             && arrowCam.rec && !arrowCam.rec.stuck && arrows.indexOf(arrowCam.rec) !== -1
+             && (arrowCam.rt += dt) < 1.8) {
+    // ARROW-CAM: chase the shaft in flight from just behind & above,
+    // looking down its line — you ride the shot to where it lands.
+    const rec = arrowCam.rec, ap = rec.m.position;
+    _acTmp.copy(rec.v); const spd = _acTmp.length() || 1; _acTmp.multiplyScalar(1 / spd);
+    const ideal = _acLook.copy(ap).addScaledVector(_acTmp, -2.4); ideal.y += 0.9;
+    // ease the camera in from wherever it was (the shot moment)
+    camera.position.lerp(ideal, Math.min(1, dt * 7));
+    camera.lookAt(ap.x + _acTmp.x * 6, ap.y + _acTmp.y * 6, ap.z + _acTmp.z * 6);
+    camera.rotation.order = 'YXZ';
+  } else if (arrowCam) {
+    // the arrow landed/stuck — glide the view back to the hunter, then release
+    if (arrowCam.mode !== 'return') { arrowCam.mode = 'return'; arrowCam.rt = 0.5; }
+    arrowCam.rt -= dt;
+    _acTmp.set(player.x, player.y + EYE, player.z);
+    camera.position.lerp(_acTmp, Math.min(1, dt * 6));
+    camera.rotation.order = 'YXZ';
+    camera.rotation.y = player.yaw; camera.rotation.x = player.pitch;
+    if (arrowCam.rt <= 0) arrowCam = null;
   } else {
     camera.position.set(player.x, player.y + EYE, player.z);
     camera.rotation.order = 'YXZ';

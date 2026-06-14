@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>CONSUME</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&display=swap" rel="stylesheet">
 <link rel="icon" type="image/svg+xml" href="icon.svg">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="manifest" href="manifest.webmanifest">
@@ -39,23 +41,23 @@
     align-items:center;justify-content:center;color:#d9cfc0;text-align:center;
     padding:24px;transition:opacity 1.2s;
     background:radial-gradient(ellipse at center,transparent 24%,rgba(4,2,2,.78) 100%)}
-  #title h1{font-family:'Times New Roman',Georgia,serif;font-weight:400;
-    white-space:nowrap;
-    font-size:min(96px, 10vw);letter-spacing:.2em;text-indent:.2em;
-    color:#cfc4b0;
-    text-shadow:0 2px 28px rgba(0,0,0,.95),0 0 90px rgba(110,16,8,.4)}
-  #title h1 span{display:inline-block}
-  #title h1 span:nth-child(1){transform:translateY(2px) rotate(-1.1deg)}
-  #title h1 span:nth-child(2){transform:translateY(-2px) scaleY(1.05)}
-  #title h1 span:nth-child(3){transform:translateY(3px) rotate(.9deg);opacity:.93}
-  #title h1 span:nth-child(4){transform:translateY(-1px) rotate(-.7deg)}
-  #title h1 span:nth-child(5){transform:translateY(3px) scaleY(.96);animation:starve 7s ease-in-out infinite}
-  #title h1 span:nth-child(6){transform:translateY(-2px) rotate(1deg);opacity:.95}
-  #title h1 span:nth-child(7){transform:translateY(1px) rotate(-.5deg);opacity:.88}
-  @keyframes starve{0%,86%,100%{opacity:.96}90%{opacity:.5}94%{opacity:.85}96%{opacity:.55}}
-  #title .sub{margin-top:14px;font-family:'Times New Roman',Georgia,serif;
-    font-size:14px;letter-spacing:.4em;text-indent:.4em;text-transform:lowercase;
-    color:#a98f82;opacity:.78;text-shadow:0 1px 8px rgba(0,0,0,.95)}
+  #title h1{font-family:'Cinzel','Times New Roman',serif;font-weight:700;
+    white-space:nowrap;margin:0;
+    font-size:clamp(46px,12.5vw,128px);letter-spacing:.1em;text-indent:.1em;
+    background:linear-gradient(180deg,#fbf1de 0%,#e7cda0 48%,#caa06a 100%);
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+    -webkit-text-fill-color:transparent;
+    filter:drop-shadow(0 3px 18px rgba(0,0,0,.9)) drop-shadow(0 0 60px rgba(150,30,12,.35));
+    animation:emberglow 6s ease-in-out infinite}
+  @keyframes emberglow{0%,100%{filter:drop-shadow(0 3px 18px rgba(0,0,0,.9)) drop-shadow(0 0 50px rgba(150,30,12,.28))}
+    50%{filter:drop-shadow(0 3px 18px rgba(0,0,0,.9)) drop-shadow(0 0 78px rgba(200,60,20,.5))}}
+  #title .rule{display:flex;align-items:center;gap:16px;margin-top:20px;width:min(360px,70vw);opacity:.9}
+  #title .rule i{flex:1;height:1px;background:linear-gradient(90deg,transparent,#caa06a)}
+  #title .rule i:last-child{background:linear-gradient(90deg,#caa06a,transparent)}
+  #title .rule svg{width:30px;height:12px;flex:none}
+  #title .sub{margin-top:16px;font-family:'Cinzel','Times New Roman',serif;font-weight:500;
+    font-size:clamp(11px,3vw,15px);letter-spacing:.42em;text-indent:.42em;text-transform:lowercase;
+    color:#bfa48a;opacity:.85;text-shadow:0 1px 8px rgba(0,0,0,.95)}
   #play{pointer-events:auto;margin-top:60px;background:none;border:none;cursor:pointer;
     color:#d9cfc0;font-family:'Times New Roman',Georgia,serif;font-size:16px;
     letter-spacing:.3em;text-indent:.3em;text-transform:lowercase;
@@ -123,7 +125,10 @@
 
 <div id="vignette"></div>
 <div id="title">
-  <h1><span>C</span><span>O</span><span>N</span><span>S</span><span>U</span><span>M</span><span>E</span></h1>
+  <h1>CONSUME</h1>
+  <div class="rule"><i></i>
+    <svg viewBox="0 0 30 12" aria-hidden="true"><line x1="2" y1="6" x2="22" y2="6" stroke="#caa06a" stroke-width="1.4"/><path d="M21 2 L28 6 L21 10" fill="none" stroke="#caa06a" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <i></i></div>
   <div class="sub">eat. or be eaten.</div>
   <button id="play" aria-label="begin" style="opacity:0;height:1px;padding:0;margin:0"></button>
   <div id="loadmsg">it is loading.</div>
