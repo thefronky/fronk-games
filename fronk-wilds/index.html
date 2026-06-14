@@ -127,10 +127,9 @@
     font-size:11px;letter-spacing:.2em;text-transform:uppercase;flex-direction:column;gap:6px}
   #oarL{left:26px}  #oarR{right:26px}
   #oarL svg,#oarR svg{width:34px;height:34px}
-  /* in the canoe: show oars, hide the land controls */
-  .touch.canoe #oarL,.touch.canoe #oarR{display:flex}
-  #oarL.rowing,#oarR.rowing{background:rgba(60,110,150,.34);border-color:rgba(150,210,255,.6)}
-  .touch.canoe #stickL,.touch.canoe #jumpBtn{display:none}
+  /* in the canoe: the move stick steers the boat; oars + jump are gone */
+  .touch.canoe #oarL,.touch.canoe #oarR{display:none}
+  .touch.canoe #jumpBtn{display:none}
 </style>
 </head>
 <body>

@@ -3621,10 +3621,9 @@ let _landDip = 0;   // camera knee-bend on landing, decays back up
 let _curGround = 'grass';   // footstep material under the player
 let tripT = 0;      // seconds left of a mushroom trip (trippy visuals + moon-jump)
 let playerVy = 0, grounded = true, jumpQ = false;
-let inCanoe = false, canoeSpd = 0, _wasCanoe = false;
-// rowing is a CIRCULAR motion: each oar accumulates the radians of arc your
-// finger sweeps this frame (touch) — keep circling smoothly to keep moving.
-let oarLDrive = 0, oarRDrive = 0;
+let inCanoe = false, canoeVX = 0, canoeVZ = 0, _wasCanoe = false;
+// the canoe is a real boat: you push it with the move stick like walking,
+// but it carries momentum — slow to build, drifts and slides to a stop.
 
 // ── the wake-up: a ~3.5s cinematic intro that plays on enter and on
 // every respawn. Driven entirely by introT on the dt loop (no setTimeout),
@@ -4012,6 +4011,11 @@ function arrowUpdate(dt) {
           if (fd > 35) setTimeout(() => say('longShot', 5200), 1600);
         }
         else if (an.cfg.bearish) {
+          // it FELT it — a flinch + a roar so the hit reads clearly
+          setAnim(an, an.acts.HitReact_Left ? 'HitReact_Left' : 'Idle_2', true);
+          setTimeout(() => { if (!an.dead) an.cur = null; }, 400);
+          if (audio.breathAt) audio.breathAt(ap.x, ap.z, 0.95);
+          camShakeT = SHAKE_DUR;
           // an arrow into a bear: a close shot enrages it (charge); a far,
           // impressive shot only baffles it — it rears, then lumbers off.
           const dxB = ap.x - player.x, dzB = ap.z - player.z;
@@ -4364,37 +4368,7 @@ if (!IS_TOUCH) {
     drawing = true; btn.classList.add('drawing');
   }, { passive: false });
   // ── oars: circular-drag rowing pads. Track the angle your finger sweeps
-  // around the pad center; the arc per frame becomes that oar's drive. ──
-  const oL = document.getElementById('oarL'), oR = document.getElementById('oarR');
-  function setupOar(el, side) {                 // side: 'L' | 'R'
-    let id = null, lastAng = 0;
-    const center = () => { const r = el.getBoundingClientRect();
-      return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; };
-    el.addEventListener('touchstart', e => { e.preventDefault();
-      if (!inCanoe || id !== null) return;
-      const t = e.changedTouches[0]; id = t.identifier;
-      const c = center(); lastAng = Math.atan2(t.clientY - c.y, t.clientX - c.x);
-      el.classList.add('rowing');
-    }, { passive: false });
-    document.addEventListener('touchmove', e => {
-      if (id === null) return;
-      for (const t of e.changedTouches) {
-        if (t.identifier !== id) continue;
-        const c = center();
-        const a = Math.atan2(t.clientY - c.y, t.clientX - c.x);
-        let d = a - lastAng;
-        while (d > Math.PI) d -= 2 * Math.PI;
-        while (d < -Math.PI) d += 2 * Math.PI;
-        if (side === 'L') oarLDrive += Math.abs(d); else oarRDrive += Math.abs(d);
-        lastAng = a;
-      }
-    }, { passive: false });
-    const end = e => { for (const t of e.changedTouches)
-      if (t.identifier === id) { id = null; el.classList.remove('rowing'); } };
-    document.addEventListener('touchend', end);
-    document.addEventListener('touchcancel', end);
-  }
-  setupOar(oL, 'L'); setupOar(oR, 'R');
+  // (canoe is steered with the normal move stick now — no oar pads) ──
   const jb = document.getElementById('jumpBtn');
   jb.addEventListener('touchstart', e => { e.preventDefault();
     if (!intro && !arrowCam) jumpQ = true; }, { passive: false });
@@ -4794,33 +4768,32 @@ function tickBody() {
     let nx = player.x + (-sin * mz + cos * mx) * sp * dt;
     let nz = player.z + (-cos * mz - sin * mx) * sp * dt;
     if (inCanoe) {
-      // ── canoe rowing: a CIRCULAR motion, one oar each side ──
-      // each oar feeds the arc your finger swept this frame; the motion
-      // pushes forward AND yaws away from that side, so circling only the
-      // left oar curls you right. Keep both going, smooth, to track straight.
-      if (!IS_TOUCH) { if (keys.KeyA) oarLDrive += 5.0 * dt; if (keys.KeyD) oarRDrive += 5.0 * dt; }
-      const THRUST = 0.95, YAWK = 0.085;
-      if (oarLDrive > 0) { canoeSpd += oarLDrive * THRUST; player.yaw += oarLDrive * YAWK; }
-      if (oarRDrive > 0) { canoeSpd += oarRDrive * THRUST; player.yaw -= oarRDrive * YAWK; }
-      // a soft, throttled paddle-dip while actually rowing
-      tickBody._rowSnd = (tickBody._rowSnd || 0) - dt;
-      if (oarLDrive + oarRDrive > 0.5 && tickBody._rowSnd <= 0) {
-        tickBody._rowSnd = 0.45; if (audio.impact) audio.impact('water', 0.55);
-      }
-      oarLDrive = 0; oarRDrive = 0;
-      canoeSpd = Math.min(7, canoeSpd) * Math.pow(0.42, dt);   // glide + drag
-      const cs = Math.sin(player.yaw), cc = Math.cos(player.yaw);
+      // ── the canoe ── a substantial boat. Push it with the move stick,
+      // same as walking (relative to where you're looking) — but it carries
+      // MOMENTUM: builds speed slowly, then drifts and slides to a stop. No
+      // jump. The view is never touched by the controls (no more oar jitter).
+      const sinY = Math.sin(player.yaw), cosY = Math.cos(player.yaw);
+      const ACCEL = 6.5, MAXV = 4.6;
+      canoeVX += (-sinY * mz + cosY * mx) * ACCEL * dt;
+      canoeVZ += (-cosY * mz - sinY * mx) * ACCEL * dt;
+      const drag = Math.pow(0.5, dt);                    // long glide / drift
+      canoeVX *= drag; canoeVZ *= drag;
+      const cspd = Math.hypot(canoeVX, canoeVZ);
+      if (cspd > MAXV) { canoeVX *= MAXV / cspd; canoeVZ *= MAXV / cspd; }
+      // soft paddle-dip while actively pushing
+      if (mx || mz) { tickBody._rowSnd = (tickBody._rowSnd || 0) - dt;
+        if (tickBody._rowSnd <= 0) { tickBody._rowSnd = 0.7; if (audio.impact) audio.impact('water', 0.5); } }
       const lim2 = WORLD * 0.47;
-      let cx = Math.max(-lim2, Math.min(lim2, player.x - cs * canoeSpd * dt));
-      let cz = Math.max(-lim2, Math.min(lim2, player.z - cc * canoeSpd * dt));
+      let cx = Math.max(-lim2, Math.min(lim2, player.x + canoeVX * dt));
+      let cz = Math.max(-lim2, Math.min(lim2, player.z + canoeVZ * dt));
       const wy = heightAt(cx, cz);
       if (wy > WATER_Y - 0.12) {            // nosed into the shallows → step out onto land
-        inCanoe = false; canoeSpd = 0;
+        inCanoe = false; canoeVX = 0; canoeVZ = 0;
         player.x = cx; player.z = cz; player.y = wy; grounded = true; player.airY = wy;
       } else {
         player.x = cx; player.z = cz; player.y = WATER_Y; grounded = true; player.airY = WATER_Y;
       }
-      _moveLvl = Math.min(1, canoeSpd / 6);
+      _moveLvl = Math.min(1, cspd / MAXV);
     } else {
     // tree collision — pushes you out at trunk level. BUT if you're up at
     // canopy height (a mushroom trip), you're ON the tree, not walking into
@@ -4891,9 +4864,13 @@ function tickBody() {
       }
       player.y = player.airY;
     } else { player.y = groundY; player.airY = groundY; }
-    // stepped off the bank into deep water → board the canoe
+    // stepped off the bank into deep water → board the canoe (carry your
+    // walking momentum in as the boat's starting drift)
     if (ny <= WATER_Y - 0.4 && stickMag > 0.02) {
-      inCanoe = true; canoeSpd = 2.0; player.x = nx; player.z = nz; player.y = WATER_Y;
+      inCanoe = true;
+      const sinY = Math.sin(player.yaw), cosY = Math.cos(player.yaw);
+      canoeVX = (-sinY * mz + cosY * mx) * 2.0; canoeVZ = (-cosY * mz - sinY * mx) * 2.0;
+      player.x = nx; player.z = nz; player.y = WATER_Y;
     }
     }  // end !inCanoe walk branch
 
