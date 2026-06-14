@@ -860,11 +860,11 @@ function mergeGeoms(list) {
        float wH = clamp(position.y / 12.0, 0.0, 1.0);
        float bendY = pow(wH, 1.6) * ${amp.toFixed(2)};
        float ph = instanceMatrix[3][0]*0.07 + instanceMatrix[3][2]*0.05;
-       float gust = 0.55 + 0.45*sin(uTime*0.27 + instanceMatrix[3][0]*0.012);
-       transformed.x += (sin(uTime*0.95 + ph) + 0.3*sin(uTime*2.3 + ph*1.7)) * bendY * gust;
-       transformed.z += cos(uTime*0.8 + ph*1.3) * bendY * ${sideAmp.toFixed(2)} * gust;`);
+       float gust = 0.7 + 0.3*sin(uTime*0.16 + instanceMatrix[3][0]*0.01);
+       transformed.x += (sin(uTime*0.42 + ph) + 0.22*sin(uTime*1.05 + ph*1.7)) * bendY * gust;
+       transformed.z += cos(uTime*0.36 + ph*1.3) * bendY * ${sideAmp.toFixed(2)} * gust;`);
   };
-  treeMat.onBeforeCompile = treeWind(0.85, 0.7);
+  treeMat.onBeforeCompile = treeWind(0.2, 0.16);   // gentle drift, not a wobble
   const species = [
     { geo: pineGeo,  inst: new THREE.InstancedMesh(pineGeo, treeMat, CFG.trees), n: 0, r: 1.1 },
     { geo: broadGeo, inst: new THREE.InstancedMesh(broadGeo, treeMat, CFG.trees), n: 0, r: 1.2 },
@@ -2591,6 +2591,7 @@ player.y = heightAt(player.x, player.z);
 const score = {};
 const keys = {};
 let started = false, drawT = 0, holdT = 0, drawing = false, dead = false, bobPhase = 0, hapticT = 0;
+let playerVy = 0, grounded = true, jumpQ = false;
 
 // ── the wake-up: a ~3.5s cinematic intro that plays on enter and on
 // every respawn. Driven entirely by introT on the dt loop (no setTimeout),
@@ -2930,7 +2931,32 @@ function arrowUpdate(dt) {
 const bow = new THREE.Group();
 let bowString1, bowString2, nockedArrow;
 {
-  const woodM = new THREE.MeshStandardMaterial({ color: 0x7a5530, roughness: 0.7 });
+  // procedural wood grain — warm streaked figure painted to a canvas,
+  // so the bow reads as real carved wood, not a flat brown tube.
+  const woodTex = (() => {
+    const c = document.createElement('canvas'); c.width = 64; c.height = 512;
+    const x = c.getContext('2d');
+    x.fillStyle = '#6b4524'; x.fillRect(0, 0, 64, 512);
+    for (let i = 0; i < 240; i++) {
+      const gx = Math.random() * 64;
+      const shade = 18 + Math.random() * 40;
+      const dark = Math.random() < 0.5;
+      x.strokeStyle = dark ? `rgba(40,24,10,${0.05 + Math.random() * 0.12})`
+                           : `rgba(${150 + shade},${108 + shade * 0.7},${60 + shade * 0.5},${0.05 + Math.random() * 0.1})`;
+      x.lineWidth = 0.5 + Math.random() * 1.6;
+      x.beginPath();
+      let gy = 0; x.moveTo(gx, 0);
+      while (gy < 512) { gy += 16 + Math.random() * 24;
+        x.lineTo(gx + Math.sin(gy * 0.03) * 3 + (Math.random() - 0.5) * 2, gy); }
+      x.stroke();
+    }
+    const t = new THREE.CanvasTexture(c);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(1, 3);
+    t.anisotropy = 4;
+    return t;
+  })();
+  const woodM = new THREE.MeshStandardMaterial({ map: woodTex, color: 0xb89066,
+    roughness: 0.5, metalness: 0.08 });
   const limbPts = [];
   // LONGBOW profile (y, z): a man-tall D-bow — the limbs run out of
   // frame when held. You should feel 6'2" behind it.
@@ -3009,7 +3035,7 @@ function resetDrawState() {
 // ───────────────────────── input ─────────────────────────
 // the wake-up is skippable — any input fast-forwards it to the end
 function skipIntro() { if (intro) introSkip = true; }
-addEventListener('keydown', e => keys[e.code] = true);
+addEventListener('keydown', e => { keys[e.code] = true; if (e.code === 'Space' && !intro && !arrowCam) jumpQ = true; });
 addEventListener('keyup', e => keys[e.code] = false);
 addEventListener('keydown', skipIntro);
 addEventListener('mousedown', skipIntro);
@@ -3069,7 +3095,7 @@ if (!IS_TOUCH) {
       if (t.identifier === stickId) { stickId = null; moveVec.x = moveVec.y = 0;
         knob.style.left = '50%'; knob.style.top = '50%'; }
       if (t.identifier === lookId) lookId = null;
-      if (t.identifier === shootId) { shootId = null; drawing = false; loose(); }
+      if (t.identifier === shootId) { shootId = null; drawing = false; loose(); document.getElementById('shootBtn').classList.remove('drawing'); }
     }
   });
   // iOS fires touchcancel (not touchend) on system gestures, alerts,
@@ -3079,7 +3105,7 @@ if (!IS_TOUCH) {
       if (t.identifier === stickId) { stickId = null; moveVec.x = moveVec.y = 0;
         knob.style.left = '50%'; knob.style.top = '50%'; }
       if (t.identifier === lookId) lookId = null;
-      if (t.identifier === shootId) { shootId = null; drawing = false; drawT = 0; }
+      if (t.identifier === shootId) { shootId = null; drawing = false; drawT = 0; document.getElementById('shootBtn').classList.remove('drawing'); }
     }
   });
   const btn = document.getElementById('shootBtn');
@@ -3088,8 +3114,12 @@ if (!IS_TOUCH) {
     if (shootId !== null || intro || arrowCam) return;  // 2nd finger / wake-up / mid-chase
     const t = e.changedTouches[0];
     shootId = t.identifier; lastShoot = { x: t.clientX, y: t.clientY };
-    drawing = true;
+    drawing = true; btn.classList.add('drawing');
   }, { passive: false });
+  // jump button
+  const jb = document.getElementById('jumpBtn');
+  jb.addEventListener('touchstart', e => { e.preventDefault();
+    if (!intro && !arrowCam) jumpQ = true; }, { passive: false });
 }
 
 // ───────────────────────── HUD ─────────────────────────
@@ -3458,7 +3488,16 @@ function tickBody() {
     const lim = WORLD * 0.47;
     nx = Math.max(-lim, Math.min(lim, nx)); nz = Math.max(-lim, Math.min(lim, nz));
     const ny = heightAt(nx, nz);
-    if (ny > WATER_Y - 0.4) { player.x = nx; player.z = nz; player.y = ny; }
+    // ── jump / fall: light, forgiving hop (Apple-simple) ──
+    const groundY = (ny > WATER_Y - 0.4) ? ny : player.y;
+    if (ny > WATER_Y - 0.4) { player.x = nx; player.z = nz; }
+    if (jumpQ && grounded) { playerVy = 6.2; grounded = false; }
+    jumpQ = false;
+    if (!grounded) {
+      playerVy -= 17 * dt; player.airY = (player.airY ?? groundY) + playerVy * dt;
+      if (player.airY <= groundY) { player.airY = groundY; playerVy = 0; grounded = true; }
+      player.y = player.airY;
+    } else { player.y = groundY; player.airY = groundY; }
 
     // bow — at full draw it RAISES to your eye: grip near center,
     // nock at the cheek, slight zoom like focusing down the arrow
@@ -3690,7 +3729,7 @@ canvas.addEventListener('webglcontextlost', (e) => {
 // ───────────────────────── boot ─────────────────────────
 renderNotes(); renderHP();
 loadAnimals().then(() => {
-  document.getElementById('loadmsg').textContent = 'it is ready. it was always hungry.';
+  document.getElementById('loadmsg').textContent = '';
 }).catch(e => {
   document.getElementById('loadmsg').textContent = 'asset load failed: ' + e;
 });
