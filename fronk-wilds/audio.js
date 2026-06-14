@@ -107,6 +107,13 @@ export class AudioEngine {
     // place the listener at the player's ear, looking down their yaw
     this._listener = C.listener;
 
+    // ── title theme bus ── the big cinematic-classical opener. Heavy on
+    // the reverb send for a concert-hall swell; fades out as you dive in.
+    this.titleBus = C.createGain(); this.titleBus.gain.value = 0.0001;
+    this.titleBus.connect(this.master);
+    this.titleBus.connect(this.verb);
+    this._title = null;
+
     // ── shared one-shot noise buffer (1s white) — every burst-style
     // sound (snap, whoosh, impacts, footsteps) reads from this with a
     // random offset instead of allocating a fresh buffer per shot.
@@ -583,6 +590,126 @@ export class AudioEngine {
     o.connect(bp).connect(g).connect(this.musicBus);
     o.connect(lp).connect(g2).connect(this.musicBus);
     o.start(t); o.stop(t + 0.55);
+  }
+
+  // ════ the cinematic title theme ════════════════════════════════════
+  // an epic minor progression (i–VI–III–VII = Am–F–C–G), swelling strings,
+  // a low cello root, a soaring lead, and timpani on the downbeats. Wholly
+  // synthesized, original, copyright-clean. Scheduled bar-by-bar from
+  // update() so it keeps building until the dive fades it out.
+  titleTheme() {
+    if (!this.started || this._title) return;
+    const t = this.ctx.currentTime;
+    this.titleBus.gain.cancelScheduledValues(t);
+    this.titleBus.gain.setValueAtTime(0.0001, t);
+    this.titleBus.gain.exponentialRampToValueAtTime(0.85, t + 3.0);   // swell up
+    this._title = { ix: 0, nextT: t + 0.1, fading: false, stopAt: 1e9 };
+  }
+  // runs every frame (even before the game starts) to keep the theme going
+  pumpTitle(dt) {
+    if (!this.started || this.muted || !this._title) return;
+    const t = this.ctx.currentTime;
+    if (this.ctx.state !== 'running') { this.ctx.resume && this.ctx.resume(); return; }
+    while (this._title.nextT < t + 0.5) {
+      this._scheduleTitleBar(this._title.ix, this._title.nextT);
+      this._title.ix++; this._title.nextT += 3.6;
+    }
+    if (this._title.fading && t > this._title.stopAt) this._title = null;
+  }
+  fadeTitle(sec = 4) {
+    if (!this._title) return;
+    const t = this.ctx.currentTime;
+    this.titleBus.gain.cancelScheduledValues(t);
+    this.titleBus.gain.setValueAtTime(Math.max(0.0001, this.titleBus.gain.value), t);
+    this.titleBus.gain.exponentialRampToValueAtTime(0.0001, t + sec);
+    this._title.fading = true; this._title.stopAt = t + sec + 0.2;
+  }
+  _scheduleTitleBar(ix, when) {
+    // Am, F, C, G — each held a bar (3.6s). roots chosen low for weight.
+    const PROG = [
+      { root: 220.00, triad: [0, 3, 7], mel: [12, 15, 19, 15] },  // Am
+      { root: 174.61, triad: [0, 4, 7], mel: [16, 12, 16, 19] },  // F
+      { root: 261.63, triad: [0, 4, 7], mel: [12, 16, 19, 24] },  // C
+      { root: 196.00, triad: [0, 4, 7], mel: [14, 11, 14, 19] },  // G
+    ];
+    const BAR = 3.6;
+    const ch = PROG[ix % 4];
+    const grow = Math.min(1, 0.55 + ix * 0.12);          // builds over the first bars
+    this._titleStrings(ch.root, ch.triad, when, BAR, grow);
+    this._titleBass(ch.root / 2, when, BAR, grow);
+    this._titleHit(when, 0.5 + 0.4 * grow);              // timpani downbeat
+    if (ix >= 2) this._titleHit(when + BAR * 0.5, 0.4 * grow);
+    // the soaring lead — enters after the first bar
+    if (ix >= 1) ch.mel.forEach((s, k) =>
+      this._titleLead(ch.root * Math.pow(2, s / 12), when + k * (BAR / 4), BAR / 4 * 0.92, grow));
+  }
+  _titleStrings(root, triad, when, dur, vol) {
+    const C = this.ctx;
+    const notes = triad.concat([12, 19]);                // triad + octave + fifth-above
+    for (const s of notes) {
+      const hz = root * Math.pow(2, s / 12);
+      for (let d = -1; d <= 1; d += 2) {                 // two detuned saws per note = ensemble
+        const o = C.createOscillator(); o.type = 'sawtooth';
+        o.frequency.value = hz * (1 + d * 0.0022);
+        const lfo = C.createOscillator(); lfo.frequency.value = 5.2 + Math.random();
+        const lg = C.createGain(); lg.gain.value = hz * 0.004;   // vibrato depth
+        lfo.connect(lg).connect(o.frequency); lfo.start(when); lfo.stop(when + dur + 0.6);
+        const lp = C.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 2200; lp.Q.value = 0.6;
+        const g = C.createGain();
+        g.gain.setValueAtTime(0.0001, when);
+        g.gain.linearRampToValueAtTime(0.05 * vol, when + 1.0);   // bowed swell
+        g.gain.setValueAtTime(0.05 * vol, when + dur - 0.5);
+        g.gain.exponentialRampToValueAtTime(0.0001, when + dur + 0.4);
+        o.connect(lp).connect(g).connect(this.titleBus);
+        o.start(when); o.stop(when + dur + 0.5);
+      }
+    }
+  }
+  _titleBass(hz, when, dur, vol) {
+    const C = this.ctx;
+    const o = C.createOscillator(); o.type = 'sawtooth'; o.frequency.value = hz;
+    const o2 = C.createOscillator(); o2.type = 'sine'; o2.frequency.value = hz;
+    const lp = C.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 380;
+    const g = C.createGain();
+    g.gain.setValueAtTime(0.0001, when);
+    g.gain.linearRampToValueAtTime(0.16 * vol, when + 0.4);
+    g.gain.setValueAtTime(0.16 * vol, when + dur - 0.4);
+    g.gain.exponentialRampToValueAtTime(0.0001, when + dur + 0.3);
+    o.connect(lp); o2.connect(lp); lp.connect(g).connect(this.titleBus);
+    o.start(when); o2.start(when); o.stop(when + dur + 0.4); o2.stop(when + dur + 0.4);
+  }
+  _titleLead(hz, when, dur, vol) {
+    const C = this.ctx;
+    const o = C.createOscillator(); o.type = 'triangle'; o.frequency.value = hz;
+    const o2 = C.createOscillator(); o2.type = 'sawtooth'; o2.frequency.value = hz;
+    const lfo = C.createOscillator(); lfo.frequency.value = 5.6;
+    const lg = C.createGain(); lg.gain.value = hz * 0.006;
+    lfo.connect(lg).connect(o.frequency); lfo.start(when); lfo.stop(when + dur + 0.3);
+    const g = C.createGain(), g2 = C.createGain(); g2.gain.value = 0.4;
+    g.gain.setValueAtTime(0.0001, when);
+    g.gain.linearRampToValueAtTime(0.11 * vol, when + 0.12);   // a singing attack
+    g.gain.exponentialRampToValueAtTime(0.0001, when + dur);
+    o.connect(g).connect(this.titleBus);
+    o2.connect(g2).connect(g);
+    o.start(when); o2.start(when); o.stop(when + dur + 0.2); o2.stop(when + dur + 0.2);
+  }
+  _titleHit(when, vol) {                         // timpani — a felt boom
+    const C = this.ctx;
+    const o = C.createOscillator(); o.type = 'sine';
+    o.frequency.setValueAtTime(80, when);
+    o.frequency.exponentialRampToValueAtTime(44, when + 0.18);
+    const g = C.createGain();
+    g.gain.setValueAtTime(0.0001, when);
+    g.gain.linearRampToValueAtTime(0.5 * vol, when + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, when + 0.5);
+    const src = C.createBufferSource(); src.buffer = this._shotNoise;
+    const bp = C.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 120; bp.Q.value = 1.2;
+    const ng = C.createGain();
+    ng.gain.setValueAtTime(0.18 * vol, when);
+    ng.gain.exponentialRampToValueAtTime(0.0001, when + 0.22);
+    o.connect(g).connect(this.titleBus);
+    src.connect(bp).connect(ng).connect(this.titleBus);
+    o.start(when); o.stop(when + 0.55); src.start(when, 0, 0.25);
   }
 
   // a low spatial breath/huff from a big animal — rarer, scarier.

@@ -4343,6 +4343,9 @@ window._sim = (seconds) => {   // test hook: advance the world while the
 function tickBody() {
   const dt = simDt ?? Math.min(clock.getDelta(), 0.05);
   const t = clock.elapsedTime;
+  if (audio.pumpTitle) audio.pumpTitle(dt);   // keep the title theme alive (runs pre-game too)
+  // auto-launch: after the theme's opening swell, the cinematic dive begins
+  if (titleArmed && !launching && !started && (t - titleArmT) > 6.5) beginLaunch();
   // kill-feel: juice timers decay on REAL time (hitstop scales the
   // world dt further down, where animals/arrows update)
   if (kickT > 0) kickT -= dt;
@@ -4872,20 +4875,34 @@ loadAnimals().then(() => {
   }
 }
 
+// ── title is two-beat ── first tap wakes the audio + starts the cinematic
+// theme over the slow aerial of CONSUME (autoplay needs that first gesture);
+// a second tap, or ~6.5s of letting it swell, dives in and fades the music.
+let titleArmed = false, titleArmT = 0;
+function onTitleTap() {
+  if (launching || started) return;
+  if (!titleArmed) {
+    titleArmed = true; titleArmT = clock.elapsedTime;
+    try { audio.start(); if (audio.titleTheme) audio.titleTheme(); } catch (e) {}
+    return;                            // just the music + the cinematic title — not yet the dive
+  }
+  beginLaunch();                       // second tap → go
+}
 function beginLaunch() {
   if (launching || started) return;
   launching = true; launchT = 0;
   _diveFrom.copy(camera.position);    // freeze the dive origin — a clean dolly, no more orbit
   try { audio.start(); } catch (e) {}
+  if (audio.fadeTitle) audio.fadeTitle(LAUNCH_DUR + 0.6);   // the theme fades as the world rushes up
   document.getElementById('title').style.opacity = 0;
   setTimeout(() => document.getElementById('title').style.display = 'none', 800);
   if (!IS_TOUCH) canvas.requestPointerLock();
   else if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => {});
 }
 // tap ANYWHERE to begin — no button, no instructions
-document.getElementById('play').addEventListener('click', beginLaunch);
-document.getElementById('title').addEventListener('click', beginLaunch);
-document.getElementById('title').addEventListener('touchstart', (e) => { e.preventDefault(); beginLaunch(); }, { passive: false });
+document.getElementById('play').addEventListener('click', onTitleTap);
+document.getElementById('title').addEventListener('click', onTitleTap);
+document.getElementById('title').addEventListener('touchstart', (e) => { e.preventDefault(); onTitleTap(); }, { passive: false });
 canvas.addEventListener('click', () => {
   if (started && !IS_TOUCH && !document.pointerLockElement) canvas.requestPointerLock();
 });
