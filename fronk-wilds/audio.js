@@ -114,6 +114,31 @@ export class AudioEngine {
     this.titleBus.connect(this.verb);
     this._title = null;
 
+    // ── trip bus ── the mushroom's magic-carpet music: heavy reverb + a
+    // slow chorus so it swims. Fades in/out with the trip.
+    this.tripBus = C.createGain(); this.tripBus.gain.value = 0.0001;
+    this.tripBus.connect(this.master); this.tripBus.connect(this.verb);
+    this._trip = null; this._tripVoices = [];
+
+    // ── unease ── a faint dissonant low drone that sits UNDER the daylight,
+    // so the pretty golden hour feels quietly wrong — daytime horror. Always
+    // on once started; the loop lifts it by day, drops it deep at night.
+    this.uneaseGain = C.createGain(); this.uneaseGain.gain.value = 0;   // loop sets the level
+    {
+      const lp = C.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 220; lp.Q.value = 0.8;
+      const trem = C.createGain(); trem.gain.value = 0.6;               // a slow tremor
+      // a minor-second cluster (55 + 58.27Hz) — beats slowly, sounds 'off'
+      [55, 58.27].forEach(hz => {
+        const o = C.createOscillator(); o.type = 'sawtooth'; o.frequency.value = hz;
+        const og = C.createGain(); og.gain.value = 0.5;
+        o.connect(og).connect(lp); o.start();
+      });
+      const lfo = C.createOscillator(); lfo.frequency.value = 0.07;
+      const lg = C.createGain(); lg.gain.value = 0.4;
+      lfo.connect(lg).connect(trem.gain); lfo.start();                  // ±0.4 around 0.6
+      lp.connect(trem).connect(this.uneaseGain).connect(this.master);
+    }
+
     // ── shared one-shot noise buffer (1s white) — every burst-style
     // sound (snap, whoosh, impacts, footsteps) reads from this with a
     // random offset instead of allocating a fresh buffer per shot.
@@ -761,6 +786,55 @@ export class AudioEngine {
     o.start(t); o2.start(t); o.stop(t + 0.75); o2.stop(t + 0.75);
   }
 
+  // ── the magic-carpet ── the mushroom's music: a swimming detuned drone
+  // with a slow filter sweep + pitch wow, under a dreamy shimmer arp.
+  // Heavy reverb (tripBus). Starts/fades with the trip.
+  tripMusic(on) {
+    if (!this.started) return;
+    const C = this.ctx, t = C.currentTime;
+    if (on) {
+      if (this._trip) return;
+      this.tripBus.gain.cancelScheduledValues(t);
+      this.tripBus.gain.setValueAtTime(0.0001, t);
+      this.tripBus.gain.exponentialRampToValueAtTime(0.8, t + 2.5);
+      const root = 146.83;                       // D3
+      [0, 7, 12].forEach((semi, i) => {
+        const hz = root * Math.pow(2, semi / 12);
+        const o = C.createOscillator(); o.type = 'sawtooth'; o.frequency.value = hz * (1 + (i - 1) * 0.005);
+        const lp = C.createBiquadFilter(); lp.type = 'lowpass'; lp.Q.value = 7; lp.frequency.value = 800;
+        const f = C.createOscillator(); f.type = 'sine'; f.frequency.value = 0.11 + i * 0.03;
+        const fg = C.createGain(); fg.gain.value = 650; f.connect(fg).connect(lp.frequency); f.start();
+        const w = C.createOscillator(); w.type = 'sine'; w.frequency.value = 0.16 + i * 0.02;
+        const wg = C.createGain(); wg.gain.value = hz * 0.013; w.connect(wg).connect(o.frequency); w.start();
+        const g = C.createGain(); g.gain.value = 0.07;
+        o.connect(lp).connect(g).connect(this.tripBus); o.start();
+        this._tripVoices.push(o, f, w);
+      });
+      this._trip = { ix: 0, nextT: t + 0.3 };
+    } else {
+      if (!this._trip) return;
+      this.tripBus.gain.cancelScheduledValues(t);
+      this.tripBus.gain.setValueAtTime(Math.max(0.0001, this.tripBus.gain.value), t);
+      this.tripBus.gain.exponentialRampToValueAtTime(0.0001, t + 2.5);
+      const v = this._tripVoices; this._tripVoices = []; this._trip = null;
+      setTimeout(() => { for (const o of v) { try { o.stop(); } catch (e) {} } }, 2700);
+    }
+  }
+  _tripArp(when, ix) {
+    const C = this.ctx;
+    const scale = [0, 2, 4, 7, 9, 12, 14, 16];     // dreamy, never resolves
+    const root = 587.33;                            // D5
+    const hz = root * Math.pow(2, scale[ix % scale.length] / 12);
+    const o = C.createOscillator(); o.type = 'triangle'; o.frequency.value = hz;
+    const o2 = C.createOscillator(); o2.type = 'sine'; o2.frequency.value = hz * 1.5;
+    const g = C.createGain(), g2 = C.createGain(); g2.gain.value = 0.3;
+    g.gain.setValueAtTime(0.0001, when);
+    g.gain.linearRampToValueAtTime(0.05, when + 0.03);
+    g.gain.exponentialRampToValueAtTime(0.0001, when + 1.1);
+    o.connect(g).connect(this.tripBus); o2.connect(g2).connect(g);
+    o.start(when); o2.start(when); o.stop(when + 1.2); o2.stop(when + 1.2);
+  }
+
   // ── breath ── one inhale→exhale, scaled by exertion L (0..1). Heavier
   // and faster the higher L. Driven by the scheduler in update().
   _breathCycle(L) {
@@ -1040,6 +1114,17 @@ export class AudioEngine {
 
     // keep the listener glued to the player so spatial one-shots track
     if (s.px !== undefined) this.setListener(s.px, s.pz, s.yaw || 0);
+
+    // unease — a quiet dread drone, LOUDER by day (daytime horror), low at night
+    this.uneaseGain.gain.setTargetAtTime(0.16 - (s.night || 0) * 0.10, t, 2.5);
+
+    // magic-carpet shimmer arp while tripping
+    if (this._trip) {
+      while (this._trip.nextT < t + 0.5) {
+        this._tripArp(this._trip.nextT, this._trip.ix);
+        this._trip.ix++; this._trip.nextT += 0.42;
+      }
+    }
 
     // breath — rate + weight ride exertion (running, holding a heavy draw).
     // Near-silent at rest; you hear yourself heave after a sprint, then

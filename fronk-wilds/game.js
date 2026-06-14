@@ -10,7 +10,9 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
-import { AudioEngine } from './audio.js';
+// cache-bust audio.js too (a static import would let the browser/Pages serve
+// a stale audio engine — why new sounds didn't always reach the phone)
+const { AudioEngine } = await import('./audio.js?ts=' + Date.now());
 
 const audio = new AudioEngine();
 window._audio = audio;
@@ -3857,7 +3859,7 @@ function forageUpdate(t) {
       toast('Berries.', 1400);
     } else {                                    // the glowing mushroom
       tripT = 26; player.lastAte = t;
-      if (audio.stinger) audio.stinger();
+      if (audio.tripMusic) audio.tripMusic(true);   // the magic carpet starts
       toast('…oh.', 2200);
     }
   }
@@ -4703,7 +4705,7 @@ function tickBody() {
     canvas.style.filter = 'hue-rotate(' + hue.toFixed(0) + 'deg) saturate('
       + (1 + 1.2 * k).toFixed(2) + ') contrast(' + (1 + 0.22 * k).toFixed(2)
       + ') brightness(' + (1 + 0.06 * Math.sin(t * 5) * k).toFixed(2) + ')';
-  } else if (canvas.style.filter) { canvas.style.filter = ''; }
+  } else if (canvas.style.filter) { canvas.style.filter = ''; if (audio.tripMusic) audio.tripMusic(false); }
   // auto-launch: after the theme's opening swell, the cinematic dive begins
   if (titleArmed && !launching && !started && (t - titleArmT) > 6.5) beginLaunch();
   // kill-feel: juice timers decay on REAL time (hitstop scales the
