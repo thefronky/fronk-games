@@ -2953,6 +2953,28 @@ function bearUpdate(a, dt, dx, dz, dist) {
     return;
   }
 
+  // ── the warning ring ── a band OUTSIDE the provoke circle where the
+  // bear notices you, squares up, and huffs (3D) — but won't charge. This
+  // is the readable danger you can skirt: hear it, give it room, move on.
+  // Cross into the inner provoke circle and it rears + charges.
+  const awareR = provokeR + 13;
+  if (!a.aggro && !a.confused && a.state !== 'rear' && a.state !== 'retreat'
+      && a.state !== 'charge' && a.state !== 'stalk'
+      && dist >= provokeR && dist < awareR) {
+    a.state = 'wary';
+    a.dir = Math.atan2(dx, dz);                          // turns to keep you in front
+    a._huffCd = (a._huffCd ?? 0) - dt;
+    if (a._huffCd <= 0) {
+      a._huffCd = 1.3 + Math.random() * 1.1;
+      if (audio.breathAt) audio.breathAt(a.obj.position.x, a.obj.position.z, 0.6);
+    }
+    setAnim(a, a.acts.Idle_2 ? 'Idle_2' : 'Idle');
+    if (!a._warned) { a._warned = true; toast('A bear. Give it room.', 3800); }
+    applyGait(a, false, dt); a._moved = false;
+    return;
+  }
+  if (a.state === 'wary' && dist >= awareR) { a.state = 'idle'; a._warned = false; }
+
   // first provoke by proximity (a shot sets a.aggro/a.confused directly)
   if (!a.aggro && !a.confused && a.state !== 'rear' && a.state !== 'retreat'
       && dist < provokeR) {
@@ -4679,13 +4701,18 @@ function tickBody() {
       }
     }
 
-    // feed the score
+    // feed the score — the danger drone tracks the nearest THREAT: a live
+    // wolf/predator, or a bear once it's wary/charging (so the music tenses
+    // as you near a bear's circle and eases as you skirt it).
     let wolfDist = 999;
-    for (const a of animals)
-      if (a.cfg.hunts && !a.dead) {
-        const dd = Math.hypot(a.obj.position.x - player.x, a.obj.position.z - player.z);
-        if (dd < wolfDist) wolfDist = dd;
-      }
+    for (const a of animals) {
+      if (a.dead) continue;
+      const threat = a.cfg.hunts
+        || (a.cfg.bearish && (a.state === 'wary' || a.state === 'charge' || a.aggro));
+      if (!threat) continue;
+      const dd = Math.hypot(a.obj.position.x - player.x, a.obj.position.z - player.z);
+      if (dd < wolfDist) wolfDist = dd;
+    }
     // exertion: a sprint loads it fast, a jog gently; holding a full draw
     // adds strain. It eases UP quicker than it recovers, so you have to
     // actually stop and catch your breath.
