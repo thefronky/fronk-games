@@ -508,7 +508,7 @@ const trampleUniform = { value: new THREE.Vector4(0, 0, 0, 26) };
     g.translate(0, 0.55, 0);
     const p = g.attributes.position;
     for (let i = 0; i < p.count; i++) {
-      const vy = p.getY(i) / 1.1;
+      const vy = Math.max(0, p.getY(i) / 1.1);   // clamp: -1e-8 float residue made pow() NaN
       p.setX(i, p.getX(i) * (1 - Math.pow(vy, 1.3) * 0.85));   // taper
       p.setZ(i, p.getZ(i) + vy * vy * 0.4);                     // curve
     }
