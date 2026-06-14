@@ -3525,6 +3525,8 @@ window._jump = () => { jumpQ = true; };   // test hook: queue a jump in window._
 let started = false, drawT = 0, holdT = 0, raiseT = 0, drawing = false, dead = false, bobPhase = 0, hapticT = 0;
 let _moveLvl = 0;   // 0..1 gait level — drives footstep audio + camera head-bob
 let breathLoad = 0; // 0..1 exertion — rises running / holding a draw, recovers at rest
+let _landDip = 0;   // camera knee-bend on landing, decays back up
+let _curGround = 'grass';   // footstep material under the player
 let playerVy = 0, grounded = true, jumpQ = false;
 let inCanoe = false, canoeSpd = 0, _wasCanoe = false;
 // rowing is a CIRCULAR motion: each oar accumulates the radians of arc your
@@ -4635,6 +4637,14 @@ function tickBody() {
     // when you're trying to thread an arrow). Feeds the continuous dB model.
     const stalking = (!sprinting && stickMag > 0.02 && (stickMag < 0.55 || drawing));
     setNoise(stickMag > 0.02 ? (sprinting ? 2 : 1) : 0, stalking);
+    // footstep material under your feet, by BIOME (raw elevation lies — the
+    // whole valley sits high): the alpine massif is rock, the wetland/water's
+    // edge is soft sand-mud, everything else is grass. Re-set only on change.
+    const reg = regionAt(player.x, player.z);
+    const grd = reg === REGION.ALPINE ? 'rock'
+              : (reg === REGION.WETLAND || player.y < WATER_Y + 1.4) ? 'sand'
+              : 'grass';
+    if (grd !== _curGround) { _curGround = grd; if (audio.setGround) audio.setGround(grd); }
     // 0..1 gait level for audio footsteps + head-bob: stalk is quiet/slow.
     _moveLvl = stickMag <= 0.02 ? 0
       : (sprinting ? 1 : 0.4 + stickMag * 0.4);
@@ -4715,7 +4725,15 @@ function tickBody() {
     jumpQ = false;
     if (!grounded) {
       playerVy -= 13 * dt; player.airY = (player.airY ?? groundY) + playerVy * dt;
-      if (player.airY <= groundY) { player.airY = groundY; playerVy = 0; grounded = true; }
+      if (player.airY <= groundY) {
+        const impact = -playerVy;                 // how hard you came down
+        player.airY = groundY; playerVy = 0; grounded = true;
+        if (impact > 2.6) {                       // a real landing, not a tiny step-down
+          _landDip = Math.min(0.13, impact * 0.014);   // the camera settles into your knees
+          if (audio.impact) audio.impact(_curGround === 'rock' ? 'wood' : 'ground', 0.1);
+          if (IS_TOUCH && navigator.vibrate && impact > 5.5) navigator.vibrate(14);
+        }
+      }
       player.y = player.airY;
     } else { player.y = groundY; player.airY = groundY; }
     // stepped off the bank into deep water → board the canoe
@@ -4931,7 +4949,8 @@ function tickBody() {
     camera.rotation.y = player.yaw; camera.rotation.x = player.pitch;
     if (arrowCam.rt <= 0) arrowCam = null;
   } else {
-    camera.position.set(player.x, player.y + EYE, player.z);
+    _landDip += (0 - _landDip) * Math.min(1, dt * 9);   // ease the knee-bend back up
+    camera.position.set(player.x, player.y + EYE - _landDip, player.z);
     camera.rotation.order = 'YXZ';
     // subtle head-bob — stronger at a sprint, damped while drawing, zero
     // when standing (bobPhase only advances while moving). Lateral sway is
