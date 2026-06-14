@@ -712,6 +712,62 @@ export class AudioEngine {
     o.start(when); o.stop(when + 0.55); src.start(when, 0, 0.25);
   }
 
+  // ── kill stinger ── a short cinematic punctuation that echoes the title
+  // theme: a timpani boom under a quick swelling Am string chord and a
+  // resolving lead note. Ties each kill back to the opening's tonality.
+  killStinger() {
+    if (!this.started || this.muted) return;
+    const C = this.ctx, t = C.currentTime;
+    const bus = C.createGain(); bus.gain.value = 0.9;
+    bus.connect(this.master); bus.connect(this.verb);
+    // timpani
+    if (this._titleHit) { /* reuse if present */ }
+    const o = C.createOscillator(); o.type = 'sine';
+    o.frequency.setValueAtTime(78, t); o.frequency.exponentialRampToValueAtTime(44, t + 0.18);
+    const og = C.createGain(); og.gain.setValueAtTime(0.0001, t);
+    og.gain.linearRampToValueAtTime(0.5, t + 0.008); og.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
+    o.connect(og).connect(bus); o.start(t); o.stop(t + 0.55);
+    // Am string chord (A C E) — swell + fall, the theme's tonic
+    [220, 261.63, 329.63].forEach((hz, k) => {
+      for (let d = -1; d <= 1; d += 2) {
+        const s = C.createOscillator(); s.type = 'sawtooth'; s.frequency.value = hz * (1 + d * 0.002);
+        const lp = C.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 2000;
+        const g = C.createGain(); g.gain.setValueAtTime(0.0001, t);
+        g.gain.linearRampToValueAtTime(0.06, t + 0.18);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + 1.6);
+        s.connect(lp).connect(g).connect(bus); s.start(t); s.stop(t + 1.7);
+      }
+    });
+    // a resolving lead note up high
+    const ld = C.createOscillator(); ld.type = 'triangle'; ld.frequency.setValueAtTime(440, t);
+    ld.frequency.linearRampToValueAtTime(659.25, t + 0.5);    // A→E, lifting
+    const lg = C.createGain(); lg.gain.setValueAtTime(0.0001, t + 0.12);
+    lg.gain.linearRampToValueAtTime(0.1, t + 0.3); lg.gain.exponentialRampToValueAtTime(0.0001, t + 1.5);
+    ld.connect(lg).connect(bus); ld.start(t + 0.12); ld.stop(t + 1.6);
+  }
+
+  // ── breath ── one inhale→exhale, scaled by exertion L (0..1). Heavier
+  // and faster the higher L. Driven by the scheduler in update().
+  _breathCycle(L) {
+    const C = this.ctx, t = C.currentTime;
+    const vol = 0.05 + 0.22 * L;
+    const dur = 0.5 - 0.18 * L;                 // quicker breaths when winded
+    const puff = (when, fromHz, toHz, v, d) => {
+      const src = C.createBufferSource(); src.buffer = this._shotNoise; src.loop = true;
+      const bp = C.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 1.0 + L;
+      bp.frequency.setValueAtTime(fromHz, when);
+      bp.frequency.exponentialRampToValueAtTime(toHz, when + d);
+      const g = C.createGain();
+      g.gain.setValueAtTime(0.0001, when);
+      g.gain.linearRampToValueAtTime(v, when + d * 0.4);
+      g.gain.setTargetAtTime(0.0001, when + d * 0.6, d * 0.4);
+      src.connect(bp).connect(g).connect(this.master);
+      src.start(when, Math.random() * 0.4); src.stop(when + d + 0.3);
+    };
+    puff(t, 360, 820, vol, dur);                // inhale — rising
+    puff(t + dur + 0.06, 620, 280, vol * 0.85, dur * 1.1);   // exhale — falling
+  }
+
   // a low spatial breath/huff from a big animal — rarer, scarier.
   breathAt(x, z, vol = 0.5) {
     if (!this.started || this.muted) return;
@@ -969,6 +1025,16 @@ export class AudioEngine {
 
     // keep the listener glued to the player so spatial one-shots track
     if (s.px !== undefined) this.setListener(s.px, s.pz, s.yaw || 0);
+
+    // breath — rate + weight ride exertion (running, holding a heavy draw).
+    // Near-silent at rest; you hear yourself heave after a sprint, then
+    // catch your breath as it falls back.
+    const ex = Math.max(0, Math.min(1, s.breath || 0));
+    this._breathT = (this._breathT ?? 2) - dt;
+    if (this._breathT <= 0) {
+      if (ex > 0.12) { this._breathCycle(ex); this._breathT = 3.6 - ex * 2.1; }
+      else this._breathT = 1.0;                 // idle: re-check soon, stay quiet
+    }
 
     // creak watchdog: if the game stops calling drawCreak (draw was
     // cancelled), fade the managed creak nodes out instead of droning.

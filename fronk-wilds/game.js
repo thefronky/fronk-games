@@ -480,6 +480,22 @@ const waterUniforms = { uTime: { value: 0 } };
 
 // ───────────────────────── wind-blown grass ─────────────────────────
 const windUniforms = { uTime: { value: 0 } };
+// ── cloth in wind ── a traveling ripple along the surface normal so tents
+// and hung hides BILLOW like real fabric (this is the ONLY thing that should
+// move in the wind besides grass/reeds — bare wood stays rigid). Reuses
+// windUniforms.uTime; one gust LFO so all cloth surges together.
+function clothWind(amp = 0.06) {
+  return (sh) => {
+    sh.uniforms.uTime = windUniforms.uTime;
+    sh.vertexShader = 'uniform float uTime;\n' + sh.vertexShader.replace(
+      '#include <begin_vertex>',
+      `#include <begin_vertex>
+       float gust = 0.5 + 0.5*sin(uTime*0.5 + position.x*0.2);
+       float ripple = sin(position.x*2.4 + position.y*1.7 + uTime*3.0)
+                    + 0.5*sin(position.y*1.3 - uTime*2.1);
+       transformed += normal * ripple * ${amp.toFixed(3)} * gust;`);
+  };
+}
 // interactive flower trample — xy = live player XZ (instant bend), zw = a
 // lagging "wake" that trails the player and eases back ~5s after you pass,
 // so a flattened corridor pops back upright behind you. Updated in tickBody.
@@ -1340,7 +1356,8 @@ function mergeGeoms(list) {
   cattailMat.onBeforeCompile = propWind(0.16, 0.7);   // reeds whip
   const snagMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1,
     emissive: 0x14160e, emissiveIntensity: 0.35 });
-  snagMat.onBeforeCompile = propWind(0.012, 0.6);     // dead wood barely creaks
+  // dead bare trunks are RIGID wood — they do not sway (a swaying trunk
+  // reads as wrong). Stock shader, zero displacement.
 
   // --- geometry builders (each merged ONCE, then instanced) ---
   // FALLEN LOG — long cylinder on its side, mossy top.
@@ -1728,9 +1745,11 @@ function buildSpit(g, cx, cz) {
 // single sloped panel propped on a pole.
 function buildTent(g, opts) {
   const { color, x = 0, z = 0, rot = 0 } = opts;
+  // cloth fabric — billows in the wind (segmented so the ripple shows)
   const mat = new THREE.MeshStandardMaterial({ color, roughness: 1, flatShading: true, side: THREE.DoubleSide });
+  if (!opts.collapsed) mat.onBeforeCompile = clothWind(0.05);
   if (opts.leanTo) {
-    const panel = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 2.6), mat);
+    const panel = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 2.6, 8, 6), mat);
     panel.position.set(x, 1.1, z); panel.rotation.set(-0.9, rot, 0);
     panel.castShadow = true; g.add(panel);
     const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 2.2, 5), logMat);
@@ -1738,7 +1757,7 @@ function buildTent(g, opts) {
     pole.rotation.z = 0.15; g.add(pole);
     return;
   }
-  const tent = new THREE.Mesh(new THREE.ConeGeometry(opts.r || 2.4, opts.h || 2.8, 4), mat);
+  const tent = new THREE.Mesh(new THREE.ConeGeometry(opts.r || 2.4, opts.h || 2.8, 5, 6), mat);
   tent.position.set(x, (opts.h || 2.8) / 2 - 0.4, z);
   tent.rotation.y = rot; tent.castShadow = true;
   if (opts.collapsed) {       // a tent the land pushed over
@@ -2152,8 +2171,9 @@ function buildBase(bx, bz) {
   const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 3.0, 5), logMat);
   bar.rotation.z = Math.PI / 2; bar.position.set(cx, 1.85, cz - 0.4); g.add(bar);
   const hideMat = new THREE.MeshStandardMaterial({ color: 0x6b4a2e, roughness: 1, side: THREE.DoubleSide });
+  hideMat.onBeforeCompile = clothWind(0.045);          // hung hides flutter in the wind
   for (const [hx, hw] of [[-0.9, 1.0], [0.5, 1.2]]) {
-    const hide = new THREE.Mesh(new THREE.PlaneGeometry(hw, 1.3), hideMat);
+    const hide = new THREE.Mesh(new THREE.PlaneGeometry(hw, 1.3, 6, 6), hideMat);
     hide.position.set(cx + hx, 1.15, cz - 0.4); hide.rotation.y = 0.1; g.add(hide);
   }
   // a small cache fire inside the cove
@@ -3222,6 +3242,7 @@ function killAnimal(a, suffered = false) {
   a.suffered = suffered || !!a.bleeding || a.state === 'wounded';
   setAnim(a, 'Death', true);
   score[a.name] = (score[a.name] || 0) + 1;
+  if (audio.killStinger) audio.killStinger();   // the theme punctuates every kill
   if (a.isCryptid) {
     say('killCryptid', 7000);
     audio.stinger(); cryptid = null; a.t = 20;
@@ -3401,6 +3422,7 @@ window._keys = keys;   // test hook: drive movement from window._sim
 window._jump = () => { jumpQ = true; };   // test hook: queue a jump in window._sim
 let started = false, drawT = 0, holdT = 0, raiseT = 0, drawing = false, dead = false, bobPhase = 0, hapticT = 0;
 let _moveLvl = 0;   // 0..1 gait level — drives footstep audio + camera head-bob
+let breathLoad = 0; // 0..1 exertion — rises running / holding a draw, recovers at rest
 let playerVy = 0, grounded = true, jumpQ = false;
 let inCanoe = false, canoeSpd = 0, _wasCanoe = false;
 // rowing is a CIRCULAR motion: each oar accumulates the radians of arc your
@@ -4664,10 +4686,16 @@ function tickBody() {
         const dd = Math.hypot(a.obj.position.x - player.x, a.obj.position.z - player.z);
         if (dd < wolfDist) wolfDist = dd;
       }
+    // exertion: a sprint loads it fast, a jog gently; holding a full draw
+    // adds strain. It eases UP quicker than it recovers, so you have to
+    // actually stop and catch your breath.
+    let exTarget = sprinting ? 1 : (_moveLvl > 0.45 ? 0.5 : 0);
+    if (drawing && drawT > 0.95) exTarget = Math.max(exTarget, 0.35 + Math.min(0.5, holdT * 0.12));
+    breathLoad += (exTarget - breathLoad) * Math.min(1, dt * (exTarget > breathLoad ? 0.7 : 0.3));
     audio.update(dt, {
       moving: !!(mx || mz), sprint: sprinting, _moveLvl,
       wolfDist, lakeDist: Math.hypot(player.x - 70, player.z + 90),
-      night: window._night || 0, hp: player.hp,
+      night: window._night || 0, hp: player.hp, breath: breathLoad,
       px: player.x, pz: player.z, yaw: player.yaw,
     });
   }
