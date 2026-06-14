@@ -1064,7 +1064,7 @@ function mergeGeoms(list) {
     // we render them but skip pushing them as collidable cover. Hard cap
     // at TREE_COLLIDE_MAX keeps the array bounded regardless of count.
     const tr = sp.r * s;
-    if (tr >= 0.8 && TREES.length < TREE_COLLIDE_MAX) TREES.push({ x, z, r: tr });
+    if (tr >= 0.45) TREES.push({ x, z, r: tr });   // EVERY real trunk is solid (player + arrows)
     placed++;
   }
   species.forEach(s => {
@@ -1170,6 +1170,7 @@ function mergeGeoms(list) {
     E.set(Math.random(), Math.random() * 6, Math.random()); Q.setFromEuler(E);
     const s = 0.5 + Math.random() * 1.6; S.set(s, s * (0.6 + Math.random() * 0.6), s);
     rocks.setMatrixAt(placed++, M.compose(P, Q, S));
+    if (s > 0.85) TREES.push({ x, z, r: s * 0.7 });   // a boulder is a hard object — blocks you + arrows
   }
   rocks.count = placed;
   scene.add(rocks);
@@ -1583,8 +1584,8 @@ let _corruptMat = null;
        transformed.y += sin(uTime*1.7 + cph) * cw * 0.05;`);
   };
 
-  const N_CORRUPT = IS_TOUCH ? 12 : 18;
-  const inst = new THREE.InstancedMesh(cgeo, _corruptMat, N_CORRUPT);
+  const N_CORRUPT = 0;   // the breathing/blighted trees are REMOVED (too odd). CORRUPT stays empty.
+  const inst = new THREE.InstancedMesh(cgeo, _corruptMat, Math.max(1, N_CORRUPT));
   inst.castShadow = true;
   let placed = 0, guard = 0;
   while (placed < N_CORRUPT && guard++ < N_CORRUPT * 60) {
@@ -2066,6 +2067,60 @@ function buildQuiver(n) {
   }
 }
 
+// ── forageables ── berries (safe to eat, a little food) and the rare
+// glowing mushroom (eat it and the world goes strange — see tripT). Walk
+// over one to take it. Scattered on land, away from the wake clearing.
+const FORAGE = []; window._forage = FORAGE;
+function buildBerry() {
+  const g = new THREE.Group();
+  const leaf = new THREE.MeshStandardMaterial({ color: 0x2f5a24, roughness: 1 });
+  for (let i = 0; i < 3; i++) {
+    const b = new THREE.Mesh(new THREE.IcosahedronGeometry(0.45, 0), leaf);
+    b.position.set((Math.random() - 0.5) * 0.6, 0.35 + Math.random() * 0.3, (Math.random() - 0.5) * 0.6);
+    b.scale.y = 0.8; g.add(b);
+  }
+  const berryMat = new THREE.MeshStandardMaterial({ color: 0x8c1026, roughness: 0.4,
+    emissive: 0x3a0510, emissiveIntensity: 0.4 });
+  for (let i = 0; i < 9; i++) {
+    const d = new THREE.Mesh(new THREE.IcosahedronGeometry(0.07, 0), berryMat);
+    const a = Math.random() * Math.PI * 2, rr = Math.random() * 0.55;
+    d.position.set(Math.cos(a) * rr, 0.32 + Math.random() * 0.45, Math.sin(a) * rr); g.add(d);
+  }
+  return g;
+}
+function buildPsyMush() {
+  const g = new THREE.Group();
+  const stalkMat = new THREE.MeshStandardMaterial({ color: 0xe8dcc0, roughness: 0.9 });
+  const capMat = new THREE.MeshStandardMaterial({ color: 0x7a3cc0, roughness: 0.5,
+    emissive: 0x6a2cff, emissiveIntensity: 0.9 });        // glows so it reads as special
+  for (let i = 0; i < 3; i++) {
+    const h = 0.4 + Math.random() * 0.4;
+    const st = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.07, h, 6), stalkMat);
+    const ox = (Math.random() - 0.5) * 0.5, oz = (Math.random() - 0.5) * 0.5;
+    st.position.set(ox, h / 2, oz); g.add(st);
+    const cap = new THREE.Mesh(new THREE.SphereGeometry(0.22, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2), capMat);
+    cap.position.set(ox, h, oz); cap.scale.y = 0.7; g.add(cap);
+  }
+  const glow = new THREE.PointLight(0x8a4cff, 2.0, 6, 2); glow.position.y = 0.7; g.add(glow);
+  return g;
+}
+{
+  const place = (n, build, kind) => {
+    let made = 0, tries = 0;
+    while (made < n && tries++ < n * 60) {
+      const x = (Math.random() - 0.5) * WORLD * 0.82, z = (Math.random() - 0.5) * WORLD * 0.82;
+      const y = heightAt(x, z);
+      if (y < WATER_Y + 1.0 || y > 24) continue;
+      if (Math.hypot(x, z - 26) < 40) continue;          // not on the doorstep
+      const mesh = build(); mesh.position.set(x, y, z); scene.add(mesh);
+      FORAGE.push({ x, z, kind, taken: false, mesh });
+      made++;
+    }
+  };
+  place(IS_TOUCH ? 14 : 20, buildBerry, 'berry');
+  place(IS_TOUCH ? 6 : 9, buildPsyMush, 'mush');
+}
+
 // ── scattered wild fires ── the only honest light once it's truly dark.
 // A bush that caught, a tree the lightning split and lit. They pool warm
 // light across the black map — beautiful to navigate by, and the
@@ -2342,7 +2397,7 @@ function landmarkUpdate(dt, t) {
         showJournal(lm);
         renderNotes();
         if (foundSet.size === LANDMARKS.length)
-          setTimeout(() => toast('EVERY MARK FOUND. You have seen the whole menu. You are on it.', 6000), 7500);
+          setTimeout(() => toast('Every mark found.', 4000), 7500);
       }
     }
   }
@@ -2750,7 +2805,7 @@ function animalUpdate(a, dt) {
         }
         if (!saidBlooded) {
           saidBlooded = true;
-          setTimeout(() => toast('You smell like the inside of something now.', 4600), 4800);
+          setTimeout(() => toast('Blood on you now.', 3000), 4800);
         }
         if (player.hp < 95) {
           player.hp = Math.min(100, player.hp + 40); renderHP();
@@ -2760,9 +2815,9 @@ function animalUpdate(a, dt) {
           if (player.meat >= 3) say('packFull'); else say('harvest');
           if (player.meat === 3 && !saidFullPack) {
             saidFullPack = true;
-            setTimeout(() => toast('Everything downwind knows what you are carrying.', 5200), 3400);
+            setTimeout(() => toast('They can smell it.', 3000), 3400);
           }
-        } else toast('You can carry no more. Whatever follows you gets the rest.');
+        } else toast('Can carry no more.');
       }
     }
     if (a.t <= 0) {
@@ -3038,7 +3093,7 @@ function bearUpdate(a, dt, dx, dz, dist) {
       if (a.rearAfter === 'retreat') {
         a.state = 'retreat'; a.t = 4 + Math.random() * 3;
         a.confused = false;
-        toast('It swats the air, baffled, and lumbers off.', 4200);
+        toast('It lumbers off.', 2600);
       } else {
         a.state = 'charge'; a.aggro = true;
       }
@@ -3409,7 +3464,7 @@ function spawnCryptid() {
   setAnim(a, 'Walk');
   animals.push(a);
   cryptid = a;
-  setTimeout(() => toast('Something out there is starving too. It has chosen.', 5000), 2500);
+  setTimeout(() => toast('Something hunts tonight.', 3000), 2500);
 }
 
 // the staring contest — sometimes it stops DEAD at 25–40m, body frozen,
@@ -3467,7 +3522,7 @@ function cryptidUpdate(night) {
       scene.remove(cryptid.obj);
       animals.splice(animals.indexOf(cryptid), 1);
       cryptid = null;
-      toast('Dawn. It withdrew, unfed. It will not stay unfed.', 4200);
+      toast('Dawn. It withdrew.', 2600);
     }
   }
   // dread veil — while it stands within 80m, light drains and the fog
@@ -3527,6 +3582,7 @@ let _moveLvl = 0;   // 0..1 gait level — drives footstep audio + camera head-b
 let breathLoad = 0; // 0..1 exertion — rises running / holding a draw, recovers at rest
 let _landDip = 0;   // camera knee-bend on landing, decays back up
 let _curGround = 'grass';   // footstep material under the player
+let tripT = 0;      // seconds left of a mushroom trip (trippy visuals + moon-jump)
 let playerVy = 0, grounded = true, jumpQ = false;
 let inCanoe = false, canoeSpd = 0, _wasCanoe = false;
 // rowing is a CIRCULAR motion: each oar accumulates the radians of arc your
@@ -3620,7 +3676,7 @@ function cacheUpdate(t) {
   while (n > 0 && player.meat < 3) { player.meat++; n--; }
   player.lastAte = t; bloodedUntil = t + 90;
   renderNotes();
-  toast('The meat you died with. Something ate around it. Take the rest.', 4600);
+  toast('What you died holding.', 2800);
   meatCache = null; cacheMesh.visible = false;
 }
 
@@ -3661,6 +3717,24 @@ function arrowPickup() {
   }
   if (got) { renderNotes(); if (audio.impact) audio.impact('wood', 0.15);
     toast('Arrow recovered. (' + player.arrows + ')', 1400); }
+}
+
+// ── forage ── walk over a berry bush or a glowing mushroom to take it
+function forageUpdate(t) {
+  for (const f of FORAGE) {
+    if (f.taken) continue;
+    if (Math.hypot(player.x - f.x, player.z - f.z) > 2.0) continue;
+    f.taken = true; f.mesh.visible = false;
+    if (f.kind === 'berry') {
+      player.lastAte = t; if (player.hp < 100) { player.hp = Math.min(100, player.hp + 12); renderHP(); }
+      if (audio.impact) audio.impact('flesh', 0.5);
+      toast('Berries.', 1400);
+    } else {                                    // the glowing mushroom
+      tripT = 26; player.lastAte = t;
+      if (audio.stinger) audio.stinger();
+      toast('…oh.', 2200);
+    }
+  }
 }
 
 // ── camp quivers ── a one-time cache of arrows at each camp
@@ -3778,7 +3852,7 @@ function loose() {
   if (power < 0.04) { drawT = 0; return; }   // a true non-draw, ignore
   if (player.arrows <= 0) {                   // out of ammo — dry, go collect some
     drawT = 0; if (audio.drawCreak) audio.drawCreak(0);
-    toast('Out of arrows. Pull them from where they landed.', 3600);
+    toast('Out of arrows.', 2400);
     return;
   }
   player.arrows--; renderNotes();
@@ -3910,7 +3984,7 @@ function arrowUpdate(dt) {
           } else {
             an.aggro = true; an.rearAfter = 'charge';
             enterBearRear(an, -dxB, -dzB);
-            toast('You put an arrow in a bear. It noticed.', 4200);
+            toast('The bear felt that.', 2600);
           }
         } else if (an.cfg.hunts || an.cfg.territorial) {
           // wounding a predator does not make it leave. It makes it sure.
@@ -4427,6 +4501,12 @@ const LINES2 = {
 "Being followed.",
 "Eyes in the trees."
 ],
+"heard": [
+"What was that.",
+"Something moved.",
+"Didn't see it.",
+"Heard that."
+],
 "bullWarn": [
 "Head's down. It's decided.",
 "Hear that snort. Move.",
@@ -4513,6 +4593,16 @@ function tickBody() {
   const dt = simDt ?? Math.min(clock.getDelta(), 0.05);
   const t = clock.elapsedTime;
   if (audio.pumpTitle) audio.pumpTitle(dt);   // keep the title theme alive (runs pre-game too)
+  // ── the trip ── a mushroom turns the world strange: hue cycles, colors
+  // swell, the picture breathes. Eases out over the last couple seconds.
+  if (tripT > 0) {
+    tripT -= dt;
+    const k = Math.max(0, Math.min(1, tripT / 2));
+    const hue = (t * 80) % 360;
+    canvas.style.filter = 'hue-rotate(' + hue.toFixed(0) + 'deg) saturate('
+      + (1 + 1.2 * k).toFixed(2) + ') contrast(' + (1 + 0.22 * k).toFixed(2)
+      + ') brightness(' + (1 + 0.06 * Math.sin(t * 5) * k).toFixed(2) + ')';
+  } else if (canvas.style.filter) { canvas.style.filter = ''; }
   // auto-launch: after the theme's opening swell, the cinematic dive begins
   if (titleArmed && !launching && !started && (t - titleArmT) > 6.5) beginLaunch();
   // kill-feel: juice timers decay on REAL time (hitstop scales the
@@ -4614,6 +4704,17 @@ function tickBody() {
     for (const an2 of animals) if (an2.cfg.hunts && !an2.dead && an2.aggro)
       wd = Math.min(wd, Math.hypot(an2.obj.position.x - player.x, an2.obj.position.z - player.z));
     if (wd < 30 && (M._wolfSaidT ?? 0) < t - 45) { M._wolfSaidT = t; say('wolfNear', 3600); }
+    // heard, not seen — a bear moving close (stalk/wary) that's NOT in your
+    // view cone makes you mutter. Tension from the unseen.
+    for (const an2 of animals) {
+      if (!an2.cfg.bearish || an2.dead) continue;
+      if (an2.state !== 'stalk' && an2.state !== 'wary') continue;
+      const bx = an2.obj.position.x - player.x, bz = an2.obj.position.z - player.z;
+      const bd = Math.hypot(bx, bz);
+      if (bd > 28 || bd < 6) continue;
+      const inView = (Math.sin(player.yaw) * bx + Math.cos(player.yaw) * bz) / (bd || 1) < -0.35;
+      if (!inView && (M._heardT ?? 0) < t - 18) { M._heardT = t; say('heard', 3200); break; }
+    }
     // following blood: near fresh blood while something out there is wounded
     const hasWounded = animals.some(an2 => an2.state === 'wounded');
     if (hasWounded) {
@@ -4720,11 +4821,12 @@ function tickBody() {
     if (grounded && groundY < player.y - 0.35) {
       grounded = false; playerVy = 0; player.airY = player.y;
     }
-    // a big, floaty Halo-style hop — higher apex (~2.2m), more hang time
-    if (jumpQ && grounded) { playerVy = 7.7; grounded = false; }
+    // a big, floaty Halo-style hop — higher apex (~2.2m), more hang time.
+    // On a mushroom trip it's a slow, soaring moon-jump.
+    if (jumpQ && grounded) { playerVy = tripT > 0 ? 10.5 : 7.7; grounded = false; }
     jumpQ = false;
     if (!grounded) {
-      playerVy -= 13 * dt; player.airY = (player.airY ?? groundY) + playerVy * dt;
+      playerVy -= (tripT > 0 ? 7 : 13) * dt; player.airY = (player.airY ?? groundY) + playerVy * dt;
       if (player.airY <= groundY) {
         const impact = -playerVy;                 // how hard you came down
         player.airY = groundY; playerVy = 0; grounded = true;
@@ -4820,7 +4922,7 @@ function tickBody() {
     if (player.hp < 35 && player.meat > 0 && !dead) {
       player.meat--; player.hp = Math.min(100, player.hp + 40);
       player.lastAte = t; renderNotes(); renderHP();
-      toast('You eat from the pack, walking. Chewing is for the safe.');
+      toast('Ate from the pack.');
     }
     // slow regen, only when fed
     if (!starving && t - player.lastHit > 8 && player.hp < 100) {
@@ -4834,6 +4936,7 @@ function tickBody() {
     // pick up spent arrows you walk over (jump to reach the high ones)
     arrowPickup();
     quiverPickup();
+    forageUpdate(t);
 
     // dawn relief — the night ends and you are still in it
     if (night > 0.65) sawNight = true;
@@ -5008,7 +5111,7 @@ function tickBody() {
       if (looked) {
         _revealStep = 1;
         if (IS_TOUCH) bc.add('show-move');
-        cinematic("I'm getting hungry.", 4600);   // the one and only opening line
+        cinematic('getting hungry….', 4600);   // the one and only opening line
       }
     } else if (_revealStep === 1 && dB > 7) { _revealStep = 2; if (IS_TOUCH) bc.add('show-jump'); }
     else if (_revealStep === 2 && dB > 11.5) { _revealStep = 3; if (IS_TOUCH) bc.add('show-bow'); }
