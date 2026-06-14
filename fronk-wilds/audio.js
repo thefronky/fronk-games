@@ -536,6 +536,51 @@ export class AudioEngine {
     o.start(t); o.stop(t + 0.09);
   }
 
+  // the breath-in of waking — a soft rising inhale of filtered noise
+  breath() {
+    if (!this.started || this.muted) return;
+    const C = this.ctx, t = C.currentTime;
+    const src = C.createBufferSource(); src.buffer = this._shotNoise; src.loop = true;
+    const bp = C.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 1.2;
+    bp.frequency.setValueAtTime(380, t);
+    bp.frequency.exponentialRampToValueAtTime(900, t + 0.7);   // rising = drawing in
+    const g = C.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.16, t + 0.55);
+    g.gain.exponentialRampToValueAtTime(0.0008, t + 1.2);
+    src.connect(bp).connect(g).connect(this.master);
+    src.start(t); src.stop(t + 1.3);
+  }
+
+  // ── jaw harp ── the base's voice. A low drone plucked on a steady
+  // beat, each twang a bright formant that sweeps down as the "mouth"
+  // closes — the distinctive boing. Synthesized, copyright-clean.
+  setBaseMusic(on) {
+    if (this._baseMusic === on) return;
+    this._baseMusic = on;
+    if (on) this._jawT = 0;            // start plucking promptly
+  }
+  _jawTwang(when = 0, hz = 73.42) {    // D2 drone fundamental
+    const C = this.ctx, t = C.currentTime + when;
+    const o = C.createOscillator(); o.type = 'sawtooth'; o.frequency.value = hz;
+    // the formant sweep — bright open mouth snapping shut
+    const bp = C.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 7;
+    bp.frequency.setValueAtTime(1900 + Math.random() * 600, t);
+    bp.frequency.exponentialRampToValueAtTime(380, t + 0.34);
+    const g = C.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.13, t + 0.01);     // sharp pluck
+    g.gain.exponentialRampToValueAtTime(0.0006, t + 0.5);
+    // a touch of the dry drone under the formant for body
+    const lp = C.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 240;
+    const g2 = C.createGain();
+    g2.gain.setValueAtTime(0.05, t);
+    g2.gain.exponentialRampToValueAtTime(0.0004, t + 0.42);
+    o.connect(bp).connect(g).connect(this.musicBus);
+    o.connect(lp).connect(g2).connect(this.musicBus);
+    o.start(t); o.stop(t + 0.55);
+  }
+
   // a low spatial breath/huff from a big animal — rarer, scarier.
   breathAt(x, z, vol = 0.5) {
     if (!this.started || this.muted) return;
@@ -850,6 +895,20 @@ export class AudioEngine {
       this._chordIx++;
       if (Math.random() < 0.22) this._rootIx = (this._rootIx + 1) % ROOTS.length;
       this._setChord(this._chordIx);
+    }
+
+    // jaw harp at the base — a steady, peaceful pluck on a slow beat,
+    // a low fifth answering now and then. Only while home.
+    if (this._baseMusic) {
+      this._jawT = (this._jawT ?? 0) - dt;
+      if (this._jawT <= 0) {
+        this._jawT = 0.62 + Math.random() * 0.12;        // ~100bpm, loose
+        this._jawStep = ((this._jawStep ?? 0) + 1) % 8;
+        const hz = (this._jawStep % 4 === 2) ? 110.0 : 73.42;  // A2 lift vs D2 drone
+        this._jawTwang(0, hz);
+        if (this._jawStep % 4 === 0 && Math.random() < 0.5)     // grace twang
+          this._jawTwang(0.31, 146.83);
+      }
     }
 
     // the hymn returns every 60-110s — long enough to half-forget it

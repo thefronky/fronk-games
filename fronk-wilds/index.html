@@ -25,9 +25,15 @@
   #notes{position:absolute;top:max(14px,env(safe-area-inset-top));left:16px;
     font-size:13px;line-height:1.7;text-shadow:0 1px 4px rgba(0,0,0,.8);opacity:.95}
   #notes b{color:#ffd27d;font-weight:600}
+  #notes .kept{color:#9a8f7e;opacity:.85}
   #toast{position:absolute;top:22%;left:50%;transform:translateX(-50%);
     font-size:17px;font-weight:600;letter-spacing:.04em;text-align:center;
     text-shadow:0 2px 10px rgba(0,0,0,.9);opacity:0;transition:opacity .4s;max-width:88%}
+  /* cinematic line — big, centered, no box; feels like he says it */
+  #cinematic{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+    font-family:'Cinzel',Georgia,serif;font-size:30px;font-weight:600;letter-spacing:.12em;
+    text-align:center;color:#f5ead8;text-shadow:0 3px 18px rgba(0,0,0,.95);
+    opacity:0;transition:opacity 1.8s ease;max-width:80%;pointer-events:none}
   #hp{position:absolute;top:max(14px,env(safe-area-inset-top));right:16px;width:120px;height:10px;
     border:1px solid rgba(245,234,216,.5);border-radius:6px;overflow:hidden;
     opacity:0;transition:opacity .6s}
@@ -127,6 +133,7 @@
   <div id="crosshair"></div>
   <div id="notes"></div>
   <div id="toast"></div>
+  <div id="cinematic"></div>
   <div id="journal" style="position:absolute;left:50%;bottom:18%;transform:translateX(-50%) translateY(30px);
     max-width:min(480px,88%);background:rgba(26,19,10,.92);border:1px solid rgba(217,164,65,.5);
     border-radius:14px;padding:18px 22px;opacity:0;transition:opacity .5s,transform .5s;

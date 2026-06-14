@@ -2073,6 +2073,84 @@ function placeWildfires(spawnX, spawnZ, campX, campZ) {
   window._nightfires = NIGHTFIRES;
 }
 
+// ── his BASE ── the clearing he wakes in, made into a home: a campfire
+// at the center, a ring of set stones around the flower bed, and a cove
+// in a low stone wall where he caches meat — deer skeletons, hung hides,
+// a small fire. Safe from animals, peaceful music. Returned to often.
+let BASE_FIRE = null;        // {cx,cz} the central campfire (warmth pulse)
+let COVE = null;             // {x,z} the storage cove — walk in to stash meat
+const BASE_FIRES = [];       // fire handles to flicker each frame
+function buildBase(bx, bz) {
+  const g = new THREE.Group();
+  const baseY = heightAt(bx, bz);
+  g.position.set(bx, baseY, bz);
+
+  // a ring of hand-set stones around the flower bed — you must step over
+  const RING = 12;
+  const boneMat = new THREE.MeshStandardMaterial({ color: 0xe8e0cf, roughness: 0.9 });
+  for (let i = 0; i < 22; i++) {
+    const a = i / 22 * Math.PI * 2;
+    const s = new THREE.Mesh(ringStoneGeo, stoneMat);
+    const rr = RING + Math.sin(i * 2.3) * 0.7;
+    s.position.set(Math.cos(a) * rr, 0.12 + (i % 3) * 0.04, Math.sin(a) * rr);
+    s.rotation.set(i * 0.6, a, i * 0.3);
+    s.scale.setScalar(0.9 + (i % 4) * 0.18);
+    g.add(s);
+  }
+
+  // the central campfire — its warmth always here
+  buildFire(g, 0, 0, true);
+  BASE_FIRE = { cx: bx, cz: bz, fire: g.userData.fire };
+  BASE_FIRES.push(g.userData.fire);
+  // a sitting log by the fire
+  const log = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.32, 2.4, 7), logMat);
+  log.rotation.z = Math.PI / 2; log.position.set(2.4, 0.34, 1.0); log.rotation.y = 0.5; g.add(log);
+
+  // ── the cove: a low arc of big stones with a meat cache ──
+  const cdir = Math.PI * 0.5;                 // cove sits to one side of the fire
+  const cx = Math.cos(cdir) * 8.5, cz = Math.sin(cdir) * 8.5;
+  COVE = { x: bx + cx, z: bz + cz };
+  for (let i = 0; i < 6; i++) {                // the curved back wall
+    const a = cdir + (i - 2.5) * 0.36;
+    const w = new THREE.Mesh(new THREE.DodecahedronGeometry(1.5, 0), stoneMat);
+    w.position.set(Math.cos(a) * 10.5, 0.7, Math.sin(a) * 10.5);
+    w.scale.set(1, 1.5 + (i % 2) * 0.4, 1); w.rotation.y = a; g.add(w);
+  }
+  // two stakes + a crossbar with hides hung to cure
+  const stakeGeo = new THREE.CylinderGeometry(0.07, 0.07, 2.0, 5);
+  for (const dx of [-1.3, 1.3]) {
+    const st = new THREE.Mesh(stakeGeo, logMat);
+    st.position.set(cx + dx, 1.0, cz - 0.4); g.add(st);
+  }
+  const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 3.0, 5), logMat);
+  bar.rotation.z = Math.PI / 2; bar.position.set(cx, 1.85, cz - 0.4); g.add(bar);
+  const hideMat = new THREE.MeshStandardMaterial({ color: 0x6b4a2e, roughness: 1, side: THREE.DoubleSide });
+  for (const [hx, hw] of [[-0.9, 1.0], [0.5, 1.2]]) {
+    const hide = new THREE.Mesh(new THREE.PlaneGeometry(hw, 1.3), hideMat);
+    hide.position.set(cx + hx, 1.15, cz - 0.4); hide.rotation.y = 0.1; g.add(hide);
+  }
+  // a small cache fire inside the cove
+  buildFire(g, cx, cz + 0.6, true);
+  g.userData.fire.light.distance = 16;
+  BASE_FIRES.push(g.userData.fire);
+  // deer skeletons — a skull with antler lines + a few ribs on the ground
+  const skull = new THREE.Mesh(new THREE.IcosahedronGeometry(0.28, 0), boneMat);
+  skull.scale.set(1, 0.8, 1.3); skull.position.set(cx - 1.6, 0.28, cz + 1.2); g.add(skull);
+  for (const sgn of [-1, 1]) {                 // antlers as thin bone forks
+    const ant = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.04, 0.7, 4), boneMat);
+    ant.position.set(cx - 1.6 + sgn * 0.12, 0.6, cz + 1.2);
+    ant.rotation.z = sgn * 0.5; g.add(ant);
+  }
+  for (let i = 0; i < 5; i++) {                 // ribs
+    const rib = new THREE.Mesh(new THREE.TorusGeometry(0.22, 0.025, 4, 8, Math.PI), boneMat);
+    rib.position.set(cx - 0.8 + i * 0.22, 0.12, cz + 1.4);
+    rib.rotation.set(Math.PI / 2, 0, 0.2); g.add(rib);
+  }
+
+  scene.add(g);
+  window._base = { group: g, COVE, BASE_FIRE };
+}
+
 // nearest wild fire to the player, and whether you're inside its safe ring
 let nearWildFire = false, nearWildFireD = 1e9;
 function updateWildfires(t, night) {
@@ -2097,6 +2175,18 @@ function updateWildfires(t, night) {
     if (d < nearWildFireD) nearWildFireD = d;
   }
   nearWildFire = nearWildFireD < 11 && night > 0.2;   // inside the ring, after dark
+
+  // the base fires burn full, always — home doesn't go to embers
+  for (const f of BASE_FIRES) {
+    f.light.intensity = 12 + fl1 * 3 + fl2 * 2 + fl3 * 1.2;
+    f.flame.rotation.z = fl2 * 0.07 + fl3 * 0.04;
+    f.fa.scale.y = 1 + fl1 * 0.18; f.fb.scale.y = 1 + fl2 * 0.22; f.fc.scale.y = 1 + fl3 * 0.3;
+    for (let i = 0; i < f.embers.length; i++) {
+      const e = f.embers[i];
+      e.position.y = 0.63 + Math.sin(t * 2.3 + e.userData.ph) * 0.18 + (i % 3) * 0.06;
+      e.material.emissiveIntensity = 2.5 + Math.sin(t * 7 + e.userData.ph) * 1.2;
+    }
+  }
 }
 
 function showJournal(lm, ix) {
@@ -3235,9 +3325,10 @@ scene.add(canoe);
 
 // ───────────────────────── player ─────────────────────────
 // the calm clearing you wake in — every life starts and respawns here
-const SPAWN = { x: 0, z: 26, yaw: Math.PI, pitch: -0.04 };
+// wake looking UP at the sky (orange→blue), not forced down
+const SPAWN = { x: 0, z: 26, yaw: Math.PI, pitch: 0.5 };
 const player = { x: SPAWN.x, z: SPAWN.z, yaw: SPAWN.yaw, pitch: SPAWN.pitch,
-                 hp: 100, lastHit: -99, meat: 0, lastAte: 0 };
+                 hp: 100, lastHit: -99, meat: 0, stored: 0, lastAte: 0 };
 window._player = player;
 player.y = heightAt(player.x, player.z);
 const score = {};
@@ -3269,10 +3360,24 @@ function beginIntro() {               // arm the wake-up for a fresh life
   bow.position.set(0.34, -1.35, -0.62);   // off the bottom of the screen
   if (camera.fov !== 70) { camera.fov = 70; camera.updateProjectionMatrix(); }
 }
+let _saidLeave = false;
 function endIntro() {                  // hand control to the player
   intro = false;
   setLids(-100, 0);                   // eyes fully open, glow gone
+  player.pitch = SPAWN.pitch;         // wake looking at the sky
+  if (audio.breath) audio.breath();   // the breath-in of waking
   say('wake', 4200);                  // no-ops cleanly if 'wake' isn't in LINES2
+  // the one cinematic line — only the first wake of a session
+  if (!_saidLeave) { _saidLeave = true; setTimeout(() => cinematic('Leave base.', 4200), 2600); }
+}
+// big centered line, no box — fades in slow, holds, fades out
+function cinematic(text, ms = 4000) {
+  const el = document.getElementById('cinematic');
+  if (!el) return;
+  el.textContent = text;
+  el.style.opacity = 1;
+  clearTimeout(cinematic._t);
+  cinematic._t = setTimeout(() => { el.style.opacity = 0; }, ms);
 }
 // CSS-var driver for the eyelids (DOM lives in index.html)
 const _eyelids = document.getElementById('eyelids');
@@ -3286,8 +3391,10 @@ function setLids(openPct, glow) {     // openPct: 0 = shut, -100 = wide open
 // Packed meat (+6m per ◆) and fresh harvest-blood (+6m for 90s) widen
 // every hunter's trigger radius. Near the camp fire it all halves:
 // sanctuary, never explained. Computed once per frame into scalars.
-const CAMP_X = -180, CAMP_Z = -160, CAMP_SAFE = 10;
+// his BASE is the clearing he wakes in — the sanctuary, returned to often
+const CAMP_X = SPAWN.x, CAMP_Z = SPAWN.z, CAMP_SAFE = 15;
 placeWildfires(SPAWN.x, SPAWN.z, CAMP_X, CAMP_Z);   // scatter the wild fires now that the anchors exist
+buildBase(SPAWN.x, SPAWN.z);                         // campfire, stone ring, the meat cove
 let bloodedUntil = -99, scentM = 0, fireNear = false;
 let saidBlooded = false, saidFullPack = false, sawNight = false;
 
@@ -3321,6 +3428,23 @@ function cacheUpdate(t) {
   renderNotes();
   toast('The meat you died with. Something ate around it. Take the rest.', 4600);
   meatCache = null; cacheMesh.visible = false;
+}
+
+// ── the cove: walk into it carrying meat and you lay it by — the loop
+// that gives the hunt a point. Stored meat is what survives you.
+let _coveCd = 0, _saidStore = false;
+function baseUpdate(t, dt) {
+  _coveCd -= dt;
+  if (!COVE || player.meat <= 0 || _coveCd > 0) return;
+  if (Math.hypot(player.x - COVE.x, player.z - COVE.z) > 2.8) return;
+  player.stored += player.meat;
+  const laid = player.meat;
+  player.meat = 0; _coveCd = 1.5;
+  renderNotes();
+  if (audio.impact) audio.impact('flesh', 0.2);
+  if (!_saidStore) { _saidStore = true;
+    toast('Laid by. This is what lasts.', 4200); }
+  else toast(player.stored + ' put away.', 2600);
 }
 
 function hurtPlayer(dmg) {
@@ -4047,9 +4171,15 @@ function toast(msg, ms = 2600) {
 }
 function pick(arr) { return arr[Math.random() * arr.length | 0]; }
 function renderNotes() {
-  // no scores, no counters — just the meat you carry, as quiet marks
-  document.getElementById('notes').innerHTML =
-    '◆'.repeat(player.meat) || '';
+  // no scores, no counters — the meat you carry as solid marks, and the
+  // meat laid by at the base as hollow ones. Quiet progress.
+  const carried = '◆'.repeat(player.meat);
+  const kept = player.stored > 0
+    ? (player.meat ? ' ' : '') + '<span class="kept">'
+      + (player.stored > 8 ? '◇×' + player.stored : '◇'.repeat(player.stored))
+      + '</span>'
+    : '';
+  document.getElementById('notes').innerHTML = carried + kept;
 }
 function renderHP() {
   document.getElementById('hpfill').style.width = Math.max(0, player.hp) + '%';
@@ -4367,6 +4497,8 @@ function tickBody() {
 
     // what fell with you, if you fell carrying
     if (meatCache) cacheUpdate(t);
+    // lay meat by at the cove
+    baseUpdate(t, dt);
 
     // dawn relief — the night ends and you are still in it
     if (night > 0.65) sawNight = true;
@@ -4506,9 +4638,11 @@ function tickBody() {
                        px: Math.round(player.x), pz: Math.round(player.z) };
   // scent + sanctuary — once per frame, every brain reads the same air
   scentM = started ? player.meat * 6 + (t < bloodedUntil ? 6 : 0) : 0;
-  fireNear = started
-    && (Math.hypot(player.x - CAMP_X, player.z - CAMP_Z) < CAMP_SAFE
-        || nearWildFire);   // a wild fire's ring keeps the predators back too
+  const atBase = started
+    && Math.hypot(player.x - CAMP_X, player.z - CAMP_Z) < CAMP_SAFE;
+  fireNear = atBase || (started && nearWildFire);   // a wild fire's ring keeps the predators back too
+  // home has a voice: the jaw harp plays only while you're at the base
+  if (audio.setBaseMusic) audio.setBaseMusic(atBase && !dead);
   // kill-feel hitstop: a connected arrow holds the world at 5% speed
   // for a few real frames (0.04s flesh / 0.09s lethal). No setTimeout —
   // juiceT burns down on real dt, world dt gets scaled while it lasts.
