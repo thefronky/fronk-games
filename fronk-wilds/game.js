@@ -43,30 +43,30 @@ const CFG = IS_TOUCH
 //   scale/tint = render overrides (bear: 1.8 scale, dark-brown 0x3a2616)
 const MENAGERIE = {
   // ── prey ──
-  Deer:  { n: 8, speed: 3.0, gallop: 10.5, hp: 1, flee: 34, r: 1.5,
-           keen: 1.15, aggroBias: 0.10, rear: 0.55 },
-  Stag:  { n: 4, speed: 2.7, gallop: 10.0, hp: 2, flee: 30, r: 1.7,
-           keen: 1.05, aggroBias: 0.30, rear: 0.70 },
-  Fox:   { n: 5, speed: 3.4, gallop: 11.5, hp: 1, flee: 26, r: 1.0,
-           keen: 1.55, aggroBias: 0.05, rear: 0.25 },   // cunning, keenest ears
-  Cow:   { n: 4, speed: 1.9, gallop: 7.4,  hp: 2, flee: 20, r: 1.7,
-           keen: 0.55, aggroBias: 0.05, rear: 0.20, gait: 'sway' }, // docile, dull
-  Horse: { n: 3, speed: 3.2, gallop: 13.5, hp: 9, flee: 30, r: 1.7,
-           keen: 1.20, aggroBias: 0.25, rear: 0.65, gait: 'smooth',
-           hpJit: true, tanky: true },                  // 8-10 hits, impressive bolt
+  Deer:  { n: 8, speed: 3.0, gallop: 10.5, hp: 2, flee: 36, r: 1.3,
+           keen: 1.15, aggroBias: 0.10, rear: 0.55, scale: 1.0, hpJit: true },
+  Stag:  { n: 4, speed: 2.7, gallop: 10.0, hp: 3, flee: 32, r: 1.5,
+           keen: 1.05, aggroBias: 0.30, rear: 0.70, scale: 1.18, hpJit: true },
+  Fox:   { n: 5, speed: 3.6, gallop: 11.8, hp: 1, flee: 30, r: 0.55,
+           keen: 1.6, aggroBias: 0.05, rear: 0.2, scale: 0.45 },  // small, skittish, keen — dies fast, runs fast
+  Cow:   { n: 4, speed: 1.9, gallop: 7.4,  hp: 3, flee: 22, r: 1.6,
+           keen: 0.5, aggroBias: 0.05, rear: 0.2, gait: 'sway', scale: 1.22, hpJit: true }, // docile, dull
+  Horse: { n: 3, speed: 3.2, gallop: 13.8, hp: 9, flee: 32, r: 1.6,
+           keen: 1.2, aggroBias: 0.25, rear: 0.65, gait: 'smooth',
+           hpJit: true, tanky: true, scale: 1.3 },        // 8-10 hits, impressive bolt
   // ── predator / territorial ──
-  Wolf:  { n: 3, speed: 3.2, gallop: 8.8,  hp: 2, flee: 0,  r: 1.2,
-           keen: 1.6,  aggroBias: 0.45,
+  Wolf:  { n: 3, speed: 3.2, gallop: 8.8,  hp: 2, flee: 0,  r: 1.0,
+           keen: 1.6,  aggroBias: 0.45, scale: 0.8,
            hunts: true, aggroR: 38, dmg: 22, packR: 80 },
            // circles before committing; after dark the whole pack answers
-  Bull:  { n: 3, speed: 2.2, gallop: 9.6,  hp: 3, flee: 0,  r: 1.7,
-           keen: 0.8,  aggroBias: 0.6,
+  Bull:  { n: 3, speed: 2.2, gallop: 9.6,  hp: 4, flee: 0,  r: 1.6,
+           keen: 0.8,  aggroBias: 0.6, scale: 1.15, hpJit: true,
            territorial: 16, dmg: 30 },
            // wanders calm — gives ONE warning stomp, then it's a freight train
-  Bear:  { n: 2, speed: 2.4, gallop: 9.2,  hp: 7, flee: 0,  r: 2.1,
-           keen: 0.9,  aggroBias: 0.7,
+  Bear:  { n: 2, speed: 2.6, gallop: 9.4,  hp: 9, flee: 0,  r: 2.0,
+           keen: 1.0,  aggroBias: 0.7,
            hpJit: true, gait: 'bound', bearish: true,
-           aggroR: 22, dmg: 38, scale: 1.8, tint: 0x3a2616 },  // RARE
+           aggroR: 24, dmg: 42, scale: 2.1, tint: 0x2c1d12, nightStalk: true },  // RARE, 8-10 hits
 };
 // SPECIES aliases MENAGERIE so every a.cfg.* reference keeps working.
 const SPECIES = MENAGERIE;
@@ -1751,7 +1751,7 @@ function buildTent(g, opts) {
 const LANDMARKS = [
   {
     id: 'circle', name: 'The Standing Stones', x: -250, z: 180, r: 16,
-    journal: 'Seven stones, arranged. Something is fed here. The grass inside the circle grows wrong. You do not eat inside the circle.',
+    journal: 'Seven stones, set on purpose. Nothing good stacks stones out here.',
     build(g, y) {
       for (let i = 0; i < 7; i++) {
         const a = i / 7 * Math.PI * 2;
@@ -1765,7 +1765,7 @@ const LANDMARKS = [
   },
   {
     id: 'tree', name: 'The Considerable Tree', x: 280, z: 250, r: 18,
-    journal: 'A tree older than hunger. Things have died at its roots, generously. It eats too. You have just never caught it chewing.',
+    journal: 'Older than it has any right to be. Nothing should be that old.',
     build(g) {
       const trunk = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 2.6, 16, 8),
         new THREE.MeshStandardMaterial({ color: 0x4f3a22, roughness: 1 }));
@@ -1781,7 +1781,7 @@ const LANDMARKS = [
   },
   {
     id: 'spring', name: 'The Generous Spring', x: 60, z: -228, r: 14,
-    journal: 'Water comes out of the mountain and asks for nothing. Everything else here charges. You keep waiting for the price.',
+    journal: 'Clean water, free. Everything else here has a price.',
     build(g) {
       const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(4.2, 0), stoneMat);
       rock.position.y = 2.4; rock.scale.y = 1.5; rock.castShadow = true; g.add(rock);
@@ -1800,7 +1800,7 @@ const LANDMARKS = [
   {
     // CAMP 1 — neat, lived-in, fire still burning. A trapper keeping order.
     id: 'camp_trapper', name: 'The Trapper’s Rest', x: -180, z: -160, r: 13,
-    journal: 'A neat camp. The tent is squared to the wind, the firewood stacked, the snares coiled and hung. Whoever kept this place kept it like a prayer — order against a country that has none. They knew the land would take them; they only argued about the date. The fire is warm. They have not gone far. They are never coming back.',
+    journal: 'Kept this place like it mattered. They never came back.',
     build(g) {
       buildTent(g, { color: 0x9c5e2c, x: -3.2, z: 0.4, rot: 0.5, h: 3.0, r: 2.4 });
       // a tidy stack of split firewood
@@ -1819,7 +1819,7 @@ const LANDMARKS = [
   {
     // CAMP 2 — ruffled, half-collapsed tent, fire guttering low.
     id: 'camp_ruffled', name: 'Where the Snow Caught Them', x: 200, z: -240, r: 13,
-    journal: 'The tent half-fell and nobody fixed it. Gear is strewn the way it lands when hands stop working. They came through in the cold season and the cold season won — not in violence, just in patience. The fire is low now, embers under ash, the last of a heat someone built with the last of their strength. Out here you do not lose. You only run out of fuel.',
+    journal: 'Tent half down. They left fast, or not by choice.',
     build(g) {
       buildTent(g, { color: 0x7d6a52, x: -2.8, z: 0.2, rot: 0.9, h: 2.8, r: 2.5, collapsed: true });
       // scattered gear: a tipped log and a dropped bone
@@ -1834,7 +1834,7 @@ const LANDMARKS = [
   {
     // CAMP 3 — long abandoned. Tent gone. Cold stone ring + bones.
     id: 'camp_cold', name: 'The Long-Cold Ring', x: -300, z: 120, r: 13,
-    journal: 'No tent. No tools. Only a ring of stones gone grey with weather and a few bones the rain has cleaned. This was a fire so long ago the ash has turned to soil and the soil has grown a little grass. Someone warmed their hands here before your grandfather was a thought. The land does not remember them. You do, for a moment. That is the whole of it.',
+    journal: 'Old fire ring. Clean bones. Long time gone.',
     build(g) {
       buildFire(g, 0, 0, false);
       // a small scatter of weathered bones around the cold ring
@@ -1852,7 +1852,7 @@ const LANDMARKS = [
   {
     // CAMP 4 — a lean-to, fire lit, a spit. A hunter still working a kill.
     id: 'camp_leanto', name: 'The Skinner’s Lean-To', x: 120, z: -100, r: 13,
-    journal: 'A single sloped panel of hide, propped against the weather — quick shelter for someone who meant to stay one night and move at dawn. A spit over the coals, a rack for drying. This is not a home; it is a working face, a place to turn an animal into the right to keep living. There is reverence in it, the old kind: you take, and you thank, and you do not waste. The fire is lit. Step lightly. The work may not be done.',
+    journal: 'Working camp. The fire is warm. Step light.',
     build(g) {
       buildTent(g, { color: 0x6f4a2a, x: -2.6, z: 0, rot: 0.4, leanTo: true });
       buildFire(g, 1.0, 0.2, true);
@@ -1873,7 +1873,7 @@ const LANDMARKS = [
   {
     // LORE PROP — antlers mounted on a stake, a marker / a boast / a grave.
     id: 'antlers', name: 'The Antler Stake', x: 90, z: 300, r: 11,
-    journal: 'Antlers lashed to a stake, facing the way they came. A marker, a boast, a grave — the same gesture for all three out here. Someone wanted the next traveler to know a great animal fell on this spot, and that a person was equal to it, once.',
+    journal: 'Antlers on a stake, facing out. A boast or a grave.',
     build(g) {
       const stake = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.13, 2.4, 6), logMat);
       stake.position.y = 1.2; stake.castShadow = true; g.add(stake);
@@ -1890,7 +1890,7 @@ const LANDMARKS = [
   {
     // LORE PROP — a cairn with a carved name-stone. A child's grave or claim.
     id: 'namestone', name: 'A Name in the Rock', x: -120, z: 280, r: 11,
-    journal: 'A low cairn, and one flat stone scratched with letters the weather has nearly won. You can make out part of a name and a single year. No story, no marker of how — just that a person was here, was named, and was loved enough that someone carried these stones.',
+    journal: 'Stones and half a name. Somebody got carried up here.',
     build(g) {
       let y = 0;
       for (let i = 0; i < 4; i++) {
@@ -1906,7 +1906,7 @@ const LANDMARKS = [
   {
     // LORE PROP — a child's carved wooden toy left on a rock. The smallest grief.
     id: 'toy', name: 'The Carved Toy', x: 260, z: -60, r: 10,
-    journal: 'A little carved animal on a flat rock, worn smooth where a small hand held it. Whittled by firelight, probably, to keep a child quiet on a hard road. It was left behind, or set down, or never picked back up. The land keeps it now, the way it keeps everything.',
+    journal: 'A carved animal, worn smooth by a small hand.',
     build(g) {
       const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(0.7, 0), stoneMat);
       rock.position.y = 0.4; rock.scale.y = 0.7; g.add(rock);
@@ -1924,7 +1924,7 @@ const LANDMARKS = [
   },
   {
     id: 'cairn', name: 'The Summit Cairn', x: 220, z: 220, r: 14,
-    journal: 'Stones stacked by hands, up where nothing grows. Someone climbed above the food chain to die. It almost worked.',
+    journal: 'Stones stacked where nothing grows. He climbed up here to die.',
     build(g) {
       let y = 0;
       for (let i = 0; i < 6; i++) {
@@ -1938,7 +1938,7 @@ const LANDMARKS = [
   },
   {
     id: 'monolith', name: 'The Door That Isn’t', x: -290, z: -290, r: 12,
-    journal: 'A black door to nowhere. It hums, and your empty stomach hums back. You knocked. Something inside swallowed once. You stopped knocking.',
+    journal: 'A black door to nowhere. It hums. I stopped knocking.',
     build(g) {
       const slab = new THREE.Mesh(new THREE.BoxGeometry(2.6, 9.5, 0.8),
         new THREE.MeshStandardMaterial({ color: 0x07070a, roughness: 0.35,
@@ -1955,7 +1955,7 @@ const LANDMARKS = [
   },
   {
     id: 'grotto', name: 'The Glowing Grotto', x: 150, z: 90, r: 13,
-    journal: 'Mushrooms making their own light. They look like food. So did you, once, to something. You leave them alone.',
+    journal: 'Mushrooms that make their own light. I leave them be.',
     build(g) {
       const stemM = new THREE.MeshStandardMaterial({ color: 0xd8d2c2, roughness: 1 });
       for (let i = 0; i < 9; i++) {
@@ -2598,12 +2598,14 @@ function animalUpdate(a, dt) {
         a.cur = null;
       }
     } else if (a.state === 'wounded') {
-      // it runs hurt — slower than you, leaving blood. The pace is the
-      // game: you gain on it walking, lose ground while you draw.
-      a.bleedT -= dt;
+      // it bolts hurt, then flags — speed bleeds DOWN over ~7s to below
+      // your walking pace, so you run it down. The persistence hunt.
+      a.bleedT -= dt; a.woundAge = (a.woundAge || 0) + dt;
       a.dir = lerpAngle(a.dir, Math.atan2(-dx, -dz) + Math.sin(clock.elapsedTime * 0.7) * 0.3, dt * 2);
-      setAnim(a, a.wound.speed < 0.3 ? 'Walk' : 'Gallop');
-      stepAnimal(a, a.cfg.gallop * a.wound.speed, dt);
+      const fade = Math.max(0, 1 - a.woundAge / 7);
+      const wsp = Math.max(4.2, a.cfg.gallop * a.wound.speed * (0.4 + 0.6 * fade));
+      setAnim(a, wsp < 5.2 ? 'Walk' : 'Gallop');
+      stepAnimal(a, wsp, dt);
       dropBlood(a);
       if (a.bleedT <= 0) {
         if (a.bleedFatal) killAnimal(a, true);          // it lies down
@@ -2622,6 +2624,17 @@ function animalUpdate(a, dt) {
         }
       }
       if (a.t <= 0 && dist > a.cfg.flee * 1.5) a.state = 'idle', a.t = 1 + Math.random() * 3;
+    } else if (a.state === 'alert') {
+      // it caught something — head up, turned your way, weighing it.
+      a.t -= dt;
+      setAnim(a, 'Idle');
+      a.dir = lerpAngle(a.dir, Math.atan2(dx, dz), dt * 4);   // turn to look
+      if (dist < spookRadius(a, dist)
+          || (noiseLevel >= 2 && dist < spookRadius(a, dist) * 1.45)) {
+        a.state = 'flee'; a.t = 5 + Math.random() * 4;
+        a.dir = Math.atan2(-dx, -dz) + (Math.random() - 0.5) * 0.7;
+        spookHerd(a);
+      } else if (a.t <= 0) { a.state = 'idle'; a.t = 1 + Math.random() * 2; }
     } else if (dist < panicRadius(a) || dist < spookRadius(a, dist)) {
       // crowded hard AND bold AND able to kick → it may turn and fight
       // instead of running. A stag/horse that's had enough rears up.
@@ -2637,6 +2650,8 @@ function animalUpdate(a, dt) {
         a.dir = Math.atan2(-dx, -dz) + (Math.random() - 0.5) * 0.7;
         spookHerd(a);                     // one spooks, the herd spooks
       }
+    } else if (dist < spookRadius(a, dist) * 1.7) {
+      a.state = 'alert'; a.t = 1.0 + Math.random() * 1.4;   // it stares
     } else wander(a, dt);
   }
   a.obj.rotation.y = lerpAngle(a.obj.rotation.y, a.dir, Math.min(1, dt * 6));
@@ -3264,7 +3279,7 @@ function loose() {
   if (power < 0.04) { drawT = 0; return; }   // a true non-draw, ignore
   // speed scales STEEPLY with how far you pulled: a flick (~0.1) limps out
   // at ~9 m/s and drops in front of you; a full draw rips at ~96 m/s.
-  const speed = 6 + Math.pow(power, 1.5) * 90;
+  const speed = 6 + Math.pow(power, 1.5) * 66;   // strong at full draw, not map-crossing
   const dir = new THREE.Vector3();
   camera.getWorldDirection(dir);
   const m = arrowTemplate.clone();
@@ -3356,14 +3371,16 @@ function arrowUpdate(dt) {
                                    a.m.position.y - a.oy,
                                    a.m.position.z - a.oz);
         if (an.cfg.bearish) {
-          // a tank: it soaks hits. clean 2 / strong 1 / weak 0.5 → ~3-4 shots.
-          an.hp -= cleanKill ? 2 : (a.power > 0.55 ? 1 : 0.5);
+          // a wall of muscle — never drops in one. ~8-10 arrows.
+          an.hp -= cleanKill ? 1.2 : (a.power > 0.55 ? 0.9 : 0.5);
         } else if (an.cfg.hunts || an.cfg.territorial) {
           an.hp -= cleanKill ? 999 : (a.power > 0.55 ? 2 : 1);
         } else {
-          // prey: a wounded animal hit again goes down. Otherwise the
-          // zone decides everything.
-          an.hp -= (cleanKill || an.state === 'wounded') ? 999 : 0;
+          // prey: a head/clean shot drops it; a finishing shot on an
+          // already-wounded one drops it; otherwise it chips real HP so
+          // a couple of solid hits put it down — no 8-shot foxes.
+          an.hp -= (cleanKill || an.state === 'wounded') ? 999
+                   : (a.power > 0.55 ? 1 : 0.5);
         }
         // kill-feel: flesh always answers — a puff of blood at the wound
         bloodPuff(a.m.position.x, a.m.position.y, a.m.position.z);
