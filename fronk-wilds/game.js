@@ -1002,10 +1002,8 @@ function mergeGeoms(list) {
   // solid AND walkable-on-top props (logs, stumps, squat boulders). Each
   // carries a world-space `top` you can clamber onto. See the movement loop.
   window.STEPPROPS = [];
-  // Cap collidable trunks so the hunt's collision scan stays cheap even
-  // as rendered tree count climbs. ~1600 real obstacles is plenty of
-  // cover; the rest render as canopy mass only.
-  const TREE_COLLIDE_MAX = IS_TOUCH ? 1100 : 1600;
+  // EVERY real trunk (r >= 0.45) is collidable now — blocks player + arrows.
+  // The collision scan stays cheap (~3.2ms/frame with 5k trunks).
   while (placed < CFG.trees && guard++ < CFG.trees * 30) {
     const x = (Math.random() - 0.5) * WORLD * 0.92,
           z = (Math.random() - 0.5) * WORLD * 0.92,
