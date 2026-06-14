@@ -2590,7 +2590,7 @@ window._player = player;
 player.y = heightAt(player.x, player.z);
 const score = {};
 const keys = {};
-let started = false, drawT = 0, holdT = 0, drawing = false, dead = false, bobPhase = 0;
+let started = false, drawT = 0, holdT = 0, drawing = false, dead = false, bobPhase = 0, hapticT = 0;
 
 // ── the wake-up: a ~3.5s cinematic intro that plays on enter and on
 // every respawn. Driven entirely by introT on the dt loop (no setTimeout),
@@ -2765,7 +2765,10 @@ const _streakMat = new THREE.MeshBasicMaterial({
 
 function loose() {
   const power = Math.min(1, drawT);
-  if (power < 0.12) { drawT = 0; return; }
+  if (power < 0.04) { drawT = 0; return; }   // a true non-draw, ignore
+  // speed scales STEEPLY with how far you pulled: a flick (~0.1) limps out
+  // at ~9 m/s and drops in front of you; a full draw rips at ~96 m/s.
+  const speed = 6 + Math.pow(power, 1.5) * 90;
   const dir = new THREE.Vector3();
   camera.getWorldDirection(dir);
   const m = arrowTemplate.clone();
@@ -2777,13 +2780,14 @@ function loose() {
   streak.position.z = -1.9;          // trails behind (arrow forward = +z)
   m.add(streak); m.userData.streak = streak;
   scene.add(m);
-  const rec = { m, v: dir.multiplyScalar(ARROW_SPEED_BASE + power * ARROW_SPEED_DRAW),
+  const rec = { m, v: dir.multiplyScalar(speed),
                 t: ARROW_LIFE, power,
                 ox: m.position.x, oy: m.position.y, oz: m.position.z };
   arrows.push(rec);
   arrowCam = { rec, mode: 'follow', rt: 0 };   // ride this one
   audio.twang();
   kickT = KICK_DUR;        // kill-feel: the string snaps your aim up a hair
+  if (IS_TOUCH && navigator.vibrate) navigator.vibrate(Math.round(18 + power * 34));
   drawT = 0;
 }
 
@@ -2985,7 +2989,7 @@ function _setBowStr(str, tip) {
 }
 function updateBowString(draw) {
   // string runs tip→nock→tip; nock pulls back toward your eye
-  _bsNock.set(0, 0, -0.125 + 0.02 + draw * 0.34);
+  _bsNock.set(0, 0, -0.125 + 0.02 + draw * 0.6);   // a LONG, visible pull
   _setBowStr(bowString1, _bsTip1);
   _setBowStr(bowString2, _bsTip2);
   nockedArrow.visible = draw > 0.03;
@@ -3463,6 +3467,13 @@ function tickBody() {
       if (drawT >= 1) holdT += dt; else holdT = 0;
     } else { drawT = Math.max(0, drawT - dt * 4); holdT = 0; }
     if (drawing && drawT > 0 && audio.drawCreak) audio.drawCreak(Math.min(1, drawT + holdT * 0.12));
+    if (drawing && IS_TOUCH && navigator.vibrate) {
+      hapticT -= dt;
+      if (hapticT <= 0) {                 // tighter, stronger buzz as it loads
+        hapticT = 0.13 - drawT * 0.08;
+        navigator.vibrate(Math.round(6 + drawT * drawT * 26));
+      }
+    }
     const _ch = document.getElementById('crosshair');
     _ch.classList.toggle('drawn', drawT > 0.5);
     // at full draw the aim WANDERS — the crosshair drifts with the
@@ -3623,7 +3634,7 @@ function tickBody() {
     camera.rotation.order = 'YXZ';
     // full draw is heavy: the aim breathes, and the longer you hold,
     // the worse it gets. The sway is real — the arrow inherits it.
-    const swayA = drawT * drawT * 0.0026 + Math.min(holdT, 4) * 0.0012;
+    const swayA = drawT * drawT * 0.0044 + Math.min(holdT, 4) * 0.0019;
     camera.rotation.y = player.yaw
       + (Math.sin(t * 1.7) + 0.5 * Math.sin(t * 4.3)) * swayA;
     camera.rotation.x = player.pitch
