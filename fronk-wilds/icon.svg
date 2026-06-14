@@ -1,45 +1,63 @@
 <svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <radialGradient id="bg" cx="50%" cy="40%" r="75%">
-      <stop offset="0%" stop-color="#43202a"/>
-      <stop offset="48%" stop-color="#231019"/>
-      <stop offset="100%" stop-color="#0c0609"/>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1c0f1e"/>
+      <stop offset="42%" stop-color="#5a1d22"/>
+      <stop offset="72%" stop-color="#b8482a"/>
+      <stop offset="100%" stop-color="#e88a3c"/>
+    </linearGradient>
+    <radialGradient id="sun" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ffe7a8"/>
+      <stop offset="55%" stop-color="#ffac4d"/>
+      <stop offset="100%" stop-color="#e8742a"/>
     </radialGradient>
-    <radialGradient id="glow" cx="50%" cy="30%" r="55%">
-      <stop offset="0%" stop-color="#e8893a" stop-opacity="0.55"/>
-      <stop offset="100%" stop-color="#e8893a" stop-opacity="0"/>
-    </radialGradient>
-    <linearGradient id="shaft" x1="0" y1="1" x2="0.4" y2="0">
+    <linearGradient id="arr" x1="0" y1="1" x2="1" y2="0">
       <stop offset="0%" stop-color="#6ad0ff"/>
-      <stop offset="52%" stop-color="#9a7be0"/>
+      <stop offset="50%" stop-color="#a87be0"/>
       <stop offset="100%" stop-color="#ff5a7a"/>
     </linearGradient>
   </defs>
 
-  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
-  <rect width="512" height="512" rx="112" fill="url(#glow)"/>
+  <rect width="512" height="512" rx="115" fill="url(#sky)"/>
+  <clipPath id="r"><rect width="512" height="512" rx="115"/></clipPath>
+  <g clip-path="url(#r)">
+    <!-- the sun -->
+    <circle cx="256" cy="232" r="118" fill="url(#sun)"/>
+    <!-- haze band -->
+    <rect x="0" y="232" width="512" height="150" fill="#ffb45a" opacity="0.16"/>
 
-  <!-- low horizon silhouette -->
-  <path d="M0 392 L96 360 L196 384 L300 350 L404 380 L512 356 L512 512 L0 512 Z" fill="#0a0609" opacity="0.85"/>
+    <!-- stag silhouette, centered on the sun -->
+    <g fill="none" stroke="#0d0709" stroke-width="13" stroke-linecap="round" stroke-linejoin="round">
+      <!-- left antler: main beam + upward tines -->
+      <path d="M236 158 L210 120 L196 92 M210 120 L182 108 M210 120 L214 86 M196 92 L176 80"/>
+      <!-- right antler -->
+      <path d="M276 158 L302 120 L316 92 M302 120 L330 108 M302 120 L298 86 M316 92 L336 80"/>
+    </g>
+    <g fill="#0d0709">
+      <!-- ears -->
+      <path d="M232 168 q-26 -10 -34 -2 q10 14 30 18 z"/>
+      <path d="M280 168 q26 -10 34 -2 q-10 14 -30 18 z"/>
+      <!-- head + neck: a clean deer profile -->
+      <path d="M256 158 q-26 6 -30 42 q-2 30 8 62 q7 26 22 34 q15 -8 22 -34 q10 -32 8 -62 q-4 -36 -30 -42 z"/>
+      <!-- muzzle -->
+      <ellipse cx="256" cy="300" rx="13" ry="20"/>
+    </g>
+    <!-- glowing eyes -->
+    <circle cx="243" cy="214" r="6" fill="#bffcf2"/>
+    <circle cx="269" cy="214" r="6" fill="#bffcf2"/>
+    <!-- dark treeline -->
+    <path d="M0 392 L40 372 L70 388 L104 364 L140 384 L180 366 L220 386 L256 368 L292 386 L332 366 L372 386 L408 366 L446 384 L478 370 L512 388 L512 512 L0 512 Z" fill="#0a0508"/>
 
-  <!-- antlers branching off the shaft -->
-  <g stroke="#caa06a" stroke-width="17" stroke-linecap="round" fill="none">
-    <path d="M256 300 L196 244 M196 244 L168 256 M196 244 L182 214"/>
-    <path d="M256 300 L316 244 M316 244 L344 256 M316 244 L330 214"/>
-    <path d="M256 256 L210 212 M256 256 L302 212"/>
+    <!-- the colorful arrow streaking across -->
+    <g transform="rotate(-26 256 420)">
+      <rect x="118" y="414" width="240" height="11" rx="5" fill="url(#arr)"/>
+      <polygon points="358,406 392,419.5 358,433" fill="#eef6ff"/>
+      <rect x="346" y="411" width="7" height="17" rx="3" fill="#fff0a8"/>
+      <polygon points="118,405 100,419.5 118,434" fill="#ff5a7a"/>
+      <polygon points="132,405 114,419.5 132,434" fill="#6ad0ff"/>
+      <circle cx="392" cy="419" r="4" fill="#ffffff"/>
+    </g>
   </g>
 
-  <!-- the arrow: vertical glinting shaft -->
-  <rect x="246" y="150" width="20" height="240" rx="10" fill="url(#shaft)"/>
-  <!-- forged head -->
-  <polygon points="256,96 226,156 286,156" fill="#eaf2ff"/>
-  <polygon points="256,116 240,156 272,156" fill="#acbdd0"/>
-  <!-- glint band -->
-  <rect x="242" y="176" width="28" height="11" rx="5" fill="#fff0a8"/>
-  <circle cx="256" cy="118" r="5" fill="#ffffff"/>
-  <!-- fletching -->
-  <polygon points="246,360 222,392 246,388" fill="#ff5a7a"/>
-  <polygon points="266,360 290,392 266,388" fill="#6ad0ff"/>
-
-  <text x="256" y="462" font-family="Georgia, 'Times New Roman', serif" font-size="42" font-weight="400" fill="#ece0cf" text-anchor="middle" letter-spacing="9">CONSUME</text>
+  <text x="256" y="476" font-family="Georgia, 'Times New Roman', serif" font-size="34" font-weight="400" fill="#f3e6d2" text-anchor="middle" letter-spacing="11">CONSUME</text>
 </svg>

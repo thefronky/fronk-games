@@ -2700,6 +2700,13 @@ const arrowTemplate = new THREE.Group();
 }
 
 
+// wind-streak template for arrows in flight (cloned-material per shot)
+const _streakGeo = new THREE.CylinderGeometry(0.001, 0.05, 3.8, 5, 1, true);
+_streakGeo.rotateX(Math.PI / 2);     // length along local z, taper toward head
+const _streakMat = new THREE.MeshBasicMaterial({
+  color: 0xbfeaff, transparent: true, opacity: 0.5,
+  blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+
 function loose() {
   const power = Math.min(1, drawT);
   if (power < 0.12) { drawT = 0; return; }
@@ -2708,6 +2715,11 @@ function loose() {
   const m = arrowTemplate.clone();
   m.position.copy(camera.position).addScaledVector(dir, 0.8);
   m.lookAt(m.position.clone().add(dir));
+  // wind-streak: a tapered translucent tail behind the head so you SEE
+  // it leave and arc. Child of the arrow → follows orientation for free.
+  const streak = new THREE.Mesh(_streakGeo, _streakMat.clone());
+  streak.position.z = -1.9;          // trails behind (arrow forward = +z)
+  m.add(streak); m.userData.streak = streak;
   scene.add(m);
   arrows.push({ m, v: dir.multiplyScalar(ARROW_SPEED_BASE + power * ARROW_SPEED_DRAW),
                 t: ARROW_LIFE, power,
@@ -2756,6 +2768,12 @@ function arrowUpdate(dt) {
     if (a.stuck) { a.t -= dt; if (a.t <= 0) { scene.remove(a.m); arrows.splice(i, 1); } continue; }
     a.v.y -= ARROW_GRAVITY * dt;
     a.m.position.addScaledVector(a.v, dt);
+    // streak fades as the arrow ages and as it slows (drag illusion)
+    const st = a.m.userData.streak;
+    if (st) {
+      const spd = Math.hypot(a.v.x, a.v.y, a.v.z);
+      st.material.opacity = Math.max(0, Math.min(0.55, spd / 80 * 0.55)) * Math.min(1, a.t / 1.5);
+    }
     // orient along velocity — skip when v is near-vertical (apex of a
     // straight-up shot) so lookAt never degenerates against the up axis
     if (a.v.x * a.v.x + a.v.z * a.v.z > 1e-4)
@@ -2824,6 +2842,7 @@ function arrowUpdate(dt) {
           an._stuck = (an._stuck || 0) + 1;
           const vl = Math.hypot(a.v.x, a.v.y, a.v.z) || 1;
           a.m.position.addScaledVector(a.v, -0.30 / vl);  // fletching proud of the hide
+          if (a.m.userData.streak) { a.m.remove(a.m.userData.streak); a.m.userData.streak = null; }
           an.obj.attach(a.m);     // carcass cleanup removes obj + arrows together
         } else scene.remove(a.m);
         arrows.splice(i, 1); hit = true; break;
@@ -2836,6 +2855,7 @@ function arrowUpdate(dt) {
       const vl = Math.hypot(a.v.x, a.v.y, a.v.z) || 1;
       a.m.position.addScaledVector(a.v, -0.30 / vl);   // back out ~30 cm along the shot line
       a.stuck = true; a.t = ARROW_STUCK_LIFE;
+      if (a.m.userData.streak) { a.m.remove(a.m.userData.streak); a.m.userData.streak = null; }
       if (audio.impact) audio.impact('ground',
         Math.min(1, Math.hypot(a.m.position.x - player.x, a.m.position.z - player.z) / 60));
     }
@@ -2911,7 +2931,9 @@ function updateBowString(draw) {
   _setBowStr(bowString1, _bsTip1);
   _setBowStr(bowString2, _bsTip2);
   nockedArrow.visible = draw > 0.03;
-  nockedArrow.position.set(0, 0, _bsNock.z);
+  // the arrow rests on the SHELF beside the riser, not through it —
+  // offset to the side + up onto the rest like real archery
+  nockedArrow.position.set(0.024, 0.012, _bsNock.z);
 }
 
 // dying mid-draw must not leave the camera zoomed / the bow drawn
