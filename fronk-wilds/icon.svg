@@ -1,69 +1,61 @@
 <svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#150a17"/>
-      <stop offset="38%" stop-color="#3f141d"/>
-      <stop offset="68%" stop-color="#a83a22"/>
-      <stop offset="100%" stop-color="#f4a23c"/>
-    </linearGradient>
-    <radialGradient id="sun" cx="50%" cy="50%" r="50%">
-      <stop offset="0%" stop-color="#fff1c4"/>
-      <stop offset="48%" stop-color="#ffb454"/>
-      <stop offset="100%" stop-color="#e76a23" stop-opacity="0"/>
+    <radialGradient id="bg" cx="50%" cy="50%" r="72%">
+      <stop offset="0%" stop-color="#5a160f"/>
+      <stop offset="42%" stop-color="#2a0a0e"/>
+      <stop offset="100%" stop-color="#0a0507"/>
     </radialGradient>
-    <radialGradient id="eye" cx="50%" cy="50%" r="50%">
-      <stop offset="0%" stop-color="#eafff7"/>
-      <stop offset="60%" stop-color="#7fe6d2"/>
-      <stop offset="100%" stop-color="#2aa890" stop-opacity="0"/>
+    <radialGradient id="iris" cx="50%" cy="48%" r="58%">
+      <stop offset="0%" stop-color="#fff3c8"/>
+      <stop offset="26%" stop-color="#ffd24e"/>
+      <stop offset="58%" stop-color="#f07a17"/>
+      <stop offset="100%" stop-color="#7c1d07"/>
+    </radialGradient>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ffb04a" stop-opacity="0.7"/>
+      <stop offset="100%" stop-color="#ffb04a" stop-opacity="0"/>
     </radialGradient>
   </defs>
 
-  <rect width="512" height="512" rx="115" fill="url(#sky)"/>
+  <rect width="512" height="512" rx="115" fill="url(#bg)"/>
   <clipPath id="r"><rect width="512" height="512" rx="115"/></clipPath>
   <g clip-path="url(#r)">
-    <!-- the low sun, a soft glow disc -->
-    <circle cx="256" cy="300" r="190" fill="url(#sun)"/>
-    <circle cx="256" cy="300" r="96" fill="#ffd07a" opacity="0.9"/>
+    <!-- ambient ember glow -->
+    <circle cx="256" cy="256" r="230" fill="url(#glow)"/>
 
-    <!-- the stag — bold, symmetric, graphic. one clean silhouette. -->
-    <g fill="#0c0608">
-      <!-- big branching antlers, drawn as a filled crown -->
-      <path d="M232 196
-               C228 168 222 150 214 134
-               C209 122 213 116 222 122
-               C229 127 234 138 239 150
-               C236 132 232 112 232 96
-               C232 86 240 84 244 94
-               C248 104 250 124 252 142
-               C255 120 258 104 264 92
-               C269 82 277 85 275 98
-               C273 116 270 134 270 152
-               C276 138 283 126 291 120
-               C300 114 304 120 298 130
-               C289 146 282 166 278 196 Z"/>
-      <!-- ears -->
-      <path d="M232 206 q-30 -14 -42 -4 q10 18 38 22 z"/>
-      <path d="M278 206 q30 -14 42 -4 q-10 18 -38 22 z"/>
-      <!-- head + neck, a clean deer profile -->
-      <path d="M255 198
-               q-30 4 -36 44
-               q-4 34 8 70
-               q9 30 28 40
-               q19 -10 28 -40
-               q12 -36 8 -70
-               q-6 -40 -36 -44 Z"/>
-      <!-- muzzle -->
-      <ellipse cx="255" cy="346" rx="15" ry="22"/>
+    <!-- the eye: an almond aperture. dark lids above and below. -->
+    <!-- lid shadow (the socket) -->
+    <path d="M40 256 C150 150, 362 150, 472 256 C362 362, 150 362, 40 256 Z"
+          fill="#000" opacity="0.55"/>
+
+    <!-- the glowing iris, clipped to the eye almond -->
+    <clipPath id="eye">
+      <path d="M64 256 C160 176, 352 176, 448 256 C352 336, 160 336, 64 256 Z"/>
+    </clipPath>
+    <g clip-path="url(#eye)">
+      <rect x="64" y="150" width="384" height="212" fill="#1a0c06"/>
+      <circle cx="256" cy="256" r="118" fill="url(#iris)"/>
+      <!-- vertical slit pupil — the predator -->
+      <ellipse cx="256" cy="256" rx="26" ry="112" fill="#080304"/>
+      <!-- iris fibres: faint radial ticks -->
+      <g stroke="#ffcf6e" stroke-width="2" opacity="0.35">
+        <line x1="256" y1="256" x2="256" y2="150"/>
+        <line x1="256" y1="256" x2="350" y2="200"/>
+        <line x1="256" y1="256" x2="362" y2="256"/>
+        <line x1="256" y1="256" x2="350" y2="312"/>
+        <line x1="256" y1="256" x2="162" y2="312"/>
+        <line x1="256" y1="256" x2="150" y2="256"/>
+        <line x1="256" y1="256" x2="162" y2="200"/>
+      </g>
+      <!-- wet specular glint -->
+      <circle cx="212" cy="212" r="22" fill="#fff" opacity="0.92"/>
+      <circle cx="300" cy="290" r="9" fill="#fff" opacity="0.5"/>
     </g>
-    <!-- glowing eyes — the only living light -->
-    <circle cx="240" cy="260" r="14" fill="url(#eye)"/>
-    <circle cx="271" cy="260" r="14" fill="url(#eye)"/>
-    <circle cx="240" cy="260" r="5" fill="#eafff7"/>
-    <circle cx="271" cy="260" r="5" fill="#eafff7"/>
 
-    <!-- dark jagged treeline anchoring the base -->
-    <path d="M0 426 L42 404 L74 420 L110 396 L150 418 L194 398 L238 420 L256 404
-             L292 420 L334 398 L376 420 L414 400 L452 418 L484 404 L512 422
-             L512 512 L0 512 Z" fill="#080406"/>
+    <!-- crisp lid lines framing the almond -->
+    <path d="M64 256 C160 176, 352 176, 448 256" fill="none" stroke="#1c0d08" stroke-width="14" stroke-linecap="round"/>
+    <path d="M64 256 C160 336, 352 336, 448 256" fill="none" stroke="#0c0507" stroke-width="14" stroke-linecap="round"/>
+    <!-- a single lash flick at each corner for menace -->
+    <path d="M64 256 l-22 -10 M448 256 l22 -10" stroke="#1c0d08" stroke-width="10" stroke-linecap="round"/>
   </g>
 </svg>

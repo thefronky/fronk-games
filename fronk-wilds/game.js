@@ -43,15 +43,15 @@ const CFG = IS_TOUCH
 //   scale/tint = render overrides (bear: 1.8 scale, dark-brown 0x3a2616)
 const MENAGERIE = {
   // ── prey ──
-  Deer:  { n: 8, speed: 3.0, gallop: 10.5, hp: 2, flee: 36, r: 1.3,
+  Deer:  { n: 8, speed: 3.0, gallop: 10.5, hp: 2, flee: 20, r: 1.3,
            keen: 1.15, aggroBias: 0.10, rear: 0.55, scale: 1.0, hpJit: true },
-  Stag:  { n: 4, speed: 2.7, gallop: 10.0, hp: 3, flee: 32, r: 1.5,
+  Stag:  { n: 4, speed: 2.7, gallop: 10.0, hp: 3, flee: 18, r: 1.5,
            keen: 1.05, aggroBias: 0.30, rear: 0.70, scale: 1.18, hpJit: true },
-  Fox:   { n: 5, speed: 3.6, gallop: 11.8, hp: 1, flee: 30, r: 0.55,
+  Fox:   { n: 5, speed: 3.6, gallop: 11.8, hp: 1, flee: 19, r: 0.55,
            keen: 1.6, aggroBias: 0.05, rear: 0.2, scale: 0.45 },  // small, skittish, keen — dies fast, runs fast
-  Cow:   { n: 4, speed: 1.9, gallop: 7.4,  hp: 3, flee: 22, r: 1.6,
+  Cow:   { n: 4, speed: 1.9, gallop: 7.4,  hp: 3, flee: 13, r: 1.6,
            keen: 0.5, aggroBias: 0.05, rear: 0.2, gait: 'sway', scale: 1.22, hpJit: true }, // docile, dull
-  Horse: { n: 3, speed: 3.2, gallop: 13.8, hp: 9, flee: 32, r: 1.6,
+  Horse: { n: 3, speed: 3.2, gallop: 13.8, hp: 9, flee: 18, r: 1.6,
            keen: 1.2, aggroBias: 0.25, rear: 0.65, gait: 'smooth',
            hpJit: true, tanky: true, scale: 1.3 },        // 8-10 hits, impressive bolt
   // ── predator / territorial ──
@@ -2815,7 +2815,7 @@ function animalUpdate(a, dt) {
         if (dist < 3.0) { hurtPlayer(8 + a.aggression * 8); camShakeT = SHAKE_DUR; }
       }
       if (a.rearT <= 0) {                      // done posturing — flee for real
-        a.state = 'flee'; a.t = 5 + Math.random() * 4;
+        a.state = 'flee'; a.t = 3 + Math.random() * 2.5;
         a.dir = Math.atan2(-dx, -dz) + (Math.random() - 0.5) * 0.7;
         a.cur = null;
       }
@@ -2853,7 +2853,7 @@ function animalUpdate(a, dt) {
       a.dir = lerpAngle(a.dir, Math.atan2(dx, dz), dt * 4);   // turn to look
       if (dist < spookRadius(a, dist)
           || (noiseLevel >= 2 && dist < spookRadius(a, dist) * 1.45)) {
-        a.state = 'flee'; a.t = 5 + Math.random() * 4;
+        a.state = 'flee'; a.t = 3 + Math.random() * 2.5;
         a.dir = Math.atan2(-dx, -dz) + (Math.random() - 0.5) * 0.7;
         spookHerd(a);
       } else if (a.t <= 0) { a.state = 'idle'; a.t = 1 + Math.random() * 2; }
@@ -2868,7 +2868,7 @@ function animalUpdate(a, dt) {
         a.dir = Math.atan2(dx, dz);
         camShakeT = SHAKE_DUR;
       } else {
-        a.state = 'flee'; a.t = 5 + Math.random() * 4;
+        a.state = 'flee'; a.t = 3 + Math.random() * 2.5;
         a.dir = Math.atan2(-dx, -dz) + (Math.random() - 0.5) * 0.7;
         spookHerd(a);                     // one spooks, the herd spooks
       }
@@ -3051,7 +3051,7 @@ function spookHerd(a) {
         || o.state === 'flee' || o.state === 'wounded') continue;
     const dx = o.obj.position.x - p.x, dz = o.obj.position.z - p.z;
     if (dx * dx + dz * dz > 625) continue;  // 25m
-    o.state = 'flee'; o.t = 5 + Math.random() * 4;
+    o.state = 'flee'; o.t = 3 + Math.random() * 2.5;
     o.dir = Math.atan2(o.obj.position.x - player.x,
                        o.obj.position.z - player.z) + (Math.random() - 0.5) * 0.7;
   }
@@ -3061,8 +3061,16 @@ function wander(a, dt) {
   a.t -= dt;
   if (a.t <= 0) {
     const roll = Math.random();
-    a.state = roll < 0.38 ? 'idle' : roll < 0.66 ? 'eat' : 'walk';
-    a.t = 2.5 + Math.random() * 5;
+    // prey mostly GRAZE — a calm meadow you have to sneak up on. Predators
+    // roam more. (eat is long; walking is the rarer, shorter beat.)
+    const prey = !(a.cfg.hunts || a.cfg.territorial || a.cfg.bearish);
+    if (prey) {
+      a.state = roll < 0.28 ? 'idle' : roll < 0.78 ? 'eat' : 'walk';
+      a.t = a.state === 'eat' ? 5 + Math.random() * 6 : 2.5 + Math.random() * 4;
+    } else {
+      a.state = roll < 0.38 ? 'idle' : roll < 0.6 ? 'eat' : 'walk';
+      a.t = 2.5 + Math.random() * 5;
+    }
     if (a.state === 'walk') {
       a.dir += (Math.random() - 0.5) * 2.4;
       // after dark — or when you reek of meat and harvest-blood —
