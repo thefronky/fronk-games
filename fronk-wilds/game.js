@@ -51,8 +51,8 @@ const MENAGERIE = {
            // hard, not hopeless: stalk quiet to ~16m, stand still to ~8m.
   Stag:  { n: 4, speed: 2.7, gallop: 10.0, hp: 3, flee: 17, r: 0.95,
            keen: 1.05, aggroBias: 0.30, rear: 0.70, scale: 0.52, hpJit: true },
-  Fox:   { n: 8, speed: 3.8, gallop: 12.2, hp: 1, flee: 18, r: 0.5,
-           keen: 1.7, aggroBias: 0.05, rear: 0.2, scale: 0.45, darty: true },  // little critters — many, tiny, skittish, JUKE when fleeing — hard to hit
+  Fox:   { n: 14, speed: 3.8, gallop: 12.2, hp: 1, flee: 16, r: 0.5,
+           keen: 1.6, aggroBias: 0.05, rear: 0.2, scale: 0.45, darty: true },  // little critters — LOTS, tiny, skittish, JUKE when fleeing — quick food, keeps the world alive
   Cow:   { n: 1, speed: 1.9, gallop: 7.4,  hp: 3, flee: 13, r: 1.6,
            keen: 0.5, aggroBias: 0.05, rear: 0.2, gait: 'sway', scale: 1.22, hpJit: true }, // RARE now — rarer than bears
   Horse: { n: 2, speed: 3.2, gallop: 13.8, hp: 9, flee: 20, r: 1.6,
@@ -2171,7 +2171,8 @@ const WISPS = []; window._wisps = WISPS;
   }
 }
 function wispUpdate(t, dt, night) {
-  const vis = Math.max(0, (night - 0.4) / 0.6);     // only once it's truly dark
+  let vis = Math.max(0, (night - 0.4) / 0.6);        // only once it's truly dark
+  if (tripT > 0) vis = Math.max(vis, 0.85);          // ...or whenever you're tripping
   for (const w of WISPS) {
     const p = w.g.position;
     w.vx += (Math.sin(t * 0.3 + w.ph) * 0.6 - w.vx) * dt;     // slow aimless drift
@@ -2664,6 +2665,19 @@ async function loadAnimals() {
           f.herdId = herd; f.herdLeader = lead;
         }
         left -= size;
+      }
+    } else if (n === 'Bear') {
+      // place bears at a findable distance from where you wake (70-150m) so
+      // you actually CROSS one — not lost across a 860m map
+      for (let i = 0; i < SPECIES.Bear.n; i++) {
+        const b = spawn('Bear');
+        for (let tr = 0; tr < 30; tr++) {
+          const ang = Math.random() * Math.PI * 2, rr = 70 + Math.random() * 80;
+          const bx = SPAWN.x + Math.cos(ang) * rr, bz = SPAWN.z + Math.sin(ang) * rr;
+          if (heightAt(bx, bz) > WATER_Y + 1) {
+            b.obj.position.set(bx, heightAt(bx, bz), bz); break;
+          }
+        }
       }
     } else for (let i = 0; i < SPECIES[n].n; i++) spawn(n);
   }
@@ -3858,7 +3872,7 @@ function forageUpdate(t) {
       if (audio.impact) audio.impact('flesh', 0.5);
       toast('Berries.', 1400);
     } else {                                    // the glowing mushroom
-      tripT = 26; player.lastAte = t;
+      tripT = 60; player.lastAte = t;   // a full minute
       if (audio.tripMusic) audio.tripMusic(true);   // the magic carpet starts
       toast('…oh.', 2200);
     }
@@ -4701,11 +4715,25 @@ function tickBody() {
   if (tripT > 0) {
     tripT -= dt;
     const k = Math.max(0, Math.min(1, tripT / 2));
-    const hue = (t * 80) % 360;
-    canvas.style.filter = 'hue-rotate(' + hue.toFixed(0) + 'deg) saturate('
-      + (1 + 1.2 * k).toFixed(2) + ') contrast(' + (1 + 0.22 * k).toFixed(2)
-      + ') brightness(' + (1 + 0.06 * Math.sin(t * 5) * k).toFixed(2) + ')';
-  } else if (canvas.style.filter) { canvas.style.filter = ''; if (audio.tripMusic) audio.tripMusic(false); }
+    // colors surge and wander — faster hue, deeper saturation, a hue that
+    // also pulses so it never sits still
+    const hue = (t * 130 + 50 * Math.sin(t * 0.7)) % 360;
+    const sat = 1 + (1.9 + 0.5 * Math.sin(t * 1.3)) * k;
+    const con = 1 + 0.35 * k;
+    const bri = 1 + (0.10 * Math.sin(t * 3.1) + 0.05 * Math.sin(t * 7.3)) * k;
+    const blur = (0.6 + 0.6 * Math.sin(t * 0.9)) * k;            // soft swimming focus
+    canvas.style.filter = 'hue-rotate(' + hue.toFixed(0) + 'deg) saturate(' + sat.toFixed(2)
+      + ') contrast(' + con.toFixed(2) + ') brightness(' + bri.toFixed(2)
+      + ') blur(' + blur.toFixed(2) + 'px)';
+    // the whole picture breathes + sways — a gentle warp, never nauseating
+    const sc = 1 + 0.03 * Math.sin(t * 1.7) * k;
+    const rot = 0.6 * Math.sin(t * 0.6) * k;
+    canvas.style.transformOrigin = 'center';
+    canvas.style.transform = 'scale(' + sc.toFixed(3) + ') rotate(' + rot.toFixed(2) + 'deg)';
+  } else if (canvas.style.filter) {
+    canvas.style.filter = ''; canvas.style.transform = '';
+    if (audio.tripMusic) audio.tripMusic(false);
+  }
   // auto-launch: after the theme's opening swell, the cinematic dive begins
   if (titleArmed && !launching && !started && (t - titleArmT) > 6.5) beginLaunch();
   // kill-feel: juice timers decay on REAL time (hitstop scales the
@@ -4800,6 +4828,17 @@ function tickBody() {
   // ── the hunter talks to himself, sparingly ──
   if (started && !dead && !intro) {
     const M = tickBody;
+    // ── hunger makes you drowsy ── the longer since you ate, the heavier
+    // the eyelids: you blink more, and the blinks linger. Eating resets it.
+    const sleepy = Math.max(0, Math.min(1, (t - player.lastAte - 55) / 70));
+    M._blinkT = (M._blinkT ?? 3) - dt;
+    if (M._blinkT <= 0 && !M._blinking && sleepy > 0.12 && tripT <= 0) {
+      M._blinkT = (3.2 - sleepy * 2.2) + Math.random() * 1.5;   // more often the hungrier you are
+      M._blinking = true;
+      setLids(-100 + (45 + sleepy * 40), 0);                    // eyes droop (heavier = lower)
+      setTimeout(() => { M._blinking = false; if (started && !dead && !intro) setLids(-100, 0); },
+        110 + sleepy * 220);                                     // and linger shut when really hungry
+    }
     if (night > 0.6 && !M._saidNight) { M._saidNight = true; M._saidDawn = false; say('nightFall', 4200); }
     if (night < 0.15 && M._saidNight && !M._saidDawn) { M._saidDawn = true; M._saidNight = false; say('dawn', 4200); }
     M._idleT = (M._idleT ?? 75) - dt;
@@ -4942,10 +4981,10 @@ function tickBody() {
     }
     // a big, floaty Halo-style hop — higher apex (~2.2m), more hang time.
     // On a mushroom trip it's a slow, soaring moon-jump.
-    if (jumpQ && grounded) { playerVy = tripT > 0 ? 14 : 7.7; grounded = false; }   // trip = soar to the treetops
+    if (jumpQ && grounded) { playerVy = tripT > 0 ? 16.5 : 7.7; grounded = false; }   // trip = soar over the treetops
     jumpQ = false;
     if (!grounded) {
-      playerVy -= (tripT > 0 ? 6 : 13) * dt; player.airY = (player.airY ?? groundY) + playerVy * dt;
+      playerVy -= (tripT > 0 ? 5 : 13) * dt; player.airY = (player.airY ?? groundY) + playerVy * dt;
       if (player.airY <= groundY) {
         const impact = -playerVy;                 // how hard you came down
         player.airY = groundY; playerVy = 0; grounded = true;
