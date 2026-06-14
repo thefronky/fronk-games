@@ -109,6 +109,15 @@
   #jumpBtn{right:128px;bottom:max(58px,calc(env(safe-area-inset-bottom) + 40px));
     width:66px;height:66px}
   .touch #stickL,.touch #shootBtn,.touch #jumpBtn{display:flex}
+  /* canoe mode: two big oar buttons across the bottom, hard to miss */
+  #oarL,#oarR{bottom:max(28px,calc(env(safe-area-inset-bottom) + 16px));
+    width:120px;height:96px;border-radius:20px;font-family:'Cinzel',serif;
+    font-size:11px;letter-spacing:.2em;text-transform:uppercase;flex-direction:column;gap:6px}
+  #oarL{left:26px}  #oarR{right:26px}
+  #oarL svg,#oarR svg{width:34px;height:34px}
+  /* in the canoe: show oars, hide the land controls */
+  .touch.canoe #oarL,.touch.canoe #oarR{display:flex}
+  .touch.canoe #stickL,.touch.canoe #jumpBtn{display:none}
 </style>
 </head>
 <body>
@@ -147,6 +156,16 @@
     <path d="M4.5 21 Q14 2.5 23.5 21"/>
     <circle cx="4.5" cy="21" r="1.7" fill="currentColor" stroke="none"/>
     <path d="M6 24.5 H22"/></svg>
+</button>
+<button id="oarL" class="abtn" aria-label="left oar">
+  <svg viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M19 4 L9 18"/><ellipse cx="6.5" cy="21.5" rx="4" ry="5.5" transform="rotate(-38 6.5 21.5)"/></svg>
+  <span>left</span>
+</button>
+<button id="oarR" class="abtn" aria-label="right oar">
+  <svg viewBox="0 0 28 28" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M9 4 L19 18"/><ellipse cx="21.5" cy="21.5" rx="4" ry="5.5" transform="rotate(38 21.5 21.5)"/></svg>
+  <span>right</span>
 </button>
 
 <div id="vignette"></div>

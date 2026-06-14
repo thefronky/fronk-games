@@ -3090,6 +3090,27 @@ function cryptidUpdate(night) {
   duckMusic(!!(cryptid && !cryptid.dead && cryptid.state === 'stare'));
 }
 
+// ── canoe: a low-poly dugout that appears when you're on water ──
+const canoe = (() => {
+  const g = new THREE.Group();
+  const woodM = new THREE.MeshStandardMaterial({ color: 0x5a3a22, roughness: 0.85 });
+  const inM = new THREE.MeshStandardMaterial({ color: 0x3c2616, roughness: 1 });
+  // hull: a long box tapered to points fore & aft (scale the ends in)
+  const hull = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.34, 3.0), woodM);
+  const vp = hull.geometry.attributes.position;
+  for (let i = 0; i < vp.count; i++) {
+    const z = vp.getZ(i), taper = 1 - Math.min(1, Math.abs(z) / 1.5) * 0.86;
+    vp.setX(i, vp.getX(i) * taper);
+  }
+  vp.needsUpdate = true; hull.geometry.computeVertexNormals();
+  const well = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.2, 2.0), inM);
+  well.position.y = 0.12;
+  g.add(hull, well);
+  g.visible = false;
+  return g;
+})();
+scene.add(canoe);
+
 // ───────────────────────── player ─────────────────────────
 // the calm clearing you wake in — every life starts and respawns here
 const SPAWN = { x: 0, z: 26, yaw: Math.PI, pitch: -0.04 };
@@ -3102,6 +3123,7 @@ const keys = {};
 let started = false, drawT = 0, holdT = 0, raiseT = 0, drawing = false, dead = false, bobPhase = 0, hapticT = 0;
 let _moveLvl = 0;   // 0..1 gait level — drives footstep audio + camera head-bob
 let playerVy = 0, grounded = true, jumpQ = false;
+let inCanoe = false, canoeSpd = 0, oarLStroke = false, oarRStroke = false, _wasCanoe = false;
 
 // ── the wake-up: a ~3.5s cinematic intro that plays on enter and on
 // every respawn. Driven entirely by introT on the dt loop (no setTimeout),
@@ -3606,7 +3628,9 @@ function resetDrawState() {
 // ───────────────────────── input ─────────────────────────
 // the wake-up is skippable — any input fast-forwards it to the end
 function skipIntro() { if (intro) introSkip = true; }
-addEventListener('keydown', e => { keys[e.code] = true; if (e.code === 'Space' && !intro && !arrowCam) jumpQ = true; });
+addEventListener('keydown', e => { keys[e.code] = true;
+  if (e.code === 'Space' && !intro && !arrowCam) jumpQ = true;
+  if (inCanoe && !e.repeat) { if (e.code === 'KeyA') oarLStroke = true; if (e.code === 'KeyD') oarRStroke = true; } });
 addEventListener('keyup', e => keys[e.code] = false);
 addEventListener('keydown', skipIntro);
 addEventListener('mousedown', skipIntro);
@@ -3688,6 +3712,9 @@ if (!IS_TOUCH) {
     drawing = true; btn.classList.add('drawing');
   }, { passive: false });
   // jump button
+  const oL = document.getElementById('oarL'), oR = document.getElementById('oarR');
+  oL.addEventListener('touchstart', e => { e.preventDefault(); if (inCanoe) oarLStroke = true; }, { passive: false });
+  oR.addEventListener('touchstart', e => { e.preventDefault(); if (inCanoe) oarRStroke = true; }, { passive: false });
   const jb = document.getElementById('jumpBtn');
   jb.addEventListener('touchstart', e => { e.preventDefault();
     if (!intro && !arrowCam) jumpQ = true; }, { passive: false });
@@ -4038,6 +4065,28 @@ function tickBody() {
     const sin = Math.sin(player.yaw), cos = Math.cos(player.yaw);
     let nx = player.x + (-sin * mz + cos * mx) * sp * dt;
     let nz = player.z + (-cos * mz - sin * mx) * sp * dt;
+    if (inCanoe) {
+      // ── canoe paddling: two oars, awkward on purpose ──
+      // each stroke shoves forward AND yaws away from that side, so
+      // paddling only the left oar curls you right; alternate for straight.
+      if (oarLStroke) { canoeSpd += 4.6; player.yaw += 0.17; oarLStroke = false;
+        if (audio.impact) audio.impact('ground', 0.45); }
+      if (oarRStroke) { canoeSpd += 4.6; player.yaw -= 0.17; oarRStroke = false;
+        if (audio.impact) audio.impact('ground', 0.45); }
+      canoeSpd = Math.min(7, canoeSpd) * Math.pow(0.42, dt);   // glide + drag
+      const cs = Math.sin(player.yaw), cc = Math.cos(player.yaw);
+      const lim2 = WORLD * 0.47;
+      let cx = Math.max(-lim2, Math.min(lim2, player.x - cs * canoeSpd * dt));
+      let cz = Math.max(-lim2, Math.min(lim2, player.z - cc * canoeSpd * dt));
+      const wy = heightAt(cx, cz);
+      if (wy > WATER_Y - 0.12) {            // nosed into the shallows → step out onto land
+        inCanoe = false; canoeSpd = 0;
+        player.x = cx; player.z = cz; player.y = wy; grounded = true; player.airY = wy;
+      } else {
+        player.x = cx; player.z = cz; player.y = WATER_Y; grounded = true; player.airY = WATER_Y;
+      }
+      _moveLvl = Math.min(1, canoeSpd / 6);
+    } else {
     // tree collision
     for (const tr of TREES) {
       const d = Math.hypot(nx - tr.x, nz - tr.z);
@@ -4082,6 +4131,11 @@ function tickBody() {
       if (player.airY <= groundY) { player.airY = groundY; playerVy = 0; grounded = true; }
       player.y = player.airY;
     } else { player.y = groundY; player.airY = groundY; }
+    // stepped off the bank into deep water → board the canoe
+    if (ny <= WATER_Y - 0.4 && stickMag > 0.02) {
+      inCanoe = true; canoeSpd = 2.0; player.x = nx; player.z = nz; player.y = WATER_Y;
+    }
+    }  // end !inCanoe walk branch
 
     // bow — at full draw it RAISES to your eye: grip near center,
     // nock at the cheek, slight zoom like focusing down the arrow
@@ -4194,6 +4248,13 @@ function tickBody() {
       night: window._night || 0, hp: player.hp,
     });
   }
+
+  // canoe: float the hull under you, swap the controls
+  canoe.visible = inCanoe && started;
+  if (canoe.visible) { canoe.position.set(player.x, WATER_Y - 0.16, player.z);
+    canoe.rotation.y = player.yaw; }
+  if (inCanoe !== _wasCanoe) { _wasCanoe = inCanoe;
+    document.body.classList.toggle('canoe', inCanoe); }
 
   // title/dive: open the fog so the aerial vista isn't washed to haze
   if (!started) { scene.fog.far = 900; }
