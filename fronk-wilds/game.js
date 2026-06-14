@@ -110,10 +110,33 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.08;
+renderer.toneMappingExposure = 1.14;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xd89a55);
+
+// ── image-based lighting ── a warm sky gradient baked to an environment
+// map so EVERY surface picks up soft golden ambient + gentle reflections,
+// instead of flat hemisphere fill. The single biggest fidelity lever, and
+// cheap (one PMREM at load). Dimmed by night in the loop.
+{
+  const c = document.createElement('canvas'); c.width = 8; c.height = 128;
+  const x = c.getContext('2d');
+  const g = x.createLinearGradient(0, 0, 0, 128);
+  g.addColorStop(0.00, '#aac4ef');   // cool zenith
+  g.addColorStop(0.42, '#e4caa0');   // warm upper
+  g.addColorStop(0.62, '#e89a55');   // golden horizon
+  g.addColorStop(0.80, '#7a5a3c');   // warm ground bounce
+  g.addColorStop(1.00, '#39281a');
+  x.fillStyle = g; x.fillRect(0, 0, 8, 128);
+  const tex = new THREE.CanvasTexture(c);
+  tex.mapping = THREE.EquirectangularReflectionMapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromEquirectangular(tex).texture;
+  if ('environmentIntensity' in scene) scene.environmentIntensity = 0.85;
+  pmrem.dispose(); tex.dispose();
+}
 
 // post-processing — bloom makes sun/fire/fireflies/the Door GLOW.
 // DISABLED on touch devices: mobile Safari renders the composer
@@ -150,13 +173,17 @@ const sun = new THREE.DirectionalLight(0xffc46a, 2.6);
 sun.position.set(-180, 95, -60);
 sun.castShadow = true;
 sun.shadow.mapSize.setScalar(CFG.shadow);
-sun.shadow.camera.left = sun.shadow.camera.bottom = -90;
-sun.shadow.camera.right = sun.shadow.camera.top = 90;
-sun.shadow.camera.far = 600;
-sun.shadow.bias = -0.0008;
+// tighter frustum around the player = the same map covers far less ground,
+// so shadows are crisp where it counts. Soft edge + normalBias kills acne.
+sun.shadow.camera.left = sun.shadow.camera.bottom = -55;
+sun.shadow.camera.right = sun.shadow.camera.top = 55;
+sun.shadow.camera.far = 420;
+sun.shadow.bias = -0.0006;
+sun.shadow.normalBias = 0.04;
+sun.shadow.radius = 3.5;
 scene.add(sun, sun.target);
-// hemisphere kept slightly low even by day — canopy shade pockets stay dark
-const hemi = new THREE.HemisphereLight(0xe6b277, 0x2c3220, 0.72);
+// hemisphere fill is lower now that IBL carries the sky ambient
+const hemi = new THREE.HemisphereLight(0xe6b277, 0x2c3220, 0.5);
 scene.add(hemi);
 
 // sky dome — sunset gradient + sun glow
@@ -4705,7 +4732,8 @@ function tickBody() {
   const dawn = (phase > 0.7 ? Math.max(0, 1 - Math.abs(phase - 0.88) / 0.12) : 0) * (1 - night);
   sun.color.copy(SUN_WARM).lerp(SUN_NIGHT, night);
   if (dawn > 0) sun.color.lerp(SUN_DAWN, dawn * 0.7);
-  hemi.intensity = (0.72 - night * 0.44) * (1 - dawn * 0.18);
+  hemi.intensity = (0.5 - night * 0.32) * (1 - dawn * 0.18);
+  if ('environmentIntensity' in scene) scene.environmentIntensity = 0.85 - night * 0.62;
   scene.fog.color.copy(FOG_DAY).lerp(FOG_NIGHT, night);
   if (dawn > 0) scene.fog.color.lerp(FOG_DAWN, dawn * 0.65);
   scene.background.copy(scene.fog.color);
@@ -5205,7 +5233,7 @@ function tickBody() {
         _revealStep = 1;
         if (IS_TOUCH) bc.add('show-move');
         if (audio.cue) audio.cue(0);
-        cinematic('getting hungry….', 4600);   // the one and only opening line
+        cinematic('getting hungry', 4600);   // the one and only opening line — no punctuation
       }
     } else if (_revealStep === 1 && dB > 7) { _revealStep = 2; if (IS_TOUCH) bc.add('show-jump'); if (audio.cue) audio.cue(1); }
     else if (_revealStep === 2 && dB > 11.5) { _revealStep = 3; if (IS_TOUCH) bc.add('show-bow'); if (audio.cue) audio.cue(2); }
