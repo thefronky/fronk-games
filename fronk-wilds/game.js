@@ -60,10 +60,8 @@ const MENAGERIE = {
            keen: 1.6,  aggroBias: 0.45, scale: 0.8,
            hunts: true, aggroR: 38, dmg: 22, packR: 80 },
            // circles before committing; after dark the whole pack answers
-  Bull:  { n: 2, speed: 2.2, gallop: 9.6,  hp: 4, flee: 0,  r: 1.6,
-           keen: 0.8,  aggroBias: 0.6, scale: 1.15, hpJit: true,
-           territorial: 16, dmg: 30 },
-           // wanders calm — gives ONE warning stomp, then it's a freight train
+  // Bull REMOVED — too big to hit cleanly, too aggressive. (The bear still
+  // borrows the Bull rig via PREFAB_FILE below, so the model still loads.)
   Bear:  { n: 3, speed: 2.6, gallop: 9.4,  hp: 9, flee: 0,  r: 2.0,
            keen: 1.0,  aggroBias: 0.7,
            hpJit: true, gait: 'bound', bearish: true,
