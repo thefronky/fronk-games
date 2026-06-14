@@ -2035,6 +2035,39 @@ for (const lm of LANDMARKS) {
 window._landmarks = LANDMARKS;
 let lmCheckT = 0;
 
+// ── quivers at the camps ── ammo is scarce; the dead left arrows behind.
+// Walk up to a camp's quiver and take what's in it (one-time). 3/5/7.
+const QUIVERS = []; window._quivers = QUIVERS;
+function buildQuiver(n) {
+  const g = new THREE.Group();
+  const pouch = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.13, 0.8, 7),
+    new THREE.MeshStandardMaterial({ color: 0x5b3a1e, roughness: 1 }));
+  pouch.position.y = 0.4; pouch.rotation.z = 0.32; g.add(pouch);
+  const FLET = [0xff5a7a, 0x6ad0ff, 0xfff0a8];
+  for (let i = 0; i < Math.min(5, Math.max(3, n)); i++) {
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.9, 4),
+      new THREE.MeshStandardMaterial({ color: 0x9a886a, roughness: 0.8 }));
+    shaft.position.set((i - 2) * 0.04 + 0.18, 0.78, (i % 2) * 0.05);
+    shaft.rotation.z = 0.32 + (i - 2) * 0.04; g.add(shaft);
+    const fl = new THREE.Mesh(new THREE.ConeGeometry(0.03, 0.12, 4),
+      new THREE.MeshStandardMaterial({ color: FLET[i % 3], roughness: 0.6,
+        emissive: FLET[i % 3], emissiveIntensity: 0.25 }));
+    fl.position.set((i - 2) * 0.04 + 0.32, 1.16, (i % 2) * 0.05); fl.rotation.z = 0.32; g.add(fl);
+  }
+  return g;
+}
+{
+  const CAMP_QUIVERS = { camp_trapper: 7, camp_ruffled: 5, camp_cold: 3, camp_leanto: 5 };
+  for (const lm of LANDMARKS) {
+    const n = CAMP_QUIVERS[lm.id]; if (!n) continue;
+    const qx = lm.x + 1.8, qz = lm.z + 1.4;
+    const gy = heightAt(qx, qz);
+    const mesh = buildQuiver(n); mesh.position.set(qx, gy, qz);
+    scene.add(mesh);
+    QUIVERS.push({ x: qx, z: qz, n, taken: false, mesh });
+  }
+}
+
 // ── scattered wild fires ── the only honest light once it's truly dark.
 // A bush that caught, a tree the lightning split and lit. They pool warm
 // light across the black map — beautiful to navigate by, and the
@@ -2708,9 +2741,15 @@ function animalUpdate(a, dt) {
       }
       const dd = Math.hypot(player.x - a.obj.position.x, player.z - a.obj.position.z);
       if (dd < 2.4) {
+        const firstTake = !a.eaten;
         a.eaten = true; a.t = Math.min(a.t, 9);
         player.lastAte = clock.elapsedTime;
         bloodedUntil = clock.elapsedTime + 90;   // the opening gets on you
+        if (firstTake) {
+          gutCarcass(a);                          // opened up, blood all around
+          if (a._stuck) { player.arrows = Math.min(ARROW_MAX, player.arrows + a._stuck);
+            a._stuck = 0; renderNotes(); }        // your arrows come back with the meat
+        }
         if (!saidBlooded) {
           saidBlooded = true;
           setTimeout(() => toast('You smell like the inside of something now.', 4600), 4800);
@@ -2728,7 +2767,10 @@ function animalUpdate(a, dt) {
         } else toast('You can carry no more. Whatever follows you gets the rest.');
       }
     }
-    if (a.t <= 0) { scene.remove(a.obj); animals.splice(animals.indexOf(a), 1); spawn(a.name); }
+    if (a.t <= 0) {
+      if (a._gore) { for (const g of a._gore) scene.remove(g); a._gore = null; }
+      scene.remove(a.obj); animals.splice(animals.indexOf(a), 1); spawn(a.name);
+    }
     return;
   }
   const p = a.obj.position;
@@ -3267,6 +3309,37 @@ const VOICE = {
              'You made it slow. Somewhere, that is being written down.'],
 };
 
+// ── gut pile ── walk over a kill and take the meat: the body opens up and
+// blood pools around it, so a harvested carcass READS as worked, not just
+// a sleeping animal. Shared geo/mats; the gore is removed with the carcass.
+const _goreGeo = new THREE.CircleGeometry(1, 12);
+const _goreMat = new THREE.MeshStandardMaterial({ color: 0x430b07, roughness: 0.75,
+  transparent: true, opacity: 0.92, polygonOffset: true, polygonOffsetFactor: -1 });
+const _gutGeo = new THREE.IcosahedronGeometry(0.18, 0);
+const _gutMat = new THREE.MeshStandardMaterial({ color: 0x6e1410, roughness: 0.6,
+  emissive: 0x2a0604, emissiveIntensity: 0.3 });
+function gutCarcass(a) {
+  if (a._gore) return;
+  const p = a.obj.position, gy = heightAt(p.x, p.z) + 0.04;
+  const sc = (a.cfg.r || 1) * 1.7;
+  const gore = [];
+  const pool = new THREE.Mesh(_goreGeo, _goreMat);
+  pool.rotation.x = -Math.PI / 2; pool.rotation.z = Math.random() * Math.PI;
+  pool.position.set(p.x, gy, p.z);
+  pool.scale.set(sc * (0.8 + Math.random() * 0.4), sc * (0.8 + Math.random() * 0.4), 1);
+  scene.add(pool); gore.push(pool);
+  for (let i = 0; i < 4; i++) {                  // a few wet gut blobs scattered
+    const b = new THREE.Mesh(_gutGeo, _gutMat);
+    const an = Math.random() * Math.PI * 2, rr = Math.random() * sc * 0.55;
+    b.position.set(p.x + Math.cos(an) * rr, gy + 0.06, p.z + Math.sin(an) * rr);
+    b.scale.set(0.5 + Math.random() * 0.7, 0.4 + Math.random() * 0.4, 0.5 + Math.random() * 0.7);
+    scene.add(b); gore.push(b);
+  }
+  a._gore = gore;
+  a.obj.scale.y *= 0.8;                          // the body slumps open
+  if (audio.impact) audio.impact('flesh', 0.1);
+}
+
 function killAnimal(a, suffered = false) {
   a.dead = true; a.t = 75;   // carcasses linger — long enough for scavengers
   a.suffered = suffered || !!a.bleeding || a.state === 'wounded';
@@ -3443,7 +3516,8 @@ scene.add(canoe);
 // wake looking UP at the sky (orange→blue), not forced down
 const SPAWN = { x: 0, z: 26, yaw: Math.PI, pitch: 0.5 };
 const player = { x: SPAWN.x, z: SPAWN.z, yaw: SPAWN.yaw, pitch: SPAWN.pitch,
-                 hp: 100, lastHit: -99, meat: 0, stored: 0, lastAte: 0 };
+                 hp: 100, lastHit: -99, meat: 0, stored: 0, lastAte: 0, arrows: 10 };
+const ARROW_MAX = 30;   // a full quiver
 window._player = player;
 player.y = heightAt(player.x, player.z);
 const score = {};
@@ -3567,6 +3641,41 @@ function baseUpdate(t, dt) {
   else toast(player.stored + ' put away.', 2600);
 }
 
+// ── pick your ammo back up ── walk over a stuck arrow to recover it. One
+// in the ground is easy; one buried in a trunk up high needs a JUMP (your
+// hands rise with you). Arrows in a carcass come back when you harvest it.
+function arrowPickup() {
+  if (player.arrows >= ARROW_MAX) return;
+  const handY = player.y + 1.3;
+  let got = 0;
+  for (let i = arrows.length - 1; i >= 0; i--) {
+    const a = arrows[i];
+    if (!a.stuck) continue;
+    const p = a.m.position;
+    if (Math.hypot(p.x - player.x, p.z - player.z) > 2.2) continue;
+    if (Math.abs(p.y - handY) > 1.7) continue;        // too high — jump to reach it
+    scene.remove(a.m); arrows.splice(i, 1);
+    player.arrows = Math.min(ARROW_MAX, player.arrows + 1);
+    got++;
+    if (player.arrows >= ARROW_MAX) break;
+  }
+  if (got) { renderNotes(); if (audio.impact) audio.impact('wood', 0.15);
+    toast('Arrow recovered. (' + player.arrows + ')', 1400); }
+}
+
+// ── camp quivers ── a one-time cache of arrows at each camp
+function quiverPickup() {
+  for (const q of QUIVERS) {
+    if (q.taken) continue;
+    if (Math.hypot(player.x - q.x, player.z - q.z) > 2.4) continue;
+    q.taken = true; q.mesh.visible = false;
+    player.arrows = Math.min(ARROW_MAX, player.arrows + q.n);
+    renderNotes();
+    if (audio.stinger) audio.stinger();
+    toast('A quiver — ' + q.n + ' arrows.', 3200);
+  }
+}
+
 function hurtPlayer(dmg) {
   if (dead) return;
   player.hp -= dmg; player.lastHit = clock.elapsedTime;
@@ -3598,7 +3707,7 @@ function hurtPlayer(dmg) {
 // gravity, no drag, long lifetime so far shots actually land.
 const ARROW_SPEED_BASE = 42, ARROW_SPEED_DRAW = 44;   // ≈86 m/s full draw — rifle-flat at range
 const ARROW_GRAVITY = 8.4;   // flatter, readable drop
-const ARROW_LIFE = 14, ARROW_STUCK_LIFE = 14;
+const ARROW_LIFE = 14, ARROW_STUCK_LIFE = 150;   // stuck arrows linger — they're ammo to recover
 
 const arrows = [];
 window._arrows = arrows;   // test hook
@@ -3667,6 +3776,12 @@ const _streakMat = new THREE.MeshBasicMaterial({
 function loose() {
   const power = Math.min(1, drawT);
   if (power < 0.04) { drawT = 0; return; }   // a true non-draw, ignore
+  if (player.arrows <= 0) {                   // out of ammo — dry, go collect some
+    drawT = 0; if (audio.drawCreak) audio.drawCreak(0);
+    toast('Out of arrows. Pull them from where they landed.', 3600);
+    return;
+  }
+  player.arrows--; renderNotes();
   // speed scales STEEPLY with how far you pulled: a flick (~0.1) limps out
   // at ~9 m/s and drops in front of you; a full draw rips at ~96 m/s.
   const speed = 6 + Math.pow(power, 1.5) * 66;   // strong at full draw, not map-crossing
@@ -4359,15 +4474,17 @@ function toast(msg, ms = 2600) {
 }
 function pick(arr) { return arr[Math.random() * arr.length | 0]; }
 function renderNotes() {
-  // no scores, no counters — the meat you carry as solid marks, and the
-  // meat laid by at the base as hollow ones. Quiet progress.
-  const carried = '◆'.repeat(player.meat);
+  // arrows you have on hand (you feel it when it's low), the meat you carry
+  // as solid marks, and the meat laid by at the base as hollow ones.
+  const lowCls = player.arrows <= 3 ? ' class="low"' : '';
+  const ammo = '<span class="ammo"' + lowCls + '>➤ ' + player.arrows + '</span>';
+  const carried = player.meat ? '  ' + '◆'.repeat(player.meat) : '';
   const kept = player.stored > 0
-    ? (player.meat ? ' ' : '') + '<span class="kept">'
+    ? '  <span class="kept">'
       + (player.stored > 8 ? '◇×' + player.stored : '◇'.repeat(player.stored))
       + '</span>'
     : '';
-  document.getElementById('notes').innerHTML = carried + kept;
+  document.getElementById('notes').innerHTML = ammo + carried + kept;
 }
 function renderHP() {
   document.getElementById('hpfill').style.width = Math.max(0, player.hp) + '%';
@@ -4698,6 +4815,9 @@ function tickBody() {
     if (meatCache) cacheUpdate(t);
     // lay meat by at the cove
     baseUpdate(t, dt);
+    // pick up spent arrows you walk over (jump to reach the high ones)
+    arrowPickup();
+    quiverPickup();
 
     // dawn relief — the night ends and you are still in it
     if (night > 0.65) sawNight = true;
