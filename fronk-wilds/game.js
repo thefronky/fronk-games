@@ -799,6 +799,29 @@ function mergeGeoms(list) {
 
   const treeMat = new THREE.MeshStandardMaterial({ vertexColors: true,
     roughness: 1, emissive: 0x16240e, emissiveIntensity: 0.55 });
+  // ── WIND ── pivot-from-base canopy sway. Reuses windUniforms.uTime
+  // (already ticked once/frame — zero extra JS). Pure vertex displacement
+  // in onBeforeCompile: no new geometry, no per-frame allocation.
+  //   bendY = (localY/H)^1.6 * amp  → 0 at trunk base, max at the crown,
+  //           so trunks stay planted and tops lean/flow.
+  //   ph    = per-instance phase from the instance world translation
+  //           (instanceMatrix[3][0/2]) → each tree ripples on its own clock.
+  //   gust  = slow global swell over uTime layered on the local sway, so the
+  //           whole forest surges together between lulls.
+  // H≈12 (tallest canopy ~y=12). amp in *local* units; instance scale (0.8–1.9)
+  // multiplies it for free, so big trees sway proportionally more.
+  const treeWind = (amp, sideAmp) => (sh) => {
+    sh.uniforms.uTime = windUniforms.uTime;
+    sh.vertexShader = 'uniform float uTime;\n' + sh.vertexShader.replace('#include <begin_vertex>',
+      `#include <begin_vertex>
+       float wH = clamp(position.y / 12.0, 0.0, 1.0);
+       float bendY = pow(wH, 1.6) * ${amp.toFixed(2)};
+       float ph = instanceMatrix[3][0]*0.07 + instanceMatrix[3][2]*0.05;
+       float gust = 0.55 + 0.45*sin(uTime*0.27 + instanceMatrix[3][0]*0.012);
+       transformed.x += (sin(uTime*0.95 + ph) + 0.3*sin(uTime*2.3 + ph*1.7)) * bendY * gust;
+       transformed.z += cos(uTime*0.8 + ph*1.3) * bendY * ${sideAmp.toFixed(2)} * gust;`);
+  };
+  treeMat.onBeforeCompile = treeWind(0.85, 0.7);
   const species = [
     { geo: pineGeo,  inst: new THREE.InstancedMesh(pineGeo, treeMat, CFG.trees), n: 0, r: 1.1 },
     { geo: broadGeo, inst: new THREE.InstancedMesh(broadGeo, treeMat, CFG.trees), n: 0, r: 1.2 },
@@ -877,9 +900,23 @@ function mergeGeoms(list) {
     }
     bushGeo.setAttribute('color', new THREE.BufferAttribute(col, 3));
   }
-  const bushes = new THREE.InstancedMesh(bushGeo,
-    new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1,
-      emissive: 0x121f0a, emissiveIntensity: 0.5 }), CFG.bushes);
+  const bushMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1,
+    emissive: 0x121f0a, emissiveIntensity: 0.5 });
+  // ── WIND ── undergrowth flutter. Bush geo tops out ~y=1.7 (local), so a
+  // small amp reads as a quick rustle vs the trees' slow lean. Reeds (wetland
+  // bushes) are y-stretched 2-4x, so their tall blades naturally swing more
+  // (bendY scales with local y). Same windUniforms.uTime, per-instance phase.
+  bushMat.onBeforeCompile = (sh) => {
+    sh.uniforms.uTime = windUniforms.uTime;
+    sh.vertexShader = 'uniform float uTime;\n' + sh.vertexShader.replace('#include <begin_vertex>',
+      `#include <begin_vertex>
+       float bendY = position.y * 0.10;
+       float ph = instanceMatrix[3][0]*0.21 + instanceMatrix[3][2]*0.17;
+       float gust = 0.6 + 0.4*sin(uTime*0.3 + instanceMatrix[3][2]*0.015);
+       transformed.x += (sin(uTime*1.6 + ph) + 0.3*sin(uTime*3.1 + ph*1.6)) * bendY * gust;
+       transformed.z += cos(uTime*1.2 + ph) * bendY * 0.6 * gust;`);
+  };
+  const bushes = new THREE.InstancedMesh(bushGeo, bushMat, CFG.bushes);
   bushes.castShadow = true;
   const BUSH_NEUTRAL = new THREE.Color(1, 1, 1);
   const REED_TINT = new THREE.Color(0xb6c47a);   // pale damp reed multiply
@@ -957,6 +994,28 @@ function mergeGeoms(list) {
     emissive: 0x14160e, emissiveIntensity: 0.35 });
   const stoneMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1,
     emissive: 0x0a0b0d, emissiveIntensity: 0.25 });
+  // ── WIND ── only the foliage props get sway; logs/stumps/boulders/stones
+  // stay dead-rigid (they're wood-on-ground / rock) and keep propMat/stoneMat.
+  // Dedicated clones so the rigid props sharing propMat are untouched.
+  //   cattails — reeds, lakeside: sway A LOT (tall thin blades, local y to 2.2).
+  //   snags    — dead bare trunks: sway A LITTLE (creak, not bend).
+  // Both reuse windUniforms.uTime + per-instance phase + a slow gust swell.
+  const propWind = (amp, sideAmp) => (sh) => {
+    sh.uniforms.uTime = windUniforms.uTime;
+    sh.vertexShader = 'uniform float uTime;\n' + sh.vertexShader.replace('#include <begin_vertex>',
+      `#include <begin_vertex>
+       float bendY = position.y * position.y * ${amp.toFixed(3)};
+       float ph = instanceMatrix[3][0]*0.18 + instanceMatrix[3][2]*0.15;
+       float gust = 0.6 + 0.4*sin(uTime*0.31 + instanceMatrix[3][0]*0.014);
+       transformed.x += (sin(uTime*1.5 + ph) + 0.35*sin(uTime*3.0 + ph*1.6)) * bendY * gust;
+       transformed.z += cos(uTime*1.1 + ph) * bendY * ${sideAmp.toFixed(2)} * gust;`);
+  };
+  const cattailMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1,
+    emissive: 0x14160e, emissiveIntensity: 0.35 });
+  cattailMat.onBeforeCompile = propWind(0.16, 0.7);   // reeds whip
+  const snagMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1,
+    emissive: 0x14160e, emissiveIntensity: 0.35 });
+  snagMat.onBeforeCompile = propWind(0.012, 0.6);     // dead wood barely creaks
 
   // --- geometry builders (each merged ONCE, then instanced) ---
   // FALLEN LOG — long cylinder on its side, mossy top.
@@ -1036,8 +1095,8 @@ function mergeGeoms(list) {
   const logsM = new THREE.InstancedMesh(logGeo, propMat, N_LOGS);
   const stumpsM = new THREE.InstancedMesh(stumpGeo, propMat, N_STUMPS);
   const bouldersM = new THREE.InstancedMesh(boulderGeo, stoneMat, N_BOULDERS);
-  const snagsM = new THREE.InstancedMesh(snagGeo, propMat, N_SNAGS);
-  const cattailsM = new THREE.InstancedMesh(cattailGeo, propMat, N_CATTAILS);
+  const snagsM = new THREE.InstancedMesh(snagGeo, snagMat, N_SNAGS);
+  const cattailsM = new THREE.InstancedMesh(cattailGeo, cattailMat, N_CATTAILS);
   const stonesM = new THREE.InstancedMesh(standingStoneGeo, stoneMat, N_STONES);
   [logsM, stumpsM, bouldersM, snagsM, cattailsM, stonesM].forEach(m => {
     m.castShadow = true; scene.add(m);
