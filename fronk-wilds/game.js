@@ -248,6 +248,50 @@ function heightAt(x, z) {
   return a;
 }
 
+// ───────────────────────── biome regions ─────────────────────────
+// Distinct AREAS so exploration has variety. Cheap zoning by world
+// position + distance-from-anchors (terrain is already composed, so we
+// just label what's there). Returns a region id; the terrain colorer
+// lerps toward each region's palette and the spawners bias species &
+// density. Readable from a distance is the whole point — the owner
+// wants to SEE different places.
+const REGION = {
+  MEADOW:   0,   // spawn — bright lush green, flowers, sparse trees
+  PINE:     1,   // NW quadrant — dark blue-green floor, dense pines
+  AUTUMN:   2,   // SE quadrant — rust ground + warm broadleaf canopy
+  ALPINE:   3,   // NE massif — pale rocky grass, sparse hardy pines
+  WETLAND:  4,   // SW lakeshore — damp dark ground, reeds + bushes
+};
+// per-region ground palettes (lerped INTO the base terrain color so
+// altitude/water/snow logic still wins where it matters)
+const REGION_GROUND = {
+  0: new THREE.Color(0x6fa238),  // meadow — vivid lush green
+  1: new THREE.Color(0x2f5238),  // pine — deep blue-green
+  2: new THREE.Color(0x8a5a2c),  // autumn — warm rust
+  3: new THREE.Color(0x9aa07e),  // alpine — pale dry grass
+  4: new THREE.Color(0x46603a),  // wetland — dark damp olive
+};
+// how hard the region tint pulls the base color (0..1)
+const REGION_TINT = { 0: 0.55, 1: 0.6, 2: 0.6, 3: 0.45, 4: 0.55 };
+
+function regionAt(x, z) {
+  // anchors match heightAt's composed features
+  const dMeadow = Math.hypot(x - 0, z - 26);     // spawn clearing
+  const dAlpine = Math.hypot(x - 235, z - 235);  // NE massif
+  const dLake   = Math.hypot(x - 70, z + 90);    // SW lake basin
+  // strong overrides first
+  if (dMeadow < 95) return REGION.MEADOW;
+  if (dAlpine < 230) return REGION.ALPINE;
+  if (dLake < 150) return REGION.WETLAND;
+  // quadrant fill for the rest of the world
+  if (x < 0 && z > 0) return REGION.PINE;        // NW
+  if (x > 0 && z < 0) return REGION.AUTUMN;      // SE
+  // NW-ish leftovers (x<0,z<0) lean wetland-adjacent → pine; SE-ish → autumn
+  return z > 0 ? REGION.PINE : REGION.AUTUMN;
+}
+window._region = regionAt;
+window._REGION = REGION;
+
 {
   const segs = CFG.segs;
   const g = new THREE.PlaneGeometry(WORLD, WORLD, segs, segs);
@@ -262,6 +306,11 @@ function heightAt(x, z) {
     pos.setY(i, y);
     const t = vnoise(x * 0.02, z * 0.02);
     let c = grassC.clone().lerp(dryC, t * 0.9);
+    // bias the grassy base toward this vertex's region BEFORE the
+    // altitude special-cases — so meadows read lush, pine reads deep,
+    // autumn reads rust, etc. Water/snow/high-rock still override below.
+    const reg = regionAt(x, z);
+    c.lerp(REGION_GROUND[reg], REGION_TINT[reg]);
     const snowLine = 50 + (t - 0.5) * 12;
     if (y < WATER_Y + 0.45) c = sandC.clone();
     else if (y < WATER_Y + 1.0) c = sandC.clone()
@@ -269,7 +318,10 @@ function heightAt(x, z) {
     else if (y > snowLine) c = new THREE.Color(0xe7edf4)
       .lerp(rockC, Math.max(0, 1 - (y - snowLine) / 10) * 0.5);
     else if (y > 26) c = rockC.clone()
-      .lerp(dirtC, vnoise(x * 0.05, z * 0.05) * 0.3);
+      .lerp(dirtC, vnoise(x * 0.05, z * 0.05) * 0.3)
+      // alpine rock gets a touch of pale-grass so the massif still
+      // reads as its own zone, not generic gray
+      .lerp(REGION_GROUND[REGION.ALPINE], reg === REGION.ALPINE ? 0.22 : 0);
     else if (y > 19) c = c.lerp(rockC, (y - 19) / 7);
     else if (t > 0.86) c = c.lerp(dirtC, 0.3);
     // micro variation — kills the flat "planes" look up close
@@ -526,6 +578,9 @@ function mergeGeoms(list) {
     { geo: birchGeo, inst: new THREE.InstancedMesh(birchGeo, treeMat, CFG.trees), n: 0, r: 0.6 },
   ];
   species.forEach(s => { s.inst.castShadow = true; scene.add(s.inst); });
+  // neutral white = pass geometry vertex-colors through untouched
+  // (instanceColor multiplies vColors on a vertexColors material)
+  const AUTUMN_NEUTRAL = new THREE.Color(1, 1, 1);
 
   const M = new THREE.Matrix4(), Q = new THREE.Quaternion(),
         S = new THREE.Vector3(), P = new THREE.Vector3(), E = new THREE.Euler();
@@ -537,11 +592,38 @@ function mergeGeoms(list) {
           y = heightAt(x, z);
     if (y < WATER_Y + 1.5 || y > 26) continue;      // treeline at 26
     if (Math.hypot(x, z) < 18) continue;            // spawn clearing
+    const reg = regionAt(x, z);
+    // density gating per region — bias WHERE trees clump without
+    // touching the spawner mechanics. reject-sample to thin/thicken.
+    // (pine 1, broadleaf 0, birch 2 in species[])
+    const dens = reg === REGION.MEADOW ? 0.22
+               : reg === REGION.ALPINE ? 0.5
+               : reg === REGION.WETLAND ? 0.4
+               : reg === REGION.PINE ? 1.0
+               : 0.95;                               // autumn
+    if (Math.random() > dens) continue;
     const roll = Math.random();
     let sp;
-    if (y < 8)       sp = roll < 0.45 ? species[1] : roll < 0.75 ? species[0] : species[2];
+    if (reg === REGION.PINE)           sp = roll < 0.82 ? species[0] : roll < 0.92 ? species[1] : species[2];
+    else if (reg === REGION.AUTUMN)    sp = roll < 0.78 ? species[1] : roll < 0.9 ? species[2] : species[0];
+    else if (reg === REGION.ALPINE)    sp = species[0];           // hardy pines only
+    else if (reg === REGION.WETLAND)   sp = roll < 0.5 ? species[1] : species[2]; // damp broadleaf + birch
+    else if (reg === REGION.MEADOW)    sp = roll < 0.55 ? species[1] : species[2]; // lone broadleaf/birch
+    // fallback to the original altitude bands for anything unlabeled
+    else if (y < 8)  sp = roll < 0.45 ? species[1] : roll < 0.75 ? species[0] : species[2];
     else if (y < 14) sp = roll < 0.65 ? species[0] : roll < 0.9 ? species[1] : species[2];
     else             sp = species[0];
+    // recolor autumn broadleaf via instance color — a warm multiply
+    // tint (instanceColor multiplies the geometry vColors) so the
+    // grove's canopy shifts orange/rust and reads as fall from afar.
+    // Trunk goes a warmer brown too, which is fine. Everyone else gets
+    // neutral white so their baked vertex colors pass through unchanged.
+    if (reg === REGION.AUTUMN && sp === species[1]) {
+      sp.inst.setColorAt(sp.n, new THREE.Color().setHSL(
+        0.055 + Math.random() * 0.04, 0.85, 0.66 + Math.random() * 0.12));
+    } else {
+      sp.inst.setColorAt(sp.n, AUTUMN_NEUTRAL);
+    }
     P.set(x, y - 0.15, z);
     E.set(0, Math.random() * Math.PI * 2, 0); Q.setFromEuler(E);
     const s = 0.8 + Math.random() * 1.1; S.set(s, s, s);
@@ -549,7 +631,10 @@ function mergeGeoms(list) {
     TREES.push({ x, z, r: sp.r * s });
     placed++;
   }
-  species.forEach(s => { s.inst.count = s.n; });
+  species.forEach(s => {
+    s.inst.count = s.n;
+    if (s.inst.instanceColor) s.inst.instanceColor.needsUpdate = true;
+  });
 
   // bushes — undergrowth that breaks sightlines. COVER, not collision.
   const bu1 = new THREE.IcosahedronGeometry(1.0, 0); bu1.translate(0, 0.7, 0);
@@ -569,6 +654,8 @@ function mergeGeoms(list) {
     new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1,
       emissive: 0x121f0a, emissiveIntensity: 0.5 }), CFG.bushes);
   bushes.castShadow = true;
+  const BUSH_NEUTRAL = new THREE.Color(1, 1, 1);
+  const REED_TINT = new THREE.Color(0xb6c47a);   // pale damp reed multiply
   window.BUSHES = [];
   placed = 0; guard = 0;
   while (placed < CFG.bushes && guard++ < CFG.bushes * 30) {
@@ -577,14 +664,36 @@ function mergeGeoms(list) {
           y = heightAt(x, z);
     if (y < WATER_Y + 1 || y > 22) continue;
     if (Math.hypot(x, z) < 14) continue;
+    const reg = regionAt(x, z);
+    // undergrowth density by region — pine floor stays open ("little
+    // undergrowth light"), wetland & autumn thicken, meadow sparse.
+    const bdens = reg === REGION.PINE ? 0.35
+                : reg === REGION.MEADOW ? 0.5
+                : reg === REGION.ALPINE ? 0.4
+                : reg === REGION.WETLAND ? 1.2     // >1 = no rejection, reeds cluster
+                : 0.9;                              // autumn
+    if (Math.random() > bdens) continue;
     P.set(x, y - 0.1, z);
     E.set(0, Math.random() * Math.PI * 2, (Math.random() - 0.5) * 0.15);
     Q.setFromEuler(E);
-    const s = 0.7 + Math.random() * 1.3; S.set(s, s * (0.7 + Math.random() * 0.5), s);
+    let s, rr;
+    if (reg === REGION.WETLAND) {
+      // reeds — tall + thin: squeeze x/z, stretch y
+      s = 0.5 + Math.random() * 0.5;
+      S.set(s * 0.4, s * (2.2 + Math.random() * 1.4), s * 0.4);
+      bushes.setColorAt(placed, REED_TINT);
+      rr = 0.5 * s;                                // thin footprint for cover
+    } else {
+      s = 0.7 + Math.random() * 1.3;
+      S.set(s, s * (0.7 + Math.random() * 0.5), s);
+      bushes.setColorAt(placed, BUSH_NEUTRAL);
+      rr = 1.3 * s;
+    }
     bushes.setMatrixAt(placed++, M.compose(P, Q, S));
-    BUSHES.push({ x, z, r: 1.3 * s });
+    BUSHES.push({ x, z, r: rr });
   }
   bushes.count = placed;
+  if (bushes.instanceColor) bushes.instanceColor.needsUpdate = true;
   scene.add(bushes);
 
   const rg = new THREE.DodecahedronGeometry(1.1, 0);
