@@ -183,13 +183,15 @@ const sky = new THREE.Mesh(
         float dayGlow = 1.0 - night;
         col += vec3(1.0, 0.58, 0.26) * pow(s, 220.0) * 1.7 * dayGlow;
         col += vec3(1.0, 0.42, 0.20) * pow(s, 6.0) * 0.36 * dayGlow;
-        // procedural stars, twinkling, night only
-        if (night > 0.02 && dir.y > -0.02) {
+        // procedural stars, twinkling. Full at night, but a FEW faint ones
+        // also linger high in the blue even at golden hour / on waking.
+        float starVis = max(night, smoothstep(0.4, 0.85, dir.y) * 0.5);
+        if (starVis > 0.02 && dir.y > -0.02) {
           vec3 cell = floor(dir * 160.0);
           float hsh = fract(sin(dot(cell, vec3(127.1, 311.7, 74.7))) * 43758.5453);
           if (hsh > 0.9962) {
             float tw = 0.55 + 0.45 * sin(uT * (1.5 + fract(hsh * 91.0) * 3.0) + hsh * 40.0);
-            col += vec3(0.9, 0.93, 1.0) * tw * night * pow(fract(hsh * 137.0), 0.6);
+            col += vec3(0.9, 0.93, 1.0) * tw * starVis * pow(fract(hsh * 137.0), 0.6);
           }
           // soft milky band for depth
           float band = pow(max(0.0, 1.0 - abs(dot(dir, normalize(vec3(0.5, 0.22, -0.8)))) * 1.6), 3.0);
@@ -2119,6 +2121,40 @@ function buildPsyMush() {
   };
   place(IS_TOUCH ? 14 : 20, buildBerry, 'berry');
   place(IS_TOUCH ? 6 : 9, buildPsyMush, 'mush');
+}
+
+// ── the lights ── pale wisps that only show in the deep dark, drifting
+// slow over the valley. Walk toward one and it drifts away — you can never
+// quite reach it. No explanation. (Outer-Wilds curiosity, wholly wordless.)
+const WISPS = []; window._wisps = WISPS;
+{
+  for (let i = 0; i < (IS_TOUCH ? 4 : 6); i++) {
+    const g = new THREE.Group();
+    const core = new THREE.Mesh(new THREE.SphereGeometry(0.16, 8, 6),
+      new THREE.MeshBasicMaterial({ color: 0xcdecff, transparent: true, opacity: 0 }));
+    g.add(core);
+    const light = new THREE.PointLight(0x9fd8ff, 0, 11, 2); g.add(light);
+    const x = (Math.random() - 0.5) * WORLD * 0.7, z = (Math.random() - 0.5) * WORLD * 0.7;
+    g.position.set(x, heightAt(x, z) + 1.8, z);
+    scene.add(g);
+    WISPS.push({ g, core, light, vx: 0, vz: 0, ph: Math.random() * 6.28 });
+  }
+}
+function wispUpdate(t, dt, night) {
+  const vis = Math.max(0, (night - 0.4) / 0.6);     // only once it's truly dark
+  for (const w of WISPS) {
+    const p = w.g.position;
+    w.vx += (Math.sin(t * 0.3 + w.ph) * 0.6 - w.vx) * dt;     // slow aimless drift
+    w.vz += (Math.cos(t * 0.23 + w.ph * 1.3) * 0.6 - w.vz) * dt;
+    const dx = p.x - player.x, dz = p.z - player.z, d = Math.hypot(dx, dz);
+    if (d < 16 && d > 0.1) { const f = (16 - d) / 16 * 1.8; w.vx += dx / d * f; w.vz += dz / d * f; }  // recedes
+    const lim = WORLD * 0.46;
+    p.x = Math.max(-lim, Math.min(lim, p.x + w.vx * dt));
+    p.z = Math.max(-lim, Math.min(lim, p.z + w.vz * dt));
+    p.y = heightAt(p.x, p.z) + 1.7 + Math.sin(t * 0.8 + w.ph) * 0.6;
+    w.core.material.opacity = vis * (0.45 + 0.45 * Math.sin(t * 1.6 + w.ph));
+    w.light.intensity = vis * 1.5;
+  }
 }
 
 // ── scattered wild fires ── the only honest light once it's truly dark.
@@ -4486,8 +4522,8 @@ const LINES2 = {
 "nightFall": [
 "Light's going.",
 "Dark coming on. Stay sharp.",
-"Sun quits early here.",
-"Dusk. Things wake up now."
+"I'm not the only one hungry out here.",
+"Dusk. Everything's hungry now."
 ],
 "dawn": [
 "Morning. Made it.",
@@ -4663,6 +4699,7 @@ function tickBody() {
   farDisc.position.x = player.x; farDisc.position.z = player.z;
   landmarkUpdate(dt, t);
   updateWildfires(t, night);
+  if (started) wispUpdate(t, dt, night);
   if (window._cloudMat) {
     window._cloudMat.color.setHex(0xf0dcc2).lerp(_CLOUD_NIGHT, night);
     window._cloudMat.opacity = 0.88 - night * 0.55;
@@ -5111,10 +5148,11 @@ function tickBody() {
       if (looked) {
         _revealStep = 1;
         if (IS_TOUCH) bc.add('show-move');
+        if (audio.cue) audio.cue(0);
         cinematic('getting hungry….', 4600);   // the one and only opening line
       }
-    } else if (_revealStep === 1 && dB > 7) { _revealStep = 2; if (IS_TOUCH) bc.add('show-jump'); }
-    else if (_revealStep === 2 && dB > 11.5) { _revealStep = 3; if (IS_TOUCH) bc.add('show-bow'); }
+    } else if (_revealStep === 1 && dB > 7) { _revealStep = 2; if (IS_TOUCH) bc.add('show-jump'); if (audio.cue) audio.cue(1); }
+    else if (_revealStep === 2 && dB > 11.5) { _revealStep = 3; if (IS_TOUCH) bc.add('show-bow'); if (audio.cue) audio.cue(2); }
   }
   // kill-feel hitstop: a connected arrow holds the world at 5% speed
   // for a few real frames (0.04s flesh / 0.09s lethal). No setTimeout —

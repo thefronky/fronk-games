@@ -746,6 +746,21 @@ export class AudioEngine {
     ld.connect(lg).connect(bus); ld.start(t + 0.12); ld.stop(t + 1.6);
   }
 
+  // a soft UI cue — used as each control reveals (ascending 1-2-3 pack)
+  cue(step = 0) {
+    if (!this.started || this.muted) return;
+    const C = this.ctx, t = C.currentTime;
+    const hz = [294, 392, 523, 659][step % 4];   // D4 G4 C5 E5 — rising
+    const o = C.createOscillator(); o.type = 'triangle'; o.frequency.value = hz;
+    const o2 = C.createOscillator(); o2.type = 'sine'; o2.frequency.value = hz * 2;
+    const g = C.createGain(), g2 = C.createGain(); g2.gain.value = 0.3;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.12, t + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.7);
+    o.connect(g).connect(this.master); o2.connect(g2).connect(g);
+    o.start(t); o2.start(t); o.stop(t + 0.75); o2.stop(t + 0.75);
+  }
+
   // ── breath ── one inhale→exhale, scaled by exertion L (0..1). Heavier
   // and faster the higher L. Driven by the scheduler in update().
   _breathCycle(L) {
