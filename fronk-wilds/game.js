@@ -3753,12 +3753,15 @@ function beginIntro() {               // arm the wake-up for a fresh life
   setLids(0, 0);
   bow.position.set(0.34, -1.35, -0.62);   // off the bottom of the screen
   if (camera.fov !== 70) { camera.fov = 70; camera.updateProjectionMatrix(); }
+  // the breath of coming alive — a deep gasp that swells AS the eyes open
+  if (audio.wakeBreath) audio.wakeBreath();
+  else if (audio.breath) audio.breath();
 }
 function endIntro() {                  // hand control to the player
   intro = false;
   setLids(-100, 0);                   // eyes fully open, glow gone
   player.pitch = SPAWN.pitch;         // wake looking at the sky — and STAY there
-  if (audio.breath) audio.breath();   // the breath-in of waking
+  // (the waking breath already fired at beginIntro, synced to the eyes opening)
   // NO text, NO buttons yet. Just the sky. The reveal waits for the
   // player to look around on their own (handled in the reveal block).
 }
@@ -5345,14 +5348,31 @@ loadAnimals().then(() => {
 // theme over the slow aerial of CONSUME (autoplay needs that first gesture);
 // a second tap, or ~6.5s of letting it swell, dives in and fades the music.
 let titleArmed = false, titleArmT = 0;
+// the cinematic theme should be playing the instant Fronk touches anything —
+// browsers block audio until a gesture, so the FIRST contact anywhere on the
+// page wakes it. The title keeps orbiting; the music swells over it.
+function startTitleMusic() {
+  if (titleArmed || launching || started) return;
+  titleArmed = true; titleArmT = clock.elapsedTime;
+  try { audio.start(); if (audio.titleTheme) audio.titleTheme(); } catch (e) {}
+}
 function onTitleTap() {
   if (launching || started) return;
-  if (!titleArmed) {
-    titleArmed = true; titleArmT = clock.elapsedTime;
-    try { audio.start(); if (audio.titleTheme) audio.titleTheme(); } catch (e) {}
-    return;                            // just the music + the cinematic title — not yet the dive
-  }
-  beginLaunch();                       // second tap → go
+  if (!titleArmed) { startTitleMusic(); return; }   // first contact → music only
+  if (clock.elapsedTime - titleArmT < 0.6) return;  // let that first beat breathe before the dive
+  beginLaunch();                                     // a deliberate second tap → dive in + fade
+}
+// one-shot: the absolute first gesture anywhere starts the music early
+{
+  const wake = () => {
+    startTitleMusic();
+    window.removeEventListener('pointerdown', wake, true);
+    window.removeEventListener('touchstart', wake, true);
+    window.removeEventListener('keydown', wake, true);
+  };
+  window.addEventListener('pointerdown', wake, true);
+  window.addEventListener('touchstart', wake, true);
+  window.addEventListener('keydown', wake, true);
 }
 function beginLaunch() {
   if (launching || started) return;

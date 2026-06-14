@@ -588,6 +588,43 @@ export class AudioEngine {
     src.start(t); src.stop(t + 1.3);
   }
 
+  // ── the FIRST breath of coming alive ── a deep, audible gasp-inhale that
+  // swells as the eyes open, then a slow shaky exhale settling into rhythm.
+  // Bigger and wetter than breath(): this is the moment you come to. The
+  // filter sweep + a low chest-resonance read as a real lungful of air.
+  wakeBreath() {
+    if (!this.started || this.muted) return;
+    const C = this.ctx, t = C.currentTime;
+    const mk = (t0, dur, peak, fLo, fHi, q) => {
+      const src = C.createBufferSource(); src.buffer = this._shotNoise; src.loop = true;
+      const bp = C.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = q;
+      bp.frequency.setValueAtTime(fLo, t0);
+      bp.frequency.exponentialRampToValueAtTime(fHi, t0 + dur * 0.8);
+      // a touch of low body so it sits in the chest, not just hiss
+      const lp = C.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 2200;
+      const g = C.createGain();
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.linearRampToValueAtTime(peak, t0 + dur * 0.45);    // draw in
+      g.gain.exponentialRampToValueAtTime(0.0006, t0 + dur);     // release
+      src.connect(bp).connect(lp).connect(g).connect(this.master);
+      src.start(t0); src.stop(t0 + dur + 0.05);
+    };
+    // inhale: deep, rising — synced to the lids retracting
+    mk(t,        1.8, 0.34, 240, 1150, 0.9);
+    // exhale: lower, softer, a beat later — the body letting go
+    const e = t + 1.95;
+    const src = C.createBufferSource(); src.buffer = this._shotNoise; src.loop = true;
+    const bp = C.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 0.8;
+    bp.frequency.setValueAtTime(620, e);
+    bp.frequency.exponentialRampToValueAtTime(260, e + 1.3);     // falling = letting out
+    const g = C.createGain();
+    g.gain.setValueAtTime(0.0001, e);
+    g.gain.linearRampToValueAtTime(0.2, e + 0.4);
+    g.gain.exponentialRampToValueAtTime(0.0006, e + 1.5);
+    src.connect(bp).connect(g).connect(this.master);
+    src.start(e); src.stop(e + 1.6);
+  }
+
   // ── jaw harp ── the base's voice. A low drone plucked on a steady
   // beat, each twang a bright formant that sweeps down as the "mouth"
   // closes — the distinctive boing. Synthesized, copyright-clean.
