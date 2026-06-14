@@ -63,10 +63,10 @@ const MENAGERIE = {
            // circles before committing; after dark the whole pack answers
   // Bull REMOVED — too big to hit cleanly, too aggressive. (The bear still
   // borrows the Bull rig via PREFAB_FILE below, so the model still loads.)
-  Bear:  { n: 3, speed: 2.6, gallop: 9.4,  hp: 9, flee: 0,  r: 2.0,
+  Bear:  { n: 3, speed: 2.6, gallop: 9.4,  hp: 9, flee: 0,  r: 1.7,
            keen: 1.0,  aggroBias: 0.7,
            hpJit: true, gait: 'bound', bearish: true,
-           aggroR: 24, dmg: 42, scale: 2.1, tint: 0x2c1d12, nightStalk: true },  // RARE, 8-10 hits
+           aggroR: 24, dmg: 42, scale: 1.05, tint: 0x2c1d12, nightStalk: true },  // RARE, 8-10 hits; procedural mesh is real-size
 };
 // SPECIES aliases MENAGERIE so every a.cfg.* reference keeps working.
 const SPECIES = MENAGERIE;
@@ -2640,20 +2640,79 @@ async function loadAnimals() {
   }
 }
 
+// ── the bear ── built from primitives (no CC0 animated bear asset exists),
+// so it actually reads as a bear, not the old dark-bull stand-in: a heavy
+// body with a shoulder hump, a low forward head + snout, round ears, small
+// dark eyes, and four swinging legs. Animated procedurally (bearAnim).
+function buildBearMesh(tint) {
+  const g = new THREE.Group();
+  const fur = new THREE.MeshStandardMaterial({ color: tint, roughness: 1, flatShading: true });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x0a0807, roughness: 0.5 });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.9, 2.0), fur);
+  body.position.set(0, 1.0, 0); body.castShadow = true; g.add(body);
+  const rump = new THREE.Mesh(new THREE.SphereGeometry(0.55, 8, 6), fur);
+  rump.position.set(0, 1.0, -0.95); rump.scale.set(1, 0.95, 0.9); g.add(rump);
+  const hump = new THREE.Mesh(new THREE.SphereGeometry(0.56, 8, 6), fur);   // bear shoulder hump
+  hump.position.set(0, 1.45, 0.55); hump.scale.set(1, 0.8, 1.1); g.add(hump);
+  const headPiv = new THREE.Group(); headPiv.position.set(0, 1.15, 1.0); g.add(headPiv);
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.56, 0.6), fur);
+  head.position.set(0, -0.05, 0.12); headPiv.add(head);
+  const snout = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.3, 0.42), fur);
+  snout.position.set(0, -0.14, 0.5); headPiv.add(snout);
+  const nose = new THREE.Mesh(new THREE.SphereGeometry(0.09, 6, 5), dark);
+  nose.position.set(0, -0.08, 0.73); headPiv.add(nose);
+  for (const sx of [-1, 1]) {
+    const ear = new THREE.Mesh(new THREE.SphereGeometry(0.14, 6, 5), fur);
+    ear.position.set(sx * 0.24, 0.32, -0.02); headPiv.add(ear);
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.055, 5, 4), dark);
+    eye.position.set(sx * 0.17, 0.06, 0.42); headPiv.add(eye);
+  }
+  const legs = [];
+  const legPos = [[-0.4, 1.0, 0.72], [0.4, 1.0, 0.72], [-0.4, 1.0, -0.72], [0.4, 1.0, -0.72]];
+  for (const [lx, ly, lz] of legPos) {
+    const piv = new THREE.Group(); piv.position.set(lx, ly, lz); g.add(piv);
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.21, 1.0, 6), fur);
+    leg.position.y = -0.5; leg.castShadow = true; piv.add(leg);
+    const paw = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.18, 0.36), fur);
+    paw.position.set(0, -1.0, 0.08); piv.add(paw);
+    legs.push(piv);
+  }
+  g.userData.bear = { headPiv, legs, tilt: 0 };
+  return g;
+}
+// procedural bear animation: leg swing while moving, head bob, and a
+// rise/lean when it rears or charges. Driven each frame from its state.
+function bearAnim(a, dt, moving) {
+  const b = a.obj.userData.bear; if (!b) return;
+  a.gaitPhase += dt * 6 * (a.gaitTs || 1);
+  const s = Math.sin(a.gaitPhase);
+  const swing = moving ? 0.6 : 0;
+  for (let i = 0; i < b.legs.length; i++) {
+    const ph = (i === 0 || i === 3) ? s : -s;       // diagonal gait
+    b.legs[i].rotation.x = ph * swing;
+  }
+  b.headPiv.rotation.x = moving ? s * 0.06 : Math.sin(a.gaitPhase * 0.3) * 0.04;  // bob / breathe
+  // rear up on hind legs when rearing; lean low + forward when charging
+  let tilt = 0, lift = 0;
+  if (a.state === 'rear') { tilt = -0.7; lift = 0.5; }
+  else if (a.state === 'charge') { tilt = 0.12; }
+  b.tilt += (tilt - b.tilt) * Math.min(1, dt * 6);
+  a.obj.rotation.x = b.tilt;
+  a.obj.position.y = heightAt(a.obj.position.x, a.obj.position.z)
+    + (moving ? Math.abs(s) * 0.07 : 0) + lift * Math.max(0, -b.tilt / 0.7);
+}
+
 function spawn(name, near) {
   const cfg = SPECIES[name], prefab = prefabs[name];
-  const obj = SkeletonUtils.clone(prefab.scene);
   // ── per-individual LOOK ── a herd should read as individuals, not clones.
-  // Non-bears get a cloned material with a small HSL hue/brightness drift;
-  // bears get a hard dark-brown standard material on the Bull rig.
   const shade = 0.82 + Math.random() * 0.36;            // 0.82–1.18 brightness
+  let obj;
   if (cfg.bearish) {
-    const bc = new THREE.Color(cfg.tint || 0x3a2616).multiplyScalar(shade);
-    const bearMat = new THREE.MeshStandardMaterial({ color: bc, roughness: 0.95, metalness: 0 });
-    obj.traverse(o => {
-      if (o.isMesh || o.isSkinnedMesh) { o.castShadow = true; o.frustumCulled = true; o.material = bearMat; }
-    });
+    // a purpose-built procedural bear (dark, humped, scary), not a tinted bull
+    const bc = new THREE.Color(cfg.tint || 0x2a1d12).multiplyScalar(shade);
+    obj = buildBearMesh(bc);
   } else {
+    obj = SkeletonUtils.clone(prefab.scene);
     const hueDrift = (Math.random() - 0.5) * 0.06;       // ±0.03 hue
     obj.traverse(o => {
       if (o.isMesh || o.isSkinnedMesh) {
@@ -2684,10 +2743,12 @@ function spawn(name, near) {
   scene.add(obj);
   const mixer = new THREE.AnimationMixer(obj);
   const acts = {};
-  for (const frag of ['Idle', 'Idle_2', 'Eating', 'Walk', 'Gallop', 'Death',
-                      'HitReact_Left', 'Attack', 'Attack_Kick']) {
-    const clip = clipOf(prefab, frag);
-    if (clip) acts[frag] = mixer.clipAction(clip);
+  if (!cfg.bearish) {                       // the procedural bear is animated by bearAnim, not clips
+    for (const frag of ['Idle', 'Idle_2', 'Eating', 'Walk', 'Gallop', 'Death',
+                        'HitReact_Left', 'Attack', 'Attack_Kick']) {
+      const clip = clipOf(prefab, frag);
+      if (clip) acts[frag] = mixer.clipAction(clip);
+    }
   }
   // ── per-individual PERSONALITY (rolled ONCE, stored on the record) ──
   const aggression = Math.max(0, Math.min(1,
@@ -2879,7 +2940,7 @@ function animalUpdate(a, dt) {
   if (a.cfg.bearish) {                         // ── the bear has its own brain
     bearUpdate(a, dt, dx, dz, dist);
     a.obj.rotation.y = lerpAngle(a.obj.rotation.y, a.dir, Math.min(1, dt * 6));
-    applyGait(a, a._moved, dt);
+    bearAnim(a, dt, a._moved);                  // procedural legs/head/rear
     a._moved = false;
     return;
   } else if (a.cfg.hunts || a.cfg.territorial) {     // ── predator / territorial brain
@@ -3434,6 +3495,8 @@ function killAnimal(a, suffered = false) {
   a.dead = true; a.t = 75;   // carcasses linger — long enough for scavengers
   a.suffered = suffered || !!a.bleeding || a.state === 'wounded';
   setAnim(a, 'Death', true);
+  if (a.cfg.bearish) { a.obj.rotation.z = 1.35; a.obj.rotation.x = 0;   // the bear goes down on its side
+    a.obj.position.y = heightAt(a.obj.position.x, a.obj.position.z) + 0.5; }
   score[a.name] = (score[a.name] || 0) + 1;
   if (audio.killStinger) audio.killStinger();   // the theme punctuates every kill
   if (a.isCryptid) {
