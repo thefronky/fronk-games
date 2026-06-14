@@ -21,9 +21,9 @@ const WORLD = 860;            // square world size
 const WATER_Y = 2.1;          // lake level
 const EYE = 1.7;
 const CFG = IS_TOUCH
-  ? { grass: 22000, trees: 620, bushes: 380, rocks: 90, px: 2, shadow: 1536, segs: 230,
+  ? { grass: 22000, trees: 2200, bushes: 380, rocks: 150, px: 2, shadow: 1536, segs: 230,
       flowers: 2200, tufts: 1400, mushrooms: 260, bedFlowers: 520 }
-  : { grass: 50000, trees: 1100, bushes: 620, rocks: 130, px: 2.5, shadow: 3072, segs: 360,
+  : { grass: 50000, trees: 4500, bushes: 620, rocks: 260, px: 2.5, shadow: 3072, segs: 360,
       flowers: 4000, tufts: 2600, mushrooms: 420, bedFlowers: 760 };
 
 const SPECIES = {
@@ -827,7 +827,34 @@ function mergeGeoms(list) {
     { geo: broadGeo, inst: new THREE.InstancedMesh(broadGeo, treeMat, CFG.trees), n: 0, r: 1.2 },
     { geo: birchGeo, inst: new THREE.InstancedMesh(birchGeo, treeMat, CFG.trees), n: 0, r: 0.6 },
   ];
-  species.forEach(s => { s.inst.castShadow = true; scene.add(s.inst); });
+  // PERF: trees do NOT cast shadows. At 4500/2200 instances a per-tree
+  // shadow pass would blow the mobile budget; the dense canopy reads as
+  // a mass without it, and the sun shadow still lands on player + animals
+  // (which keep castShadow). This is the single biggest perf lever for
+  // pushing tree count ~4x.
+  species.forEach(s => { s.inst.castShadow = false; s.inst.receiveShadow = false; scene.add(s.inst); });
+
+  // ── grove clumping field ──────────────────────────────────────────
+  // A cheap hash-based value-noise sampled at two scales. Trees/rocks
+  // reject-sample against it so the world breaks into dense thickets AND
+  // open clearings instead of uniform static. No per-frame cost — only
+  // sampled once during placement. Pure function, no allocations.
+  const _h2 = (ix, iz) => {
+    let h = (ix * 374761393 + iz * 668265263) | 0;
+    h = (h ^ (h >> 13)) * 1274126177 | 0;
+    return ((h ^ (h >> 16)) >>> 0) / 4294967295;
+  };
+  const _vnoise = (x, z) => {
+    const xi = Math.floor(x), zi = Math.floor(z), fx = x - xi, fz = z - zi;
+    const u = fx * fx * (3 - 2 * fx), v = fz * fz * (3 - 2 * fz);
+    const a = _h2(xi, zi), b = _h2(xi + 1, zi),
+          c = _h2(xi, zi + 1), d = _h2(xi + 1, zi + 1);
+    return (a * (1 - u) + b * u) * (1 - v) + (c * (1 - u) + d * u) * v;
+  };
+  // 0..1 grove mask: high = thicket, low = clearing. Two octaves so
+  // big groves contain smaller gaps. 1/55 ≈ ~55-unit grove cells.
+  const groveAt = (x, z) =>
+    _vnoise(x / 55, z / 55) * 0.68 + _vnoise(x / 17, z / 17) * 0.32;
   // neutral white = pass geometry vertex-colors through untouched
   // (instanceColor multiplies vColors on a vertexColors material)
   const AUTUMN_NEUTRAL = new THREE.Color(1, 1, 1);
@@ -836,6 +863,10 @@ function mergeGeoms(list) {
         S = new THREE.Vector3(), P = new THREE.Vector3(), E = new THREE.Euler();
   let placed = 0, guard = 0;
   window.TREES = [];
+  // Cap collidable trunks so the hunt's collision scan stays cheap even
+  // as rendered tree count climbs. ~1600 real obstacles is plenty of
+  // cover; the rest render as canopy mass only.
+  const TREE_COLLIDE_MAX = IS_TOUCH ? 1100 : 1600;
   while (placed < CFG.trees && guard++ < CFG.trees * 30) {
     const x = (Math.random() - 0.5) * WORLD * 0.92,
           z = (Math.random() - 0.5) * WORLD * 0.92,
@@ -852,6 +883,18 @@ function mergeGeoms(list) {
                : reg === REGION.PINE ? 1.0
                : 0.95;                               // autumn
     if (Math.random() > dens) continue;
+    // grove clumping — fold the noise mask into acceptance so trees
+    // pile into thickets and thin out into huntable clearings. Meadow
+    // stays mostly open (low gveffect) so the spawn region reads sparse;
+    // deep pine clumps hardest. groveAt ~0.5 avg → boost ~1.0x so the
+    // raised CFG.trees count still fills.
+    const gv = groveAt(x, z);
+    const gveffect = reg === REGION.MEADOW ? 0.35
+                   : reg === REGION.PINE ? 1.0
+                   : 0.8;
+    // bias toward thickets: square the mask, then mix with flat by gveffect
+    const groveAccept = (1 - gveffect) + gveffect * (0.18 + 1.45 * gv * gv);
+    if (Math.random() > groveAccept) continue;
     const roll = Math.random();
     let sp;
     if (reg === REGION.PINE)           sp = roll < 0.82 ? species[0] : roll < 0.92 ? species[1] : species[2];
@@ -878,7 +921,13 @@ function mergeGeoms(list) {
     E.set(0, Math.random() * Math.PI * 2, 0); Q.setFromEuler(E);
     const s = 0.8 + Math.random() * 1.1; S.set(s, s, s);
     sp.inst.setMatrixAt(sp.n++, M.compose(P, Q, S));
-    TREES.push({ x, z, r: sp.r * s });
+    // PERF: cap the collision/cover array. With 4500 trunks a full
+    // TREES[] would bloat the per-step collision scan; the smallest
+    // saplings (r below ~0.8) are visual filler, not real obstacles, so
+    // we render them but skip pushing them as collidable cover. Hard cap
+    // at TREE_COLLIDE_MAX keeps the array bounded regardless of count.
+    const tr = sp.r * s;
+    if (tr >= 0.8 && TREES.length < TREE_COLLIDE_MAX) TREES.push({ x, z, r: tr });
     placed++;
   }
   species.forEach(s => {
@@ -965,11 +1014,21 @@ function mergeGeoms(list) {
     new THREE.MeshStandardMaterial({ color: 0x8d8678, roughness: 1 }), CFG.rocks);
   rocks.castShadow = true;
   placed = 0; guard = 0;
-  while (placed < CFG.rocks && guard++ < CFG.rocks * 30) {
+  while (placed < CFG.rocks && guard++ < CFG.rocks * 40) {
     const x = (Math.random() - 0.5) * WORLD * 0.94,
           z = (Math.random() - 0.5) * WORLD * 0.94,
           y = heightAt(x, z);
     if (y < WATER_Y + 0.5) continue;
+    // cluster rocks into rocky fields. Offset-sample the grove noise so
+    // rock clumps DON'T line up with tree thickets, and bias hard toward
+    // high/alpine ground so the climbable rocky terrain gets boulder-
+    // dense while lowland stays mostly clear. Keeps clearings readable.
+    const reg = regionAt(x, z);
+    const rmask = groveAt(x + 311, z - 197);          // decorrelated field
+    const highBias = Math.min(1, Math.max(0, (y - 8) / 18)); // 0 low → 1 alpine
+    const rockAccept = (reg === REGION.ALPINE ? 0.45 : 0.12)
+                     + 0.7 * rmask * rmask + 0.5 * highBias;
+    if (Math.random() > rockAccept) continue;
     P.set(x, y, z);
     E.set(Math.random(), Math.random() * 6, Math.random()); Q.setFromEuler(E);
     const s = 0.5 + Math.random() * 1.6; S.set(s, s * (0.6 + Math.random() * 0.6), s);
