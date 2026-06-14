@@ -1354,6 +1354,113 @@ const clouds = [];
 // fires once (persisted in localStorage) with a music stinger.
 
 const stoneMat = new THREE.MeshStandardMaterial({ color: 0x9a948a, roughness: 1 });
+
+// ── reverence kit: shared camp materials, fire + tent builders ────────────
+// Frontier camps repeat across the map. Geometry/materials are built ONCE
+// here and reused by every camp's build() — no per-camp allocation beyond
+// the handful of meshes each scene needs. Fire flicker is driven entirely
+// by the existing per-frame landmarkUpdate() (no extra rAF cost).
+const ashMat   = new THREE.MeshStandardMaterial({ color: 0x2c2620, roughness: 1 });
+const charMat  = new THREE.MeshStandardMaterial({ color: 0x16120e, roughness: 1 });
+const logMat   = new THREE.MeshStandardMaterial({ color: 0x5d452c, roughness: 1 });
+const boneMat  = new THREE.MeshStandardMaterial({ color: 0xcfc7b4, roughness: 0.9 });
+const ringStoneGeo = new THREE.DodecahedronGeometry(0.42, 0);
+const flameGeoA = new THREE.ConeGeometry(0.55, 1.4, 7);
+const flameGeoB = new THREE.ConeGeometry(0.34, 1.0, 6);
+const flameGeoC = new THREE.ConeGeometry(0.18, 0.6, 5);
+const emberGeo  = new THREE.IcosahedronGeometry(0.07, 0);
+const logGeo    = new THREE.CylinderGeometry(0.28, 0.28, 2.4, 6);
+
+// A ring of fire-stones (always), then — if lit — a layered flickering
+// flame, a bed of glowing embers, and a warm flickering PointLight. Cold
+// camps get charred logs + grey ash instead. Returns nothing; stashes the
+// animatable bits on g.userData.fire for landmarkUpdate to drive.
+function buildFire(g, cx, cz, lit) {
+  // ring of hand-set stones
+  const n = 8;
+  for (let i = 0; i < n; i++) {
+    const a = i / n * Math.PI * 2 + (cx * 0.3 + cz * 0.7);
+    const s = new THREE.Mesh(ringStoneGeo, stoneMat);
+    const rr = 1.05 + ((i * 13) % 3) * 0.06;
+    s.position.set(cx + Math.cos(a) * rr, 0.18, cz + Math.sin(a) * rr);
+    s.rotation.set(i * 0.7, a, i * 0.4);
+    s.scale.setScalar(0.7 + ((i * 7) % 4) * 0.12);
+    g.add(s);
+  }
+  // two charred logs crossing the pit
+  for (let i = 0; i < 2; i++) {
+    const lg = new THREE.Mesh(logGeo, lit ? logMat : charMat);
+    lg.rotation.set(0, i * 1.1 - 0.5, Math.PI / 2);
+    lg.position.set(cx, 0.22, cz);
+    lg.scale.set(0.8, 0.7, 0.8);
+    g.add(lg);
+  }
+  if (!lit) {
+    // cold camp: a low mound of grey ash, long dead
+    const ash = new THREE.Mesh(new THREE.CircleGeometry(0.9, 12), ashMat);
+    ash.rotation.x = -Math.PI / 2; ash.position.set(cx, 0.13, cz); g.add(ash);
+    return;
+  }
+  // three nested flame cones at descending scale — layered flicker
+  const flame = new THREE.Group(); flame.position.set(cx, 0.5, cz);
+  const matA = new THREE.MeshStandardMaterial({ color: 0xff7a1e, emissive: 0xff5a10, emissiveIntensity: 2.4 });
+  const matB = new THREE.MeshStandardMaterial({ color: 0xffb347, emissive: 0xff8a1e, emissiveIntensity: 2.8 });
+  const matC = new THREE.MeshStandardMaterial({ color: 0xffe39a, emissive: 0xffd070, emissiveIntensity: 3.4 });
+  const fa = new THREE.Mesh(flameGeoA, matA); fa.position.y = 0.7;
+  const fb = new THREE.Mesh(flameGeoB, matB); fb.position.y = 0.55;
+  const fc = new THREE.Mesh(flameGeoC, matC); fc.position.y = 0.4;
+  flame.add(fa, fb, fc); g.add(flame);
+  // a few glowing embers floating low over the pit
+  const embers = [];
+  const emberMat = new THREE.MeshStandardMaterial({ color: 0xff8a2e, emissive: 0xff6a1e, emissiveIntensity: 3 });
+  for (let i = 0; i < 5; i++) {
+    const e = new THREE.Mesh(emberGeo, emberMat);
+    const a = i * 1.7;
+    e.position.set(cx + Math.cos(a) * 0.3, 0.45 + (i % 3) * 0.12, cz + Math.sin(a) * 0.3);
+    e.userData.ph = a; g.add(e); embers.push(e);
+  }
+  const light = new THREE.PointLight(0xff9242, 14, 26, 1.8);
+  light.position.set(cx, 1.5, cz); g.add(light);
+  g.userData.fire = { flame, fa, fb, fc, embers, light, cx, cz };
+}
+
+// A spit-and-rack over the fire: two forked stakes + a crossbar.
+function buildSpit(g, cx, cz) {
+  const stakeGeo = new THREE.CylinderGeometry(0.06, 0.06, 1.5, 5);
+  for (const dx of [-1, 1]) {
+    const st = new THREE.Mesh(stakeGeo, logMat);
+    st.position.set(cx + dx * 0.9, 0.7, cz); st.rotation.z = dx * 0.12; g.add(st);
+  }
+  const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 2.2, 5), logMat);
+  bar.rotation.z = Math.PI / 2; bar.position.set(cx, 1.35, cz); g.add(bar);
+}
+
+// One tent. opts: { color, h, lean, collapsed, leanTo, x, z, rot }
+// A-frame cone by default; collapsed → flattened & tilted; leanTo → a
+// single sloped panel propped on a pole.
+function buildTent(g, opts) {
+  const { color, x = 0, z = 0, rot = 0 } = opts;
+  const mat = new THREE.MeshStandardMaterial({ color, roughness: 1, flatShading: true, side: THREE.DoubleSide });
+  if (opts.leanTo) {
+    const panel = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 2.6), mat);
+    panel.position.set(x, 1.1, z); panel.rotation.set(-0.9, rot, 0);
+    panel.castShadow = true; g.add(panel);
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 2.2, 5), logMat);
+    pole.position.set(x - Math.sin(rot) * 1.4, 1.0, z - Math.cos(rot) * 1.4);
+    pole.rotation.z = 0.15; g.add(pole);
+    return;
+  }
+  const tent = new THREE.Mesh(new THREE.ConeGeometry(opts.r || 2.4, opts.h || 2.8, 4), mat);
+  tent.position.set(x, (opts.h || 2.8) / 2 - 0.4, z);
+  tent.rotation.y = rot; tent.castShadow = true;
+  if (opts.collapsed) {       // a tent the land pushed over
+    tent.scale.set(1.1, 0.45, 1.1);
+    tent.rotation.z = 0.7; tent.rotation.x = 0.25;
+    tent.position.y = 0.7;
+  }
+  g.add(tent);
+}
+
 const LANDMARKS = [
   {
     id: 'circle', name: 'The Standing Stones', x: -250, z: 180, r: 16,
@@ -1404,23 +1511,128 @@ const LANDMARKS = [
     },
   },
   {
-    id: 'camp', name: 'The Abandoned Camp', x: -180, z: -160, r: 13,
-    journal: 'A tent, a fire, no one. They left their food. Nobody leaves their food. Whatever ate them was not here for the beans.',
+    // CAMP 1 — neat, lived-in, fire still burning. A trapper keeping order.
+    id: 'camp_trapper', name: 'The Trapper’s Rest', x: -180, z: -160, r: 13,
+    journal: 'A neat camp. The tent is squared to the wind, the firewood stacked, the snares coiled and hung. Whoever kept this place kept it like a prayer — order against a country that has none. They knew the land would take them; they only argued about the date. The fire is warm. They have not gone far. They are never coming back.',
     build(g) {
-      const tent = new THREE.Mesh(new THREE.ConeGeometry(2.4, 2.8, 4),
-        new THREE.MeshStandardMaterial({ color: 0xa3622f, roughness: 1, flatShading: true }));
-      tent.position.set(-3, 1.3, 0); tent.rotation.y = 0.6; tent.castShadow = true; g.add(tent);
-      const logM = new THREE.MeshStandardMaterial({ color: 0x5d452c, roughness: 1 });
-      const log1 = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 2.6, 6), logM);
-      log1.rotation.z = Math.PI / 2; log1.position.set(2.2, 0.35, 1.4); g.add(log1);
-      const fire = new THREE.Mesh(new THREE.ConeGeometry(0.5, 1.1, 6),
-        new THREE.MeshStandardMaterial({ color: 0xff8c2e, emissive: 0xff6a14,
-          emissiveIntensity: 2.2 }));
-      fire.position.set(1.2, 0.6, -0.6); g.add(fire);
-      g.userData.flame = fire;
-      const light = new THREE.PointLight(0xff9242, 14, 26, 1.8);
-      light.position.set(1.2, 1.6, -0.6); g.add(light);
-      g.userData.fireLight = light;
+      buildTent(g, { color: 0x9c5e2c, x: -3.2, z: 0.4, rot: 0.5, h: 3.0, r: 2.4 });
+      // a tidy stack of split firewood
+      for (let i = 0; i < 4; i++) {
+        const lg = new THREE.Mesh(logGeo, logMat);
+        lg.rotation.z = Math.PI / 2; lg.position.set(-3.4 + i * 0.16, 0.3 + (i % 2) * 0.34, 2.6);
+        lg.scale.set(0.5, 0.6, 0.5); g.add(lg);
+      }
+      // a sitting log by the fire
+      const seat = new THREE.Mesh(logGeo, logMat);
+      seat.rotation.z = Math.PI / 2; seat.position.set(2.4, 0.32, 1.5); g.add(seat);
+      buildFire(g, 1.2, -0.4, true);
+      buildSpit(g, 1.2, -0.4);
+    },
+  },
+  {
+    // CAMP 2 — ruffled, half-collapsed tent, fire guttering low.
+    id: 'camp_ruffled', name: 'Where the Snow Caught Them', x: 200, z: -240, r: 13,
+    journal: 'The tent half-fell and nobody fixed it. Gear is strewn the way it lands when hands stop working. They came through in the cold season and the cold season won — not in violence, just in patience. The fire is low now, embers under ash, the last of a heat someone built with the last of their strength. Out here you do not lose. You only run out of fuel.',
+    build(g) {
+      buildTent(g, { color: 0x7d6a52, x: -2.8, z: 0.2, rot: 0.9, h: 2.8, r: 2.5, collapsed: true });
+      // scattered gear: a tipped log and a dropped bone
+      const lg = new THREE.Mesh(logGeo, logMat);
+      lg.rotation.set(0.4, 0.6, Math.PI / 2 + 0.3); lg.position.set(2.6, 0.3, 2.2);
+      lg.scale.set(0.7, 0.6, 0.7); g.add(lg);
+      const rib = new THREE.Mesh(new THREE.TorusGeometry(0.5, 0.06, 5, 9, Math.PI), boneMat);
+      rib.position.set(-1.5, 0.1, 2.8); rib.rotation.x = -1.3; g.add(rib);
+      buildFire(g, 0.8, -0.6, true);
+    },
+  },
+  {
+    // CAMP 3 — long abandoned. Tent gone. Cold stone ring + bones.
+    id: 'camp_cold', name: 'The Long-Cold Ring', x: -300, z: 120, r: 13,
+    journal: 'No tent. No tools. Only a ring of stones gone grey with weather and a few bones the rain has cleaned. This was a fire so long ago the ash has turned to soil and the soil has grown a little grass. Someone warmed their hands here before your grandfather was a thought. The land does not remember them. You do, for a moment. That is the whole of it.',
+    build(g) {
+      buildFire(g, 0, 0, false);
+      // a small scatter of weathered bones around the cold ring
+      const place = [[1.8, 0.6, -0.4], [-1.4, 0.8, 0.2], [0.4, -1.7, 1.1]];
+      for (let i = 0; i < place.length; i++) {
+        const [bx, bz, rr] = place[i];
+        const b = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 0.9, 5), boneMat);
+        b.position.set(bx, 0.1, bz); b.rotation.set(Math.PI / 2, 0, rr); g.add(b);
+      }
+      // a skull-ish dome half in the dirt
+      const skull = new THREE.Mesh(new THREE.IcosahedronGeometry(0.32, 0), boneMat);
+      skull.position.set(2.2, 0.16, 1.4); skull.scale.set(1, 0.7, 1.2); g.add(skull);
+    },
+  },
+  {
+    // CAMP 4 — a lean-to, fire lit, a spit. A hunter still working a kill.
+    id: 'camp_leanto', name: 'The Skinner’s Lean-To', x: 120, z: -100, r: 13,
+    journal: 'A single sloped panel of hide, propped against the weather — quick shelter for someone who meant to stay one night and move at dawn. A spit over the coals, a rack for drying. This is not a home; it is a working face, a place to turn an animal into the right to keep living. There is reverence in it, the old kind: you take, and you thank, and you do not waste. The fire is lit. Step lightly. The work may not be done.',
+    build(g) {
+      buildTent(g, { color: 0x6f4a2a, x: -2.6, z: 0, rot: 0.4, leanTo: true });
+      buildFire(g, 1.0, 0.2, true);
+      buildSpit(g, 1.0, 0.2);
+      // a drying rack: two stakes + crossbar with a hanging strip
+      const stakeGeo = new THREE.CylinderGeometry(0.05, 0.05, 1.6, 5);
+      for (const dx of [-1, 1]) {
+        const st = new THREE.Mesh(stakeGeo, logMat);
+        st.position.set(-3.4 + dx * 0.9, 0.75, 2.4); g.add(st);
+      }
+      const rackBar = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 2.0, 5), logMat);
+      rackBar.rotation.z = Math.PI / 2; rackBar.position.set(-3.4, 1.5, 2.4); g.add(rackBar);
+      const hide = new THREE.Mesh(new THREE.PlaneGeometry(0.7, 0.9),
+        new THREE.MeshStandardMaterial({ color: 0x8a5a36, roughness: 1, side: THREE.DoubleSide }));
+      hide.position.set(-3.4, 1.0, 2.4); g.add(hide);
+    },
+  },
+  {
+    // LORE PROP — antlers mounted on a stake, a marker / a boast / a grave.
+    id: 'antlers', name: 'The Antler Stake', x: 90, z: 300, r: 11,
+    journal: 'Antlers lashed to a stake, facing the way they came. A marker, a boast, a grave — the same gesture for all three out here. Someone wanted the next traveler to know a great animal fell on this spot, and that a person was equal to it, once.',
+    build(g) {
+      const stake = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.13, 2.4, 6), logMat);
+      stake.position.y = 1.2; stake.castShadow = true; g.add(stake);
+      // a forked antler crown
+      for (const dx of [-1, 1]) {
+        for (let j = 0; j < 3; j++) {
+          const tine = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.05, 0.6 + j * 0.18, 5), boneMat);
+          tine.position.set(dx * (0.15 + j * 0.12), 2.3 + j * 0.18, 0);
+          tine.rotation.z = dx * (0.5 + j * 0.18); g.add(tine);
+        }
+      }
+    },
+  },
+  {
+    // LORE PROP — a cairn with a carved name-stone. A child's grave or claim.
+    id: 'namestone', name: 'A Name in the Rock', x: -120, z: 280, r: 11,
+    journal: 'A low cairn, and one flat stone scratched with letters the weather has nearly won. You can make out part of a name and a single year. No story, no marker of how — just that a person was here, was named, and was loved enough that someone carried these stones.',
+    build(g) {
+      let y = 0;
+      for (let i = 0; i < 4; i++) {
+        const rr = 1.1 - i * 0.2;
+        const s = new THREE.Mesh(new THREE.DodecahedronGeometry(rr, 0), stoneMat);
+        s.position.set(((i * 17) % 5 - 2) * 0.06, y + rr * 0.55, ((i * 31) % 5 - 2) * 0.06);
+        s.scale.y = 0.6; s.castShadow = true; g.add(s); y += rr * 0.7;
+      }
+      const slab = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.1, 0.16), stoneMat);
+      slab.position.set(0, 0.55, 1.0); slab.rotation.x = -0.18; slab.castShadow = true; g.add(slab);
+    },
+  },
+  {
+    // LORE PROP — a child's carved wooden toy left on a rock. The smallest grief.
+    id: 'toy', name: 'The Carved Toy', x: 260, z: -60, r: 10,
+    journal: 'A little carved animal on a flat rock, worn smooth where a small hand held it. Whittled by firelight, probably, to keep a child quiet on a hard road. It was left behind, or set down, or never picked back up. The land keeps it now, the way it keeps everything.',
+    build(g) {
+      const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(0.7, 0), stoneMat);
+      rock.position.y = 0.4; rock.scale.y = 0.7; g.add(rock);
+      // a tiny carved quadruped: body + 4 stub legs + a head
+      const woodMat = new THREE.MeshStandardMaterial({ color: 0x8a5a30, roughness: 0.9 });
+      const body = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.16, 0.14), woodMat);
+      body.position.set(0, 0.78, 0); body.rotation.y = 0.4; g.add(body);
+      const head = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.12), woodMat);
+      head.position.set(0.16, 0.86, 0.05); head.rotation.y = 0.4; g.add(head);
+      for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+        const leg = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.12, 0.05), woodMat);
+        leg.position.set(sx * 0.1, 0.68, sz * 0.04); g.add(leg);
+      }
     },
   },
   {
@@ -1530,12 +1742,30 @@ function showJournal(lm, ix) {
 
 function landmarkUpdate(dt, t) {
   // ambient animation: campfire flicker, waterfall shimmer
+  // cheap shared flicker terms, computed once per frame for all camps
+  const fl1 = Math.sin(t * 11), fl2 = Math.sin(t * 23), fl3 = Math.sin(t * 31);
   for (const lm of LANDMARKS) {
     const u = lm.group.userData;
-    if (u.fireLight) u.fireLight.intensity = 11 + Math.sin(t * 11) * 2.5 + Math.sin(t * 23) * 1.5;
+    if (u.fireLight) u.fireLight.intensity = 11 + fl1 * 2.5 + fl2 * 1.5;
     if (u.seam) u.seam.material.emissiveIntensity = 2 + Math.sin(t * 0.9) * 0.9;
     if (u.flame) u.flame.scale.y = 1 + Math.sin(t * 13) * 0.15;
     if (u.fall) u.fall.material.opacity = 0.55 + Math.sin(t * 6) * 0.12;
+    if (u.fire) {
+      const f = u.fire;
+      // light flickers warm; each flame layer breathes on a different beat;
+      // the whole flame sways like wind catches it; embers bob + glow.
+      f.light.intensity = 12 + fl1 * 3 + fl2 * 2 + fl3 * 1.2;
+      f.flame.rotation.z = fl2 * 0.07 + fl3 * 0.04;
+      f.fa.scale.y = 1 + fl1 * 0.18;
+      f.fb.scale.y = 1 + fl2 * 0.22;
+      f.fc.scale.y = 1 + fl3 * 0.3;
+      f.fc.scale.x = 1 + fl1 * 0.1;
+      for (let i = 0; i < f.embers.length; i++) {
+        const e = f.embers[i];
+        e.position.y = 0.45 + 0.18 + Math.sin(t * 2.3 + e.userData.ph) * 0.18 + (i % 3) * 0.06;
+        e.material.emissiveIntensity = 2.5 + Math.sin(t * 7 + e.userData.ph) * 1.2;
+      }
+    }
   }
   lmCheckT -= dt;
   if (lmCheckT > 0) return;
@@ -1553,7 +1783,7 @@ function landmarkUpdate(dt, t) {
         showJournal(lm);
         renderNotes();
         if (foundSet.size === LANDMARKS.length)
-          setTimeout(() => toast('ALL SEVEN FOUND. You have seen the whole menu. You are on it.', 6000), 7500);
+          setTimeout(() => toast('EVERY MARK FOUND. You have seen the whole menu. You are on it.', 6000), 7500);
       }
     }
   }
