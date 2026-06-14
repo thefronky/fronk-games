@@ -364,20 +364,47 @@ export class AudioEngine {
       lfo.frequency.value = 6.3;
       const lfoG = C.createGain(); lfoG.gain.value = 0;
       lfo.connect(lfoG); lfoG.connect(g.gain); lfo.start();
+      // 2nd, slower stutter LFO at a non-integer ratio → irregular grind
+      const lfo2 = C.createOscillator(); lfo2.type = 'sawtooth';
+      lfo2.frequency.value = 3.7;
+      const lfo2G = C.createGain(); lfo2G.gain.value = 0;
+      lfo2.connect(lfo2G); lfo2G.connect(g.gain); lfo2.start();
       // faint string-tension tone, rises with the draw
       const o = C.createOscillator(); o.type = 'triangle';
       o.frequency.value = 64;
       const og = C.createGain(); og.gain.value = 0;
       o.connect(og).connect(this.foleyBus); o.start();
-      this._creak = { g, bp, lfo, lfoG, o, og };
+      this._creak = { g, bp, lfo, lfoG, lfo2, lfo2G, o, og };
     }
     const cr = this._creak;
-    cr.g.gain.setTargetAtTime(k * 0.05, t, 0.06);
-    cr.lfoG.gain.setTargetAtTime(k * 0.024, t, 0.06);
-    cr.lfo.frequency.setTargetAtTime(4.5 + k * 5.5, t, 0.1);
-    cr.bp.frequency.setTargetAtTime(130 + k * 430, t, 0.08);
-    cr.o.frequency.setTargetAtTime(64 + k * 150, t, 0.07);
-    cr.og.gain.setTargetAtTime(k * k * 0.028, t, 0.06);
+    // LOUD, escalating creak — the bow STRETCHING. Gain ramps hard with
+    // the draw and the stutter LFO speeds up so near full draw it
+    // sputters like wood and sinew fighting you.
+    cr.g.gain.setTargetAtTime((0.06 + k * 0.20), t, 0.05);          // much louder
+    cr.lfoG.gain.setTargetAtTime(0.04 + k * 0.10, t, 0.05);         // deep stutter
+    cr.lfo.frequency.setTargetAtTime(5 + k * 13, t, 0.08);          // sputters faster as you pull
+    cr.lfo2.frequency.setTargetAtTime(3.3 + k * 7, t, 0.08);        // 2nd LFO = irregular grind
+    cr.lfo2G.gain.setTargetAtTime(k * 0.07, t, 0.06);
+    cr.bp.frequency.setTargetAtTime(150 + k * 620, t, 0.07);        // brighter, straining
+    cr.bp.Q.setTargetAtTime(2.0 + k * 4, t, 0.08);
+    cr.o.frequency.setTargetAtTime(70 + k * k * 260, t, 0.06);      // rising tension tone
+    cr.og.gain.setTargetAtTime(k * k * 0.06, t, 0.05);
+    // random fiber-creak ticks near full draw — the satisfying sputter.
+    // discrete pops scheduled when the draw is deep, rate rises with k.
+    this._creakTickT = (this._creakTickT ?? 0) - 0.016;
+    if (k > 0.45 && this._creakTickT <= 0) {
+      this._creakTickT = 0.16 - k * 0.11 + Math.random() * 0.06;    // faster, denser near full
+      const o = C.createOscillator(); o.type = 'triangle';
+      o.frequency.value = 320 + Math.random() * 480 + k * 300;
+      const g = C.createGain();
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(0.05 + k * 0.06, t + 0.004);
+      g.gain.exponentialRampToValueAtTime(0.0006, t + 0.05 + Math.random() * 0.04);
+      const bp = C.createBiquadFilter(); bp.type = 'bandpass';
+      bp.frequency.value = 1800 + Math.random() * 1400; bp.Q.value = 3;
+      o.connect(bp).connect(g).connect(this.foleyBus);
+      o.start(t); o.stop(t + 0.12);
+    }
     this._creakOn = true; this._creakT = 0.15;   // watchdog (see update)
   }
 
@@ -386,6 +413,7 @@ export class AudioEngine {
     if (!cr) return;
     cr.g.gain.setTargetAtTime(0, t, 0.03);
     cr.lfoG.gain.setTargetAtTime(0, t, 0.03);
+    if (cr.lfo2G) cr.lfo2G.gain.setTargetAtTime(0, t, 0.03);
     cr.og.gain.setTargetAtTime(0, t, 0.03);
   }
 

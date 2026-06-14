@@ -2935,7 +2935,15 @@ function tickBody() {
       if (drawT >= 1) holdT += dt; else holdT = 0;
     } else { drawT = Math.max(0, drawT - dt * 4); holdT = 0; }
     if (drawing && drawT > 0 && audio.drawCreak) audio.drawCreak(Math.min(1, drawT + holdT * 0.12));
-    document.getElementById('crosshair').classList.toggle('drawn', drawT > 0.5);
+    const _ch = document.getElementById('crosshair');
+    _ch.classList.toggle('drawn', drawT > 0.5);
+    // at full draw the aim WANDERS — the crosshair drifts with the
+    // strain (worsens the longer you hold), so you must time the loose.
+    const chDrift = drawT * drawT * 9 + Math.min(holdT, 4) * 5;
+    const chx = (Math.sin(t * 1.7) + 0.5 * Math.sin(t * 4.3)) * chDrift;
+    const chy = (Math.cos(t * 2.3) * 0.8 + Math.sin(t * 5.1) * 0.4) * chDrift;
+    _ch.style.transform = 'translate(calc(-50% + ' + chx.toFixed(1) +
+      'px), calc(-50% + ' + chy.toFixed(1) + 'px))' + (drawT > 0.5 ? ' scale(2.2)' : '');
     const e = drawT * drawT * (3 - 2 * drawT);  // smoothstep — weighty
     // full draw = a real longbow anchor: the riser stands nearly
     // VERTICAL just left of the sight line, the arrow runs dead ahead
