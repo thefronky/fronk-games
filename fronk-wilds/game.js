@@ -2373,15 +2373,20 @@ function tickBody() {
     if (drawing && drawT > 0 && audio.drawCreak) audio.drawCreak(Math.min(1, drawT + holdT * 0.12));
     document.getElementById('crosshair').classList.toggle('drawn', drawT > 0.5);
     const e = drawT * drawT * (3 - 2 * drawT);  // smoothstep — weighty
-    bow.position.set(0.34 + (-0.055 - 0.34) * e,   // riser lands LEFT of the eye-line
-                     -0.4 + (-0.09 + 0.4) * e,
-                     -0.62 + (-0.52 + 0.62) * e);
-    bow.rotation.set(0.05, -0.55 + 0.41 * e, 0.21 - 0.17 * e);
+    // full draw = a real longbow anchor: the riser stands nearly
+    // VERTICAL just left of the sight line, the arrow runs dead ahead
+    // under the eye, the string is at the cheek. You look down the shaft.
+    bow.position.set(0.34 + (-0.028 - 0.34) * e,   // settles just off the eye-line
+                     -0.4 + (-0.052 + 0.4) * e,    // up to eye height
+                     -0.62 + (-0.44 + 0.62) * e);  // drawn in close to the face
+    bow.rotation.set(0.05 - 0.02 * e,              // limbs vertical
+                     -0.55 + 0.52 * e,             // face square downrange
+                     0.21 - 0.19 * e);             // lose the carry-cant
     // walk bob + breath — you're holding it, not gliding with it
     bobPhase += dt * (mx || mz ? 7.5 : 1.6);
     bow.position.y += Math.sin(bobPhase) * (mx || mz ? 0.012 : 0.004);
     bow.position.x += Math.cos(bobPhase * 0.5) * (mx || mz ? 0.006 : 0.002);
-    let targetFov = 70 - e * 8;
+    let targetFov = 70 - e * 11;   // sighting focus
     // kill-feel: lethal hit = brief 0.96 punch-in, easing back out
     if (fovPunchT > 0) targetFov *= 0.96 + 0.04 * (1 - fovPunchT / PUNCH_DUR);
     if (Math.abs(camera.fov - targetFov) > 0.05) {

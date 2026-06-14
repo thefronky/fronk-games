@@ -1,0 +1,45 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="40%" r="75%">
+      <stop offset="0%" stop-color="#43202a"/>
+      <stop offset="48%" stop-color="#231019"/>
+      <stop offset="100%" stop-color="#0c0609"/>
+    </radialGradient>
+    <radialGradient id="glow" cx="50%" cy="30%" r="55%">
+      <stop offset="0%" stop-color="#e8893a" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#e8893a" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="shaft" x1="0" y1="1" x2="0.4" y2="0">
+      <stop offset="0%" stop-color="#6ad0ff"/>
+      <stop offset="52%" stop-color="#9a7be0"/>
+      <stop offset="100%" stop-color="#ff5a7a"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <rect width="512" height="512" rx="112" fill="url(#glow)"/>
+
+  <!-- low horizon silhouette -->
+  <path d="M0 392 L96 360 L196 384 L300 350 L404 380 L512 356 L512 512 L0 512 Z" fill="#0a0609" opacity="0.85"/>
+
+  <!-- antlers branching off the shaft -->
+  <g stroke="#caa06a" stroke-width="17" stroke-linecap="round" fill="none">
+    <path d="M256 300 L196 244 M196 244 L168 256 M196 244 L182 214"/>
+    <path d="M256 300 L316 244 M316 244 L344 256 M316 244 L330 214"/>
+    <path d="M256 256 L210 212 M256 256 L302 212"/>
+  </g>
+
+  <!-- the arrow: vertical glinting shaft -->
+  <rect x="246" y="150" width="20" height="240" rx="10" fill="url(#shaft)"/>
+  <!-- forged head -->
+  <polygon points="256,96 226,156 286,156" fill="#eaf2ff"/>
+  <polygon points="256,116 240,156 272,156" fill="#acbdd0"/>
+  <!-- glint band -->
+  <rect x="242" y="176" width="28" height="11" rx="5" fill="#fff0a8"/>
+  <circle cx="256" cy="118" r="5" fill="#ffffff"/>
+  <!-- fletching -->
+  <polygon points="246,360 222,392 246,388" fill="#ff5a7a"/>
+  <polygon points="266,360 290,392 266,388" fill="#6ad0ff"/>
+
+  <text x="256" y="462" font-family="Georgia, 'Times New Roman', serif" font-size="42" font-weight="400" fill="#ece0cf" text-anchor="middle" letter-spacing="9">CONSUME</text>
+</svg>
