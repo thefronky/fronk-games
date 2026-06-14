@@ -2015,6 +2015,90 @@ for (const lm of LANDMARKS) {
 window._landmarks = LANDMARKS;
 let lmCheckT = 0;
 
+// ── scattered wild fires ── the only honest light once it's truly dark.
+// A bush that caught, a tree the lightning split and lit. They pool warm
+// light across the black map — beautiful to navigate by, and the
+// predators won't follow you into the ring of one. Near-invisible by day
+// (a thread of smoke-glow), full and flickering at night.
+const NIGHTFIRES = [];
+function buildWildfire(x, z, kind) {
+  const g = new THREE.Group();
+  const y = heightAt(x, z);
+  g.position.set(x, y, z);
+  if (kind === 'tree') {
+    // a charred, split trunk — the lightning's leftover
+    const h = 7 + Math.random() * 3;
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.5, h, 6), charMat);
+    trunk.position.y = h / 2; trunk.rotation.z = (Math.random() - 0.5) * 0.5;
+    g.add(trunk);
+    const stub = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.22, 2.4, 5), charMat);
+    stub.position.set(0.5, h * 0.62, 0); stub.rotation.z = 1.1; g.add(stub);
+  } else {
+    // a low shrub gone to flame — a charred clump of cones
+    for (let i = 0; i < 5; i++) {
+      const c = new THREE.Mesh(new THREE.IcosahedronGeometry(0.5 + Math.random() * 0.4, 0), charMat);
+      c.position.set((Math.random() - 0.5) * 1.4, 0.4 + Math.random() * 0.5, (Math.random() - 0.5) * 1.4);
+      c.scale.y = 1.3; g.add(c);
+    }
+  }
+  buildFire(g, 0, 0, true);
+  const f = g.userData.fire;
+  if (kind === 'tree') {            // flames climb the trunk
+    f.flame.scale.set(1.5, 3.2, 1.5);
+    f.flame.position.y = 1.4;
+    f.light.position.y = 3.0; f.light.distance = 34;
+  } else { f.flame.scale.set(1.3, 1.5, 1.3); f.light.distance = 24; }
+  f.kind = kind;
+  scene.add(g);
+  NIGHTFIRES.push({ x, z, group: g, fire: f });
+}
+// (placement runs once near boot, AFTER SPAWN/CAMP constants exist —
+//  see placeWildfires() below)
+function placeWildfires(spawnX, spawnZ, campX, campZ) {
+  const N = IS_TOUCH ? 4 : 7;       // keep the phone's light count sane
+  let placed = 0, tries = 0;
+  while (placed < N && tries++ < 200) {
+    const x = (Math.random() - 0.5) * WORLD * 0.78;
+    const z = (Math.random() - 0.5) * WORLD * 0.78;
+    if (heightAt(x, z) < WATER_Y + 1.2) continue;            // not in the lake
+    if (Math.hypot(x - spawnX, z - spawnZ) < 70) continue;   // not on your face
+    if (Math.hypot(x - campX, z - campZ) < 40) continue;     // base has its own
+    let clear = true;
+    for (const nf of NIGHTFIRES)
+      if (Math.hypot(x - nf.x, z - nf.z) < 120) { clear = false; break; }
+    if (!clear) continue;
+    buildWildfire(x, z, Math.random() < 0.5 ? 'tree' : 'bush');
+    placed++;
+  }
+  window._nightfires = NIGHTFIRES;
+}
+
+// nearest wild fire to the player, and whether you're inside its safe ring
+let nearWildFire = false, nearWildFireD = 1e9;
+function updateWildfires(t, night) {
+  const fl1 = Math.sin(t * 11), fl2 = Math.sin(t * 23), fl3 = Math.sin(t * 31);
+  // they bank to embers in daylight, roar back up after dark
+  const lvl = Math.max(0.05, night);
+  nearWildFireD = 1e9;
+  for (const nf of NIGHTFIRES) {
+    const f = nf.fire;
+    f.light.intensity = (3 + fl1 * 3 + fl2 * 2 + fl3 * 1.2) * lvl;
+    f.flame.visible = night > 0.08;
+    if (f.flame.visible) {
+      f.flame.rotation.z = fl2 * 0.07 + fl3 * 0.04;
+      f.fa.scale.y = (1 + fl1 * 0.18); f.fb.scale.y = (1 + fl2 * 0.22);
+      f.fc.scale.y = (1 + fl3 * 0.3);
+      for (let i = 0; i < f.embers.length; i++) {
+        const e = f.embers[i];
+        e.material.emissiveIntensity = (2.5 + Math.sin(t * 7 + e.userData.ph) * 1.2) * lvl;
+      }
+    }
+    const d = Math.hypot(player.x - nf.x, player.z - nf.z);
+    if (d < nearWildFireD) nearWildFireD = d;
+  }
+  nearWildFire = nearWildFireD < 11 && night > 0.2;   // inside the ring, after dark
+}
+
 function showJournal(lm, ix) {
   const el = document.getElementById('journal');
   document.getElementById('jr-kicker').textContent = 'THE WOODS KEEP SCORE';
@@ -2368,8 +2452,10 @@ function applyGait(a, moving, dt) {
   a.obj.rotation.z = a.gaitRoll;
   if (g === 'bound') {
     a._baseY = a._baseY ?? a.obj.position.y;
-    // bob rides on top of the live ground height (which stepAnimal sets)
-    a.obj.position.y = heightAt(a.obj.position.x, a.obj.position.z) + bob;
+    // bob rides on top of the live ground height (which stepAnimal sets);
+    // a stalking bear rides low to the ground — a hunched, hidden crawl
+    const crouch = a._stalking ? 0.5 * a.obj.scale.y : 0;
+    a.obj.position.y = heightAt(a.obj.position.x, a.obj.position.z) + bob - crouch;
   }
 }
 
@@ -2669,6 +2755,41 @@ function bearUpdate(a, dt, dx, dz, dist) {
   a.attackCd -= dt;
   const provokeR = 6 + (1 - a.aggression) * 6;          // bold bear: ~6m, shy: ~12m
   const loseR = (a.cfg.aggroR || 22) + 26;
+  const night = window._night || 0;
+
+  // ── the night stalk ── after dark a nightStalk bear is not objecting
+  // to you, it is HUNTING you. It creeps in — fast while a tree or bush
+  // hides it, a low crawl in the open — and FREEZES the instant you might
+  // have it in frame. Look away and it's closer. It keeps this up until
+  // it's inside provoke range, where it rears and charges like always.
+  a._stalking = false;
+  if (a.cfg.nightStalk && night > 0.4 && !a.aggro && !a.confused && !fireNear
+      && a.state !== 'rear' && a.state !== 'retreat' && a.state !== 'charge'
+      && dist < loseR && dist > provokeR) {
+    a.state = 'stalk';
+    a.dir = Math.atan2(dx, dz);                          // always oriented at you
+    const hidden = losBlocked(a);
+    // is it in your view cone? dx/dz point bear→player, so bear→YOU from
+    // your eye is (-dx,-dz); player faces it when forward·(-dx,-dz) > 0.55
+    const inView = !hidden && dist < 34
+      && -(Math.sin(player.yaw) * dx + Math.cos(player.yaw) * dz) / (dist || 1) > 0.55;
+    if (inView) {
+      setAnim(a, 'Idle');                                // caught looking — hold dead still
+      a._snapCd = 0.6 + Math.random() * 0.6;            // no twig-snaps while frozen
+    } else {
+      a._stalking = true;                                // applyGait drops it into a crouch
+      const sp = hidden ? a.cfg.speed * 1.45 : a.cfg.speed * 0.62;
+      setAnim(a, 'Walk');
+      stepAnimal(a, sp, dt);
+      // 3D twig-snaps as it moves — you hear it before you see it
+      a._snapCd = (a._snapCd ?? 0) - dt;
+      if (a._snapCd <= 0) {
+        a._snapCd = 0.9 + Math.random() * 1.3;
+        if (audio.snapAt) audio.snapAt(a.obj.position.x, a.obj.position.z, player, hidden ? 0.55 : 0.85);
+      }
+    }
+    return;
+  }
 
   // first provoke by proximity (a shot sets a.aggro/a.confused directly)
   if (!a.aggro && !a.confused && a.state !== 'rear' && a.state !== 'retreat'
@@ -2729,6 +2850,7 @@ function enterBearRear(a, dx, dz) {
   a.dir = Math.atan2(dx, dz);
   setAnim(a, a.acts.Idle_2 ? 'Idle_2' : 'HitReact_Left', true);
   camShakeT = SHAKE_DUR;
+  if (audio.breathAt) audio.breathAt(a.obj.position.x, a.obj.position.z, 0.7);
   toast('It stands up. All of it.', 3600);
 }
 
@@ -3165,6 +3287,7 @@ function setLids(openPct, glow) {     // openPct: 0 = shut, -100 = wide open
 // every hunter's trigger radius. Near the camp fire it all halves:
 // sanctuary, never explained. Computed once per frame into scalars.
 const CAMP_X = -180, CAMP_Z = -160, CAMP_SAFE = 10;
+placeWildfires(SPAWN.x, SPAWN.z, CAMP_X, CAMP_Z);   // scatter the wild fires now that the anchors exist
 let bloodedUntil = -99, scentM = 0, fireNear = false;
 let saidBlooded = false, saidFullPack = false, sawNight = false;
 
@@ -3630,6 +3753,8 @@ function resetDrawState() {
 function skipIntro() { if (intro) introSkip = true; }
 addEventListener('keydown', e => { keys[e.code] = true;
   if (e.code === 'Space' && !intro && !arrowCam) jumpQ = true;
+  if (e.code === 'Escape' && drawing) {      // back out of the shot
+    drawing = false; drawT = 0; holdT = 0; if (audio.drawCreak) audio.drawCreak(0); }
   if (inCanoe && !e.repeat) { if (e.code === 'KeyA') oarLStroke = true; if (e.code === 'KeyD') oarRStroke = true; } });
 addEventListener('keyup', e => keys[e.code] = false);
 addEventListener('keydown', skipIntro);
@@ -3637,8 +3762,14 @@ addEventListener('mousedown', skipIntro);
 addEventListener('touchstart', skipIntro, { passive: true });
 
 if (!IS_TOUCH) {
-  canvas.addEventListener('mousedown', () => { if (started && !intro && !arrowCam && document.pointerLockElement) drawing = true; });
-  addEventListener('mouseup', () => { if (drawing) { drawing = false; loose(); } });
+  canvas.addEventListener('mousedown', e => {
+    if (!(started && !intro && !arrowCam && document.pointerLockElement)) return;
+    if (e.button === 2 && drawing) {          // right-click — back out of the shot
+      drawing = false; drawT = 0; holdT = 0; if (audio.drawCreak) audio.drawCreak(0);
+    } else if (e.button === 0) drawing = true;
+  });
+  addEventListener('mouseup', e => { if (e.button === 0 && drawing) { drawing = false; loose(); } });
+  addEventListener('contextmenu', e => { if (document.pointerLockElement) e.preventDefault(); });
   addEventListener('mousemove', e => {
     if (!document.pointerLockElement) return;
     player.yaw -= e.movementX * 0.0023;
@@ -3690,7 +3821,18 @@ if (!IS_TOUCH) {
       if (t.identifier === stickId) { stickId = null; moveVec.x = moveVec.y = 0;
         knob.style.left = '50%'; knob.style.top = '50%'; }
       if (t.identifier === lookId) lookId = null;
-      if (t.identifier === shootId) { shootId = null; drawing = false; loose(); document.getElementById('shootBtn').classList.remove('drawing'); }
+      if (t.identifier === shootId) {
+        shootId = null; drawing = false;
+        const sb = document.getElementById('shootBtn');
+        // drag your thumb off the trigger and let go = back out of the
+        // shot. Lift it on the button = loose. (cancel ≈ "tap fire again")
+        const r = sb.getBoundingClientRect(), m = 46;
+        const off = t.clientX < r.left - m || t.clientX > r.right + m
+                 || t.clientY < r.top - m || t.clientY > r.bottom + m;
+        if (off) { drawT = 0; holdT = 0; if (audio.drawCreak) audio.drawCreak(0); }
+        else loose();
+        sb.classList.remove('drawing');
+      }
     }
   });
   // iOS fires touchcancel (not touchend) on system gestures, alerts,
@@ -3992,6 +4134,7 @@ function tickBody() {
   farDisc.material.color.copy(scene.fog.color);
   farDisc.position.x = player.x; farDisc.position.z = player.z;
   landmarkUpdate(dt, t);
+  updateWildfires(t, night);
   if (window._cloudMat) {
     window._cloudMat.color.setHex(0xf0dcc2).lerp(_CLOUD_NIGHT, night);
     window._cloudMat.opacity = 0.88 - night * 0.55;
@@ -4246,6 +4389,7 @@ function tickBody() {
       moving: !!(mx || mz), sprint: sprinting, _moveLvl,
       wolfDist, lakeDist: Math.hypot(player.x - 70, player.z + 90),
       night: window._night || 0, hp: player.hp,
+      px: player.x, pz: player.z, yaw: player.yaw,
     });
   }
 
@@ -4363,7 +4507,8 @@ function tickBody() {
   // scent + sanctuary — once per frame, every brain reads the same air
   scentM = started ? player.meat * 6 + (t < bloodedUntil ? 6 : 0) : 0;
   fireNear = started
-    && Math.hypot(player.x - CAMP_X, player.z - CAMP_Z) < CAMP_SAFE;
+    && (Math.hypot(player.x - CAMP_X, player.z - CAMP_Z) < CAMP_SAFE
+        || nearWildFire);   // a wild fire's ring keeps the predators back too
   // kill-feel hitstop: a connected arrow holds the world at 5% speed
   // for a few real frames (0.04s flesh / 0.09s lethal). No setTimeout —
   // juiceT burns down on real dt, world dt gets scaled while it lasts.

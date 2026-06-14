@@ -97,6 +97,16 @@ export class AudioEngine {
     this.foleyBus.connect(this.master);
     this._musicLevel = this.musicBus.gain.value;   // for sidechain restore
 
+    // ── 3D / spatial bus ── world-positioned one-shots (a bear's twig
+    // snap, its breath) feed PannerNodes so they arrive from their true
+    // bearing and distance. HRTF panning = the "8D" headphone effect:
+    // you hear it behind your left shoulder before you ever see it.
+    this.spatialBus = C.createGain(); this.spatialBus.gain.value = 1.0;
+    this.spatialBus.connect(this.master);
+    this.spatialBus.connect(this.verb);            // a little air around it
+    // place the listener at the player's ear, looking down their yaw
+    this._listener = C.listener;
+
     // ── shared one-shot noise buffer (1s white) — every burst-style
     // sound (snap, whoosh, impacts, footsteps) reads from this with a
     // random offset instead of allocating a fresh buffer per shot.
@@ -463,6 +473,83 @@ export class AudioEngine {
       burst(0.07, 0.03, 3200, 'bandpass', 2, 0.012);
     }
   }
+
+  // ── place the listener (the player's ears) in the world each frame.
+  // forward derives from yaw: the game's forward is (sin yaw, 0, cos yaw).
+  setListener(x, z, yaw) {
+    const L = this._listener; if (!L) return;
+    const fx = Math.sin(yaw), fz = Math.cos(yaw);
+    if (L.positionX) {                 // modern AudioParam interface
+      const t = this.ctx.currentTime;
+      L.positionX.setTargetAtTime(x, t, 0.02);
+      L.positionY.setTargetAtTime(1.6, t, 0.02);
+      L.positionZ.setTargetAtTime(z, t, 0.02);
+      L.forwardX.setTargetAtTime(fx, t, 0.02);
+      L.forwardY.setTargetAtTime(0, t, 0.02);
+      L.forwardZ.setTargetAtTime(fz, t, 0.02);
+      L.upX.value = 0; L.upY.value = 1; L.upZ.value = 0;
+    } else if (L.setPosition) {         // legacy Safari
+      L.setPosition(x, 1.6, z);
+      L.setOrientation(fx, 0, fz, 0, 1, 0);
+    }
+  }
+
+  // build a PannerNode at a world point. HRTF for the headphone-3D feel.
+  _panner(x, z) {
+    const C = this.ctx;
+    const p = C.createPanner();
+    p.panningModel = 'HRTF';
+    p.distanceModel = 'inverse';
+    p.refDistance = 5; p.maxDistance = 70; p.rolloffFactor = 1.1;
+    if (p.positionX) { p.positionX.value = x; p.positionY.value = 0.3; p.positionZ.value = z; }
+    else if (p.setPosition) p.setPosition(x, 0.3, z);
+    return p;
+  }
+
+  // a twig/branch snap at a world point — the signature stalk sound.
+  // vol fades it for distant or covered movement; spatialized so its
+  // bearing is unmistakable on headphones.
+  snapAt(x, z, player, vol = 0.8) {
+    if (!this.started || this.muted) return;
+    const C = this.ctx, t = C.currentTime;
+    const pan = this._panner(x, z);
+    pan.connect(this.spatialBus);
+    // dry crack: a short filtered noise burst + a tiny woody pitch drop
+    const src = C.createBufferSource(); src.buffer = this._shotNoise;
+    const bp = C.createBiquadFilter(); bp.type = 'bandpass';
+    bp.frequency.value = 1700 + Math.random() * 1400; bp.Q.value = 5;
+    const g = C.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(vol, t + 0.004);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.07);
+    src.connect(bp).connect(g).connect(pan);
+    src.start(t, Math.random() * 0.6, 0.1);
+    // the woody knock under it
+    const o = C.createOscillator(); o.type = 'triangle';
+    o.frequency.setValueAtTime(240 + Math.random() * 80, t);
+    o.frequency.exponentialRampToValueAtTime(90, t + 0.05);
+    const og = C.createGain();
+    og.gain.setValueAtTime(0, t);
+    og.gain.linearRampToValueAtTime(vol * 0.5, t + 0.005);
+    og.gain.exponentialRampToValueAtTime(0.001, t + 0.06);
+    o.connect(og).connect(pan);
+    o.start(t); o.stop(t + 0.09);
+  }
+
+  // a low spatial breath/huff from a big animal — rarer, scarier.
+  breathAt(x, z, vol = 0.5) {
+    if (!this.started || this.muted) return;
+    const C = this.ctx, t = C.currentTime;
+    const pan = this._panner(x, z); pan.connect(this.spatialBus);
+    const src = C.createBufferSource(); src.buffer = this._shotNoise; src.loop = true;
+    const lp = C.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 520; lp.Q.value = 0.7;
+    const g = C.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(vol, t + 0.18);     // breathe in
+    g.gain.setTargetAtTime(0.0001, t + 0.5, 0.22);     // breathe out
+    src.connect(lp).connect(g).connect(pan);
+    src.start(t, Math.random() * 0.5); src.stop(t + 1.1);
+  }
   thud() {                          // player hurt — gut punch
     if (!this.started) return;
     const C = this.ctx, t = C.currentTime;
@@ -703,6 +790,9 @@ export class AudioEngine {
     }
     const t = C.currentTime;
     const night = s.night || 0;
+
+    // keep the listener glued to the player so spatial one-shots track
+    if (s.px !== undefined) this.setListener(s.px, s.pz, s.yaw || 0);
 
     // creak watchdog: if the game stops calling drawCreak (draw was
     // cancelled), fade the managed creak nodes out instead of droning.
