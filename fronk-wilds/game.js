@@ -206,6 +206,38 @@ function ridged(x, z, f) {
   return 1 - Math.abs(vnoise(x * f, z * f) * 2 - 1);
 }
 
+// ───────────────────── climbable rocky outcrops ──────────────────
+// Hand-placed boulder-stacks you can WALK UP for a sniping vantage.
+// Each is a smoothstep dome added into heightAt: gentle toe at the
+// base, naturally flat-ish summit (a perch). Kept to a tiny fixed
+// list with one Math.hypot each — NO noise loops — because heightAt
+// runs per grass blade. Max gradient ≈ 1.5*h/r rise-over-run
+// (~0.6 here ≈ 32°): brisk to climb, never a cliff. matching rock
+// geometry is dropped at each anchor later (see OUTCROP geometry).
+const OUTCROPS = [
+  { x: -46, z:  -8, r: 27, h: 11.5 },  // SW of spawn — vantage over the meadow
+  { x: -10, z: -55, r: 30, h: 12.5 },  // lake NE shore — vantage over the water
+  { x: 160, z:-140, r: 25, h: 11.0 },  // SE autumn ridge — overlooks the rust woods
+  { x:-180, z:  80, r: 26, h: 11.0 },  // NW pine — a perch in the deep conifers
+  { x:  64, z: 120, r: 22, h:  9.0 },  // S meadow edge — a lower stepping perch
+];
+// added height from outcrops at (x,z). Cheap: a handful of hypots,
+// smoothstep falloff, no loops over noise octaves.
+function outcropAt(x, z) {
+  let add = 0;
+  for (let i = 0; i < OUTCROPS.length; i++) {
+    const o = OUTCROPS[i];
+    const dx = x - o.x, dz = z - o.z;
+    const d2 = dx * dx + dz * dz, r2 = o.r * o.r;
+    if (d2 >= r2) continue;
+    let q = 1 - Math.sqrt(d2) / o.r;   // 1 at center → 0 at rim
+    q = q * q * (3 - 2 * q);           // smoothstep: gentle toe + flat perch
+    add += o.h * q;
+  }
+  return add;
+}
+window._outcrops = OUTCROPS;
+
 // Terrain v2 — the reference-demo recipe: COMPOSED features, not
 // uniform noise. An alpine massif, a valley carved toward the lake,
 // a mountain rim ringing the world, rolling hills as filler — all
@@ -247,6 +279,11 @@ function heightAt(x, z) {
   // central lake basin
   const d = Math.hypot(x - 70, z + 90) / 130;
   a -= Math.max(0, 1 - d * d) * 17;
+
+  // climbable rocky outcrops — added LAST so a perch always sits
+  // proud of whatever terrain it rests on (raw x,z, not warped, so
+  // the dropped rock geometry lines up exactly).
+  a += outcropAt(x, z);
   return a;
 }
 
@@ -326,6 +363,12 @@ window._REGION = REGION;
       .lerp(REGION_GROUND[REGION.ALPINE], reg === REGION.ALPINE ? 0.22 : 0);
     else if (y > 19) c = c.lerp(rockC, (y - 19) / 7);
     else if (t > 0.86) c = c.lerp(dirtC, 0.3);
+    // climbable outcrops — tint the dome rocky so the perch READS as
+    // stone you scramble up (skip underwater so shores stay sandy).
+    if (y > WATER_Y + 1.0) {
+      const ob = outcropAt(x, z);
+      if (ob > 0.5) c.lerp(rockC, Math.min(0.7, ob / 7));
+    }
     // micro variation — kills the flat "planes" look up close
     c.offsetHSL(0, 0, (vnoise(x * 0.31 + 7, z * 0.31 + 3) - 0.5) * 0.07);
     colors[i * 3] = c.r; colors[i * 3 + 1] = c.g; colors[i * 3 + 2] = c.b;
@@ -1036,6 +1079,61 @@ function mergeGeoms(list) {
   }
   rocks.count = placed;
   scene.add(rocks);
+
+  // ─────────── climbable outcrop cladding — visual rock on the perches ──────────
+  // The walkable surface IS the heightAt dome; these boulders just make
+  // it READ as rock you climb. They hug the dome (clamped to heightAt)
+  // and are deliberately NOT pushed into TREES — so nothing blocks the
+  // ascent. One InstancedMesh = one draw call. No shadows (cheap).
+  {
+    // a chunkier, more angular rock than the scatter dodec
+    const og = mergeGeoms([
+      new THREE.DodecahedronGeometry(1.0, 0),
+      (() => { const g = new THREE.IcosahedronGeometry(0.7, 0); g.translate(0.9, 0.3, 0.4); return g; })(),
+    ]);
+    // count up front so we can size the instanced mesh once
+    const RING = 9;                       // boulders per flank ring
+    const RINGS = 2;                      // two stacked flank rings
+    const CROWN = 5;                      // boulders crowning the rim/perch
+    const perOut = RING * RINGS + CROWN;
+    const outRocks = new THREE.InstancedMesh(
+      og, new THREE.MeshStandardMaterial({ color: 0x8a8275, roughness: 1,
+        emissive: 0x0c0d0a, emissiveIntensity: 0.25 }),
+      OUTCROPS.length * perOut);
+    outRocks.castShadow = false; outRocks.receiveShadow = true;
+    let op = 0;
+    for (const o of OUTCROPS) {
+      // flank rings — boulders stepping up the slope (a "scale" to walk)
+      for (let ring = 0; ring < RINGS; ring++) {
+        const frac = 0.62 + ring * 0.18;        // out along the radius
+        const rr = o.r * frac;
+        for (let k = 0; k < RING; k++) {
+          const a2 = (k / RING) * Math.PI * 2 + ring * 0.7 + o.x * 0.01;
+          const x = o.x + Math.cos(a2) * rr, z = o.z + Math.sin(a2) * rr;
+          const y = heightAt(x, z);
+          P.set(x, y - 0.35, z);                // seated slightly into the slope
+          E.set((k * 1.3) % 1, a2, (ring + k) * 0.4); Q.setFromEuler(E);
+          const s = 1.5 + ((k * 7) % 5) * 0.4;
+          S.set(s, s * (0.7 + ((k * 3) % 4) * 0.12), s);
+          outRocks.setMatrixAt(op++, M.compose(P, Q, S));
+        }
+      }
+      // crown — a few big slabs around the flat perch lip for drama
+      for (let k = 0; k < CROWN; k++) {
+        const a2 = (k / CROWN) * Math.PI * 2 + o.z * 0.02;
+        const rr = o.r * 0.34;
+        const x = o.x + Math.cos(a2) * rr, z = o.z + Math.sin(a2) * rr;
+        const y = heightAt(x, z);
+        P.set(x, y - 0.2, z);
+        E.set((k * 0.9) % 1, a2 + 0.5, k * 0.3); Q.setFromEuler(E);
+        const s = 1.7 + ((k * 5) % 4) * 0.35;
+        S.set(s, s * 0.85, s);
+        outRocks.setMatrixAt(op++, M.compose(P, Q, S));
+      }
+    }
+    outRocks.count = op;
+    scene.add(outRocks);
+  }
 
   // ───────────── prop scatter — fill the world with THINGS ─────────────
   // All instanced, placed once, vertex-colored. Big solid props (logs,
