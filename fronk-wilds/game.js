@@ -959,9 +959,9 @@ function mergeGeoms(list) {
   const treeWind = (amp, sideAmp) => (sh) => {};
   // (intentionally NOT assigning treeMat.onBeforeCompile — trees are still)
   const species = [
-    { geo: pineGeo,  inst: new THREE.InstancedMesh(pineGeo, treeMat, CFG.trees), n: 0, r: 1.1 },
-    { geo: broadGeo, inst: new THREE.InstancedMesh(broadGeo, treeMat, CFG.trees), n: 0, r: 1.2 },
-    { geo: birchGeo, inst: new THREE.InstancedMesh(birchGeo, treeMat, CFG.trees), n: 0, r: 0.6 },
+    { geo: pineGeo,  inst: new THREE.InstancedMesh(pineGeo, treeMat, CFG.trees), n: 0, r: 1.1, ch: 12.5 },
+    { geo: broadGeo, inst: new THREE.InstancedMesh(broadGeo, treeMat, CFG.trees), n: 0, r: 1.2, ch: 9.5 },
+    { geo: birchGeo, inst: new THREE.InstancedMesh(birchGeo, treeMat, CFG.trees), n: 0, r: 0.6, ch: 8.5 },
   ];
   // PERF: trees do NOT cast shadows. At 4500/2200 instances a per-tree
   // shadow pass would blow the mobile budget; the dense canopy reads as
@@ -1064,7 +1064,9 @@ function mergeGeoms(list) {
     // we render them but skip pushing them as collidable cover. Hard cap
     // at TREE_COLLIDE_MAX keeps the array bounded regardless of count.
     const tr = sp.r * s;
-    if (tr >= 0.45) TREES.push({ x, z, r: tr });   // EVERY real trunk is solid (player + arrows)
+    // EVERY real trunk is solid (player + arrows). `top` = canopy height —
+    // landable ONLY during a mushroom trip (treetop parkour).
+    if (tr >= 0.45) TREES.push({ x, z, r: tr, top: (y - 0.15) + sp.ch * s });
     placed++;
   }
   species.forEach(s => {
@@ -4819,8 +4821,11 @@ function tickBody() {
       }
       _moveLvl = Math.min(1, canoeSpd / 6);
     } else {
-    // tree collision
+    // tree collision — pushes you out at trunk level. BUT if you're up at
+    // canopy height (a mushroom trip), you're ON the tree, not walking into
+    // it, so it doesn't shove you — you can stand and hop tree to tree.
     for (const tr of TREES) {
+      if (tr.top !== undefined && player.y >= tr.top - 1.3) continue;   // on the canopy
       const d = Math.hypot(nx - tr.x, nz - tr.z);
       if (d < tr.r + 0.5) {
         const push = (tr.r + 0.5 - d);
@@ -4844,6 +4849,18 @@ function tickBody() {
         nx += (nx - sp2.x) / (d || 1) * push; nz += (nz - sp2.z) / (d || 1) * push;
       }
     }
+    // ── mushroom trip: tree CANOPIES become landable surfaces. Jump up and
+    // you can perch on a treetop, then bound tree to tree (and onto the
+    // mountains). Only while tripping; off-trip you can't reach them anyway.
+    if (tripT > 0) {
+      const TRIP_REACH = 2.8;
+      for (const tr of TREES) {
+        if (tr.top === undefined) continue;
+        if (Math.abs(nx - tr.x) > tr.r + 1.8 || Math.abs(nz - tr.z) > tr.r + 1.8) continue;
+        if (Math.hypot(nx - tr.x, nz - tr.z) >= tr.r + 1.8) continue;   // wide canopy pad
+        if (tr.top <= feetY + TRIP_REACH && tr.top > stepGround) stepGround = tr.top;
+      }
+    }
     const lim = WORLD * 0.47;
     nx = Math.max(-lim, Math.min(lim, nx)); nz = Math.max(-lim, Math.min(lim, nz));
     const ny = heightAt(nx, nz);
@@ -4858,10 +4875,10 @@ function tickBody() {
     }
     // a big, floaty Halo-style hop — higher apex (~2.2m), more hang time.
     // On a mushroom trip it's a slow, soaring moon-jump.
-    if (jumpQ && grounded) { playerVy = tripT > 0 ? 10.5 : 7.7; grounded = false; }
+    if (jumpQ && grounded) { playerVy = tripT > 0 ? 14 : 7.7; grounded = false; }   // trip = soar to the treetops
     jumpQ = false;
     if (!grounded) {
-      playerVy -= (tripT > 0 ? 7 : 13) * dt; player.airY = (player.airY ?? groundY) + playerVy * dt;
+      playerVy -= (tripT > 0 ? 6 : 13) * dt; player.airY = (player.airY ?? groundY) + playerVy * dt;
       if (player.airY <= groundY) {
         const impact = -playerVy;                 // how hard you came down
         player.airY = groundY; playerVy = 0; grounded = true;
