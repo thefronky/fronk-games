@@ -467,6 +467,10 @@ export class AudioEngine {
       hit(195, 150, 0.4, 0.06, 'triangle');
       hit(720, 695, 0.15, 0.14);
       burst(0.22, 0.025, 2400, 'bandpass', 1.5);
+    } else if (kind === 'water') {   // a plip + a rising-then-falling splash
+      hit(900, 240, 0.16, 0.09, 'sine');         // the bloop
+      burst(0.34, 0.16, 2600, 'bandpass', 0.6);  // the splash spray
+      burst(0.18, 0.30, 700, 'lowpass', 0.8, 0.04);  // the swallow under it
     } else {                          // ground: soft thud + grass tick
       hit(88, 50, 0.4, 0.1);
       burst(0.2, 0.06, 380);

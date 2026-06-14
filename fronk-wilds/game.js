@@ -22,9 +22,9 @@ const WATER_Y = 2.1;          // lake level
 const EYE = 1.7;
 const CFG = IS_TOUCH
   ? { grass: 22000, trees: 2200, bushes: 380, rocks: 150, px: 2, shadow: 1536, segs: 230,
-      flowers: 2200, tufts: 1400, mushrooms: 260, bedFlowers: 520 }
+      flowers: 2200, tufts: 1400, mushrooms: 260, bedFlowers: 1300 }
   : { grass: 50000, trees: 4500, bushes: 620, rocks: 260, px: 2.5, shadow: 3072, segs: 360,
-      flowers: 4000, tufts: 2600, mushrooms: 420, bedFlowers: 760 };
+      flowers: 4000, tufts: 2600, mushrooms: 420, bedFlowers: 1900 };
 
 // ── THE MENAGERIE ─────────────────────────────────────────────────
 // Field meanings:
@@ -3542,6 +3542,7 @@ const ARROW_GRAVITY = 8.4;   // flatter, readable drop
 const ARROW_LIFE = 14, ARROW_STUCK_LIFE = 14;
 
 const arrows = [];
+window._arrows = arrows;   // test hook
 // Real arrow template — built ONCE, cloned per shot (clones share
 // geometry + material, so this is cheap). Tip points +z so the
 // existing lookAt-along-velocity orientation just works.
@@ -3669,6 +3670,7 @@ function arrowUpdate(dt) {
   for (let i = arrows.length - 1; i >= 0; i--) {
     const a = arrows[i];
     if (a.stuck) { a.t -= dt; if (a.t <= 0) { scene.remove(a.m); arrows.splice(i, 1); } continue; }
+    a._px = a.m.position.x; a._py = a.m.position.y; a._pz = a.m.position.z;  // last pos (swept tests)
     a.v.y -= ARROW_GRAVITY * dt;
     a.m.position.addScaledVector(a.v, dt);
     // streak fades as the arrow ages and as it slows (drag illusion)
@@ -3773,15 +3775,49 @@ function arrowUpdate(dt) {
       }
     }
     if (hit) continue;
-    // ground hit — embed it at the impact angle, head buried,
-    // fletching proud of the dirt
-    if (a.m.position.y < heightAt(a.m.position.x, a.m.position.z)) {
+    const distVol = Math.min(1, Math.hypot(a.m.position.x - player.x, a.m.position.z - player.z) / 60);
+    const px = a.m.position.x, py = a.m.position.y, pz = a.m.position.z;
+
+    // tree hit — SWEPT against the trunk (a fast arrow steps >2m/frame, so
+    // a point test would tunnel through a thin trunk). It stops IN the
+    // wood and knocks like it. Closest approach of this frame's segment.
+    let treeHit = false;
+    const sx = a._px, sz = a._pz, dxs = px - sx, dzs = pz - sz;
+    const segLen2 = dxs * dxs + dzs * dzs || 1;
+    for (const tr of TREES) {
+      const trunkR = Math.min(tr.r, 0.6) + 0.18;
+      // quick reject: trunk far from the segment's bounding box
+      if (tr.x < Math.min(sx, px) - trunkR || tr.x > Math.max(sx, px) + trunkR ||
+          tr.z < Math.min(sz, pz) - trunkR || tr.z > Math.max(sz, pz) + trunkR) continue;
+      let t = ((tr.x - sx) * dxs + (tr.z - sz) * dzs) / segLen2;
+      t = Math.max(0, Math.min(1, t));
+      const cxp = sx + dxs * t, czp = sz + dzs * t;
+      if (Math.hypot(tr.x - cxp, tr.z - czp) >= trunkR) continue;
+      const cyp = a._py + (py - a._py) * t;             // arrow height at closest approach
+      const gy = heightAt(tr.x, tr.z);
+      if (cyp > gy + 0.3 && cyp < gy + 10) {            // trunk + lower canopy zone
+        a.m.position.set(cxp, cyp, czp);                // snap to the trunk face
+        a.stuck = true; a.t = ARROW_STUCK_LIFE;
+        if (a.m.userData.streak) { a.m.remove(a.m.userData.streak); a.m.userData.streak = null; }
+        if (audio.impact) audio.impact('wood', distVol);
+        treeHit = true; break;
+      }
+    }
+    if (treeHit) continue;
+
+    // water hit — a splash, then it sinks and is gone
+    if (py < WATER_Y && heightAt(px, pz) < WATER_Y) {
+      if (audio.impact) audio.impact('water', distVol);
+      scene.remove(a.m); arrows.splice(i, 1); continue;
+    }
+
+    // ground hit (grass/dirt) — embed it, head buried, fletching proud
+    if (py < heightAt(px, pz)) {
       const vl = Math.hypot(a.v.x, a.v.y, a.v.z) || 1;
       a.m.position.addScaledVector(a.v, -0.30 / vl);   // back out ~30 cm along the shot line
       a.stuck = true; a.t = ARROW_STUCK_LIFE;
       if (a.m.userData.streak) { a.m.remove(a.m.userData.streak); a.m.userData.streak = null; }
-      if (audio.impact) audio.impact('ground',
-        Math.min(1, Math.hypot(a.m.position.x - player.x, a.m.position.z - player.z) / 60));
+      if (audio.impact) audio.impact('ground', distVol);
     }
     a.t -= dt; if (a.t <= 0) { scene.remove(a.m); arrows.splice(i, 1); }
   }
@@ -3969,10 +4005,14 @@ if (!IS_TOUCH) {
   window.moveVec = moveVec;
   addEventListener('touchstart', e => {
     for (const t of e.changedTouches) {
-      if (t.clientX < innerWidth * 0.45 && t.clientY > innerHeight * 0.5 && stickId === null) {
+      if (t.clientX < innerWidth * 0.40 && t.clientY > innerHeight * 0.58 && stickId === null) {
         stickId = t.identifier;
-        stick.style.left = (t.clientX - 59) + 'px';
-        stick.style.bottom = (innerHeight - t.clientY - 59) + 'px';
+        // float to the thumb, but CLAMP it to the lower-left — never drifts
+        // toward the middle of the screen
+        const lx = Math.max(14, Math.min(innerWidth * 0.20, t.clientX - 59));
+        const lb = Math.max(20, Math.min(innerHeight * 0.26, innerHeight - t.clientY - 59));
+        stick.style.left = lx + 'px';
+        stick.style.bottom = lb + 'px';
       } else if (lookId === null && t.target.id !== 'shootBtn') {
         lookId = t.identifier; lastLook = { x: t.clientX, y: t.clientY };
       }
@@ -4458,10 +4498,11 @@ function tickBody() {
     if (grounded && groundY < player.y - 0.35) {
       grounded = false; playerVy = 0; player.airY = player.y;
     }
-    if (jumpQ && grounded) { playerVy = 6.2; grounded = false; }
+    // a big, floaty Halo-style hop — higher apex (~2.2m), more hang time
+    if (jumpQ && grounded) { playerVy = 7.7; grounded = false; }
     jumpQ = false;
     if (!grounded) {
-      playerVy -= 17 * dt; player.airY = (player.airY ?? groundY) + playerVy * dt;
+      playerVy -= 13 * dt; player.airY = (player.airY ?? groundY) + playerVy * dt;
       if (player.airY <= groundY) { player.airY = groundY; playerVy = 0; grounded = true; }
       player.y = player.airY;
     } else { player.y = groundY; player.airY = groundY; }
@@ -4506,14 +4547,15 @@ function tickBody() {
     // full draw = a real longbow anchor: the riser stands nearly
     // VERTICAL just left of the sight line, the arrow runs dead ahead
     // under the eye, the string is at the cheek. You look down the shaft.
-    // the riser sits OFF to the left of the sight line — like a real
-    // archer, you look PAST the bow, not through it. Center stays clear.
-    bow.position.set(0.34 + (-0.22 - 0.34) * r,    // riser well left of center
-                     -0.4 + (-0.10 + 0.4) * r,     // a touch below the eye
-                     -0.62 + (-0.46 + 0.62) * r);  // drawn in close to the face
+    // the riser sits a touch LEFT of the sight line — visible in frame,
+    // off to the side so you look past it, but never off-screen or dead
+    // center where the wood blocks your shot.
+    bow.position.set(0.34 + (-0.12 - 0.34) * r,    // left of center, still in view
+                     -0.4 + (-0.12 + 0.4) * r,     // a touch below the eye
+                     -0.62 + (-0.5 + 0.62) * r);   // drawn in close to the face
     bow.rotation.set(0.05 - 0.02 * r,              // limbs vertical
-                     -0.55 + 0.46 * r,             // angled slightly, not dead-on your eye
-                     0.21 - 0.10 * r);             // keep a little cant so it reads as held aside
+                     -0.55 + 0.5 * r,              // face mostly downrange
+                     0.21 - 0.13 * r);             // a little cant — held just aside
     // walk bob + breath — you're holding it, not gliding with it
     bobPhase += dt * (mx || mz ? 7.5 : 1.6);
     bow.position.y += Math.sin(bobPhase) * (mx || mz ? 0.012 : 0.004);
