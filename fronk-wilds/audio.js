@@ -602,7 +602,7 @@ export class AudioEngine {
     const t = this.ctx.currentTime;
     this.titleBus.gain.cancelScheduledValues(t);
     this.titleBus.gain.setValueAtTime(0.0001, t);
-    this.titleBus.gain.exponentialRampToValueAtTime(0.85, t + 3.0);   // swell up
+    this.titleBus.gain.exponentialRampToValueAtTime(1.15, t + 2.2);   // a bigger, faster swell in
     this._title = { ix: 0, nextT: t + 0.1, fading: false, stopAt: 1e9 };
   }
   // runs every frame (even before the game starts) to keep the theme going

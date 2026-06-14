@@ -43,11 +43,11 @@ const CFG = IS_TOUCH
 //   scale/tint = render overrides (bear: 1.8 scale, dark-brown 0x3a2616)
 const MENAGERIE = {
   // ── prey ──
-  Deer:  { n: 16, speed: 3.0, gallop: 12.8, hp: 2, flee: 26, r: 1.1,
-           keen: 1.45, aggroBias: 0.10, rear: 0.45, scale: 1.0, hpJit: true },
-           // the staple: EVERYWHERE, twitchy, fast, a small hard target
-  Stag:  { n: 4, speed: 2.7, gallop: 10.6, hp: 3, flee: 22, r: 1.5,
-           keen: 1.15, aggroBias: 0.30, rear: 0.70, scale: 1.18, hpJit: true },
+  Deer:  { n: 16, speed: 3.0, gallop: 12.8, hp: 2, flee: 26, r: 0.7,
+           keen: 1.45, aggroBias: 0.10, rear: 0.45, scale: 0.42, hpJit: true },
+           // the staple: EVERYWHERE, twitchy, fast — a small hard target, shoulder-high to a man at most
+  Stag:  { n: 4, speed: 2.7, gallop: 10.6, hp: 3, flee: 22, r: 0.95,
+           keen: 1.15, aggroBias: 0.30, rear: 0.70, scale: 0.52, hpJit: true },
   Fox:   { n: 8, speed: 3.8, gallop: 12.2, hp: 1, flee: 18, r: 0.5,
            keen: 1.7, aggroBias: 0.05, rear: 0.2, scale: 0.45, darty: true },  // little critters — many, tiny, skittish, JUKE when fleeing — hard to hit
   Cow:   { n: 1, speed: 1.9, gallop: 7.4,  hp: 3, flee: 13, r: 1.6,
@@ -1818,10 +1818,10 @@ const LANDMARKS = [
   },
   {
     // CAMP 1 — neat, lived-in, fire still burning. A trapper keeping order.
-    id: 'camp_trapper', name: 'The Trapper’s Rest', x: -180, z: -160, r: 13,
-    journal: 'Kept this place like it mattered. They never came back.',
+    id: 'camp_trapper', name: 'A Camp', x: -180, z: -160, r: 13,
+    journal: 'Someone was here.',
     build(g) {
-      buildTent(g, { color: 0x9c5e2c, x: -3.2, z: 0.4, rot: 0.5, h: 3.0, r: 2.4 });
+      buildTent(g, { color: 0xb3a684, x: -3.2, z: 0.4, rot: 0.5, h: 3.0, r: 2.4 });  // waxed canvas
       // a tidy stack of split firewood
       for (let i = 0; i < 4; i++) {
         const lg = new THREE.Mesh(logGeo, logMat);
@@ -1837,10 +1837,10 @@ const LANDMARKS = [
   },
   {
     // CAMP 2 — ruffled, half-collapsed tent, fire guttering low.
-    id: 'camp_ruffled', name: 'Where the Snow Caught Them', x: 200, z: -240, r: 13,
-    journal: 'Tent half down. They left fast, or not by choice.',
+    id: 'camp_ruffled', name: 'A Camp', x: 200, z: -240, r: 13,
+    journal: 'Left in a hurry.',
     build(g) {
-      buildTent(g, { color: 0x7d6a52, x: -2.8, z: 0.2, rot: 0.9, h: 2.8, r: 2.5, collapsed: true });
+      buildTent(g, { color: 0x988b6f, x: -2.8, z: 0.2, rot: 0.9, h: 2.8, r: 2.5, collapsed: true });  // weathered canvas
       // scattered gear: a tipped log and a dropped bone
       const lg = new THREE.Mesh(logGeo, logMat);
       lg.rotation.set(0.4, 0.6, Math.PI / 2 + 0.3); lg.position.set(2.6, 0.3, 2.2);
@@ -1852,8 +1852,8 @@ const LANDMARKS = [
   },
   {
     // CAMP 3 — long abandoned. Tent gone. Cold stone ring + bones.
-    id: 'camp_cold', name: 'The Long-Cold Ring', x: -300, z: 120, r: 13,
-    journal: 'Old fire ring. Clean bones. Long time gone.',
+    id: 'camp_cold', name: 'A Cold Camp', x: -300, z: 120, r: 13,
+    journal: 'Long cold.',
     build(g) {
       buildFire(g, 0, 0, false);
       // a small scatter of weathered bones around the cold ring
@@ -1870,10 +1870,10 @@ const LANDMARKS = [
   },
   {
     // CAMP 4 — a lean-to, fire lit, a spit. A hunter still working a kill.
-    id: 'camp_leanto', name: 'The Skinner’s Lean-To', x: 120, z: -100, r: 13,
-    journal: 'Working camp. The fire is warm. Step light.',
+    id: 'camp_leanto', name: 'A Camp', x: 120, z: -100, r: 13,
+    journal: 'The fire is still warm.',
     build(g) {
-      buildTent(g, { color: 0x6f4a2a, x: -2.6, z: 0, rot: 0.4, leanTo: true });
+      buildTent(g, { color: 0x6f5436, x: -2.6, z: 0, rot: 0.4, leanTo: true });  // oiled hide
       buildFire(g, 1.0, 0.2, true);
       buildSpit(g, 1.0, 0.2);
       // a drying rack: two stakes + crossbar with a hanging strip
@@ -4984,10 +4984,10 @@ function tickBody() {
   // title/dive: open the fog so the aerial vista isn't washed to haze
   if (!started) { scene.fog.far = 900; }
   if (!started && !launching) {
-    // TITLE: a vast, high, slowly-orbiting aerial of the whole valley —
-    // the world should feel enormous before you're dropped into it.
-    const a = t * 0.012;
-    camera.position.set(Math.cos(a) * 150, 165, Math.sin(a) * 150);
+    // TITLE: a fast, sweeping aerial orbit of the whole valley — cinematic,
+    // the world rushing past beneath you before you're dropped in.
+    const a = t * 0.07;
+    camera.position.set(Math.cos(a) * 150, 150 + Math.sin(t * 0.13) * 12, Math.sin(a) * 150);
     camera.lookAt(0, 6, 0);
     camera.rotation.order = 'YXZ';
   } else if (launching) {
