@@ -596,8 +596,10 @@ const trampleUniform = { value: new THREE.Vector4(0, 0, 0, 26) };
       `#include <begin_vertex>
        float bendY = position.y * position.y * 0.62;
        float ph = instanceMatrix[3][0]*0.21 + instanceMatrix[3][2]*0.17;
-       transformed.x += (sin(uTime*1.9 + ph) + 0.4*sin(uTime*3.7 + ph*1.7)) * bendY * 0.55;
-       transformed.z += cos(uTime*1.4 + ph) * bendY * 0.38;`);
+       // a traveling wind WAVE rolls across the meadow — visible bands of bend
+       float wave = 0.72 + 0.5*sin(uTime*0.9 - instanceMatrix[3][0]*0.05 - instanceMatrix[3][2]*0.043);
+       transformed.x += (sin(uTime*1.9 + ph) + 0.4*sin(uTime*3.7 + ph*1.7)) * bendY * 0.55 * wave;
+       transformed.z += cos(uTime*1.4 + ph) * bendY * 0.38 * wave;`);
   };
   // REAL grass = density where you're standing. The field is a dense
   // ±R box that follows the player: blades that fall behind wrap
@@ -1206,6 +1208,9 @@ function mergeGeoms(list) {
        float bendY = position.y * 0.10;
        float ph = instanceMatrix[3][0]*0.21 + instanceMatrix[3][2]*0.17;
        float gust = 0.6 + 0.4*sin(uTime*0.3 + instanceMatrix[3][2]*0.015);
+       // a traveling wind WAVE rolls across the meadow — a band of stronger bend
+       float wave = 0.7 + 0.55*sin(uTime*0.9 - instanceMatrix[3][0]*0.05 - instanceMatrix[3][2]*0.043);
+       gust *= wave;
        transformed.x += (sin(uTime*1.6 + ph) + 0.3*sin(uTime*3.1 + ph*1.6)) * bendY * gust;
        transformed.z += cos(uTime*1.2 + ph) * bendY * 0.6 * gust;`);
   };
@@ -2721,6 +2726,75 @@ function updateButterflies(dt, t) {
     const fadeOut = Math.min(1, bflyT / 2.5);
     u.mat.opacity = fadeIn * fadeOut;
     if (bflyT <= 0) b.visible = false;
+  }
+}
+
+// ── golden-hour pollen ── soft motes drifting in the light around you. Day
+// only; additive gold; the box follows you so the air always shimmers.
+const _dotTex = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 32;
+  const x = c.getContext('2d'); const g = x.createRadialGradient(16, 16, 0, 16, 16, 16);
+  g.addColorStop(0, 'rgba(255,246,214,1)'); g.addColorStop(0.4, 'rgba(255,232,170,0.55)'); g.addColorStop(1, 'rgba(255,232,170,0)');
+  x.fillStyle = g; x.fillRect(0, 0, 32, 32);
+  return new THREE.CanvasTexture(c);
+})();
+const POLLEN_N = IS_TOUCH ? 90 : 170, POLLEN_BOX = 38;
+const pollen = (() => {
+  const geo = new THREE.BufferGeometry();
+  const pos = new Float32Array(POLLEN_N * 3);
+  for (let i = 0; i < POLLEN_N; i++) {
+    pos[i * 3] = (Math.random() - 0.5) * POLLEN_BOX;
+    pos[i * 3 + 1] = Math.random() * 15;
+    pos[i * 3 + 2] = (Math.random() - 0.5) * POLLEN_BOX;
+  }
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  const mat = new THREE.PointsMaterial({ map: _dotTex, size: 0.24, transparent: true, opacity: 0,
+    depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: true, color: 0xffe7a8 });
+  const p = new THREE.Points(geo, mat); p.frustumCulled = false; scene.add(p); return p;
+})();
+function updatePollen(t, dt, night) {
+  pollen.material.opacity = 0.5 * (1 - night);          // day only
+  if (night > 0.96) return;
+  pollen.position.set(player.x, heightAt(player.x, player.z), player.z);
+  const a = pollen.geometry.attributes.position.array;
+  for (let i = 0; i < POLLEN_N; i++) {
+    a[i * 3] += Math.sin(t * 0.3 + i) * dt * 0.25;
+    a[i * 3 + 1] += dt * 0.4;                            // rise slowly through the light
+    a[i * 3 + 2] += Math.cos(t * 0.25 + i) * dt * 0.25;
+    if (a[i * 3 + 1] > 15.5) { a[i * 3 + 1] = 0;
+      a[i * 3] = (Math.random() - 0.5) * POLLEN_BOX; a[i * 3 + 2] = (Math.random() - 0.5) * POLLEN_BOX; }
+  }
+  pollen.geometry.attributes.position.needsUpdate = true;
+}
+
+// ── birds ── a skein crossing the high sky, day only, on a slow loop. Adds
+// life and a sense of scale to the valley.
+const birds = (() => {
+  const g = new THREE.Group();
+  const mat = new THREE.MeshBasicMaterial({ color: 0x232730, side: THREE.DoubleSide });
+  for (let i = 0; i < 7; i++) {
+    const b = new THREE.Group();
+    for (const s of [-1, 1]) {
+      const w = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 0.6), mat);
+      w.rotation.x = -Math.PI / 2; w.position.x = s * 1.3; w.rotation.y = s * 0.5; b.add(w);
+    }
+    b.position.set((i - 3) * 4.5, (Math.random() - 0.5) * 5, (Math.random() - 0.5) * 10);
+    b.userData.ph = i * 0.8; g.add(b);
+  }
+  scene.add(g); return g;
+})();
+let _birdT = 0;
+function updateBirds(t, dt, night) {
+  birds.visible = night < 0.45;
+  if (!birds.visible) return;
+  _birdT += dt;
+  const span = WORLD * 0.6;
+  const x = ((_birdT * 7) % (span * 2)) - span;         // glide across, wrap
+  birds.position.set(x, 120 + Math.sin(_birdT * 0.2) * 12, Math.sin(_birdT * 0.05) * span * 0.3);
+  birds.rotation.y = -Math.PI / 2;
+  for (const b of birds.children) {
+    const fl = Math.sin(t * 7 + b.userData.ph) * 0.6;
+    b.children[0].rotation.y = 0.5 + fl; b.children[1].rotation.y = -0.5 - fl;
   }
 }
 
@@ -5579,6 +5653,7 @@ function tickBody() {
   moon.material.opacity = night * Math.max(0, Math.min(1, (_moonDir.y - 0.06) * 6)) * 0.9;
   updateFireflies(t, night);
   updateButterflies(dt, t);
+  if (started) { updatePollen(t, dt, night); updateBirds(t, dt, night); }
   corruptionUpdate(dt, t);
   updateMist(t, night);
   // flower trample: live player bends instantly; the wake (zw) trails and
