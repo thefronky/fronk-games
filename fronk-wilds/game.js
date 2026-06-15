@@ -4130,6 +4130,7 @@ const _eyelids = document.getElementById('eyelids');
 const _exhaust = document.getElementById('exhaust');   // hunger/exhaustion edge-darkening
 let _exhaustV = 0;                                      // eased opacity, 0..1
 const _heaven = document.getElementById('heaven');     // overexposed-heavenly wash high in the climb
+const _warpDisp = document.getElementById('warpDisp'); // SVG liquid-warp displacement for the deep trip
 const _consumeBtn = document.getElementById('consume'); // tap-to-eat the mushroom
 if (_consumeBtn) {
   const eat = (e) => { e.preventDefault(); e.stopPropagation(); window._eatMushroom(); };
@@ -4354,42 +4355,41 @@ function buildKitchenItem(kind, col) {
   g.traverse(o => { if (o.isMesh) o.castShadow = true; });
   return g;
 }
+// an ENDLESS spiral of clouds — they keep generating above you forever, so
+// you can climb and climb and climb. Bounded by pruning the ones far below.
+let _cloudCx = 0, _cloudCz = 0, _cloudBaseY = 0, _cloudI = 0, _cloudTopY = 0;
+function _makeCloud(i) {
+  const ang = i * 0.8;                                    // spirals around a column
+  const rad = 9 + 5.5 * Math.sin(i * 0.37);              // bounded — stays in the column
+  const x = _cloudCx + Math.cos(ang) * rad, z = _cloudCz + Math.sin(ang) * rad;
+  const y = _cloudBaseY + 8 + i * 4.4;                   // forever upward
+  const r = 3.4 + Math.random() * 2.2;
+  const g = new THREE.Group(); g.position.set(x, y, z);
+  for (let b = 0; b < 4; b++) {
+    const s = new THREE.Mesh(_cloudBlobGeo, _cloudMat3);
+    s.position.set((Math.random() - 0.5) * r * 1.5, (Math.random() - 0.5) * 0.7, (Math.random() - 0.5) * r * 1.5);
+    s.scale.setScalar(0.7 + Math.random() * 0.9); g.add(s);
+  }
+  _cloudGroup.add(g);
+  CLOUDSTEPS.push({ x, z, y: y + 0.8, r: r + 2.0, grp: g });
+  if (y > _cloudTopY) _cloudTopY = y;
+}
 function spawnClouds() {
   clearClouds();
   _cloudGroup = new THREE.Group(); scene.add(_cloudGroup);
-  const cx = player.x, cz = player.z, baseY = player.y;
-  const N = IS_TOUCH ? 24 : 36;
-  for (let i = 0; i < N; i++) {
-    const ang = i * 0.85 + Math.random() * 0.5;          // spiral up
-    const rad = 7 + i * 0.7 + Math.random() * 5;
-    const x = cx + Math.cos(ang) * rad, z = cz + Math.sin(ang) * rad;
-    const y = baseY + 8 + i * 4.2 + Math.random() * 2.5;  // ascending staircase
-    const r = 3.2 + Math.random() * 2.4;
-    const g = new THREE.Group(); g.position.set(x, y, z);
-    for (let b = 0; b < 4; b++) {
-      const s = new THREE.Mesh(_cloudBlobGeo, _cloudMat3);
-      s.position.set((Math.random() - 0.5) * r * 1.5, (Math.random() - 0.5) * 0.7, (Math.random() - 0.5) * r * 1.5);
-      s.scale.setScalar(0.7 + Math.random() * 0.9); g.add(s);
+  _cloudCx = player.x; _cloudCz = player.z; _cloudBaseY = player.y;
+  _cloudI = 0; _cloudTopY = player.y;
+  for (let k = 0; k < (IS_TOUCH ? 26 : 38); k++) _makeCloud(_cloudI++);
+}
+// keep ~140m of clouds above you, prune the ones well below — endless climb
+function extendClouds() {
+  if (!_cloudGroup || tripLevel < 3) return;
+  while (_cloudTopY < player.y + 140 && _cloudI < 100000) _makeCloud(_cloudI++);
+  if (CLOUDSTEPS.length > 80) {
+    for (let i = CLOUDSTEPS.length - 1; i >= 0; i--) {
+      const c = CLOUDSTEPS[i];
+      if (c.grp && c.y < player.y - 70) { _cloudGroup.remove(c.grp); CLOUDSTEPS.splice(i, 1); }
     }
-    _cloudGroup.add(g);
-    CLOUDSTEPS.push({ x, z, y: y + 0.8, r: r + 2.0 });    // landable top, generous pad
-  }
-  // and up top, the KITCHEN — climb the clouds into it
-  const KITS = [['mug', 0xd11f2a], ['cookie', 0xc0894a], ['box', 0xf2c500],
-                ['mug', 0x2a6fd1], ['cookie', 0xa9743a], ['box', 0xe0452a]];
-  const topCloud = baseY + 8 + N * 4.2;
-  for (let i = 0; i < KITS.length; i++) {
-    const ang = i * 1.15 + 0.5, rad = 16 + i * 4;
-    const x = cx + Math.cos(ang) * rad, z = cz + Math.sin(ang) * rad;
-    const y = topCloud + 6 + i * 16;                     // higher than the clouds
-    const obj = buildKitchenItem(KITS[i][0], KITS[i][1]);
-    obj.position.set(x, y, z); _cloudGroup.add(obj);
-    CLOUDSTEPS.push({ x, z, y: y + obj.userData.topH, r: obj.userData.r });
-    // a glowing puzzle target floating just above each object — fire to light
-    const tm = new THREE.Mesh(_targGeo, _targUnlitMat);
-    const ty = y + obj.userData.topH + 3.5;
-    tm.position.set(x, ty, z); _cloudGroup.add(tm);
-    KITCHEN_TARGETS.push({ mesh: tm, x, y: ty, z, lit: false });
   }
 }
 function clearClouds() {
@@ -4497,7 +4497,7 @@ function hurtPlayer(dmg) {
 // While it burns the fire JUMPS to 1-2 nearby trees — so a careless trip
 // can sweep a whole grove to ash. Bounded by MAX_TREEFIRE for the phone.
 const TREEFIRES = [];
-const MAX_TREEFIRE = IS_TOUCH ? 14 : 28;   // a real wildfire that runs
+const MAX_TREEFIRE = IS_TOUCH ? 40 : 90;   // a true wildfire — one tree can take the whole forest
 const _fmA = new THREE.MeshBasicMaterial({ color: 0xff6a18, transparent: true, opacity: 0.95 });
 const _fmB = new THREE.MeshBasicMaterial({ color: 0xffab3a, transparent: true, opacity: 0.95 });
 const _fmC = new THREE.MeshBasicMaterial({ color: 0xffe7a0, transparent: true, opacity: 0.95 });
@@ -4529,8 +4529,8 @@ function igniteTree(tr) {
     light.position.set(tr.x, gy + h * 0.5, tr.z); scene.add(light);
   }
   if (audio.impact) audio.impact('wood', 0.4);
-  TREEFIRES.push({ tr, grp, light, t: 0, dur: 4.5 + Math.random() * 2,
-                   spreadAt: 0.6 + Math.random() * 0.7, spread: 0, gy, h });   // catches sooner
+  TREEFIRES.push({ tr, grp, light, t: 0, dur: 5.5 + Math.random() * 2.5,
+                   spreadAt: 0.4 + Math.random() * 0.4, spread: 0, gy, h });   // catches FAST, burns long
   return true;
 }
 // scorched-earth wake: each felled tree leaves a sandy/ash scar on the ground.
@@ -4540,7 +4540,7 @@ const _scarMat = new THREE.MeshStandardMaterial({ color: 0xb89b6a, roughness: 1 
 let _scarGroup = null;
 function scorch(x, z, r) {
   if (!_scarGroup) { _scarGroup = new THREE.Group(); scene.add(_scarGroup); }
-  if (_scarGroup.children.length > 400) return;   // bound the count
+  if (_scarGroup.children.length > 1200) return;  // bound the count (a whole forest can burn)
   const s = new THREE.Mesh(_scarGeo, _scarMat);
   s.rotation.x = -Math.PI / 2; s.rotation.z = Math.random() * Math.PI;
   s.position.set(x, heightAt(x, z) + 0.05, z);
@@ -4549,7 +4549,7 @@ function scorch(x, z, r) {
 }
 window._scars = () => (_scarGroup ? _scarGroup.children.length : 0);   // debug/test hook
 function fellTree(tr) {                           // char the instance down to a black stump, then it's gone
-  scorch(tr.x, tr.z, 4 + (tr.sc || 1) * 2);       // leave desert in the wake
+  scorch(tr.x, tr.z, 6 + (tr.sc || 1) * 3);       // a wide scar — burned forest becomes open desert
   if (!tr.inst) { tr._gone = true; tr.r = 0; tr.top = -999; return; }
   _mat4 = _mat4 || new THREE.Matrix4();
   _q0 = _q0 || new THREE.Quaternion();
@@ -4583,11 +4583,11 @@ function treeFireUpdate(dt) {
     if (!f.spread && f.t > f.spreadAt) {
       f.spread = 1;
       let lit = 0;
-      const want = 2 + (Math.random() < 0.6 ? 1 : 0);   // 2-3 neighbours — runs hard
+      const want = 4 + (Math.random() < 0.5 ? 1 : 0);   // 4-5 neighbours — an inferno that won't quit
       for (const o of TREES) {
         if (lit >= want) break;
         if (o === f.tr || o._burning || o._gone || o.top === undefined) continue;
-        if (Math.hypot(o.x - f.tr.x, o.z - f.tr.z) > 16) continue;   // reaches FARTHER
+        if (Math.hypot(o.x - f.tr.x, o.z - f.tr.z) > 24) continue;   // reaches FAR — leaps gaps
         if (igniteTree(o)) lit++;
       }
     }
@@ -5500,14 +5500,24 @@ function tickBody() {
     const con = 1 + (0.28 + 0.1 * lv) * k * (1 - heaven * 0.6);
     const bri = 1 + (0.05 + 0.02 * lv) + heaven * 0.38 + 0.04 * Math.sin(t * 1.3) * k;  // overexposed up high (but kitchen still visible)
     const blur = IS_TOUCH ? 0 : (0.35 + 0.45 * Math.sin(t * 0.5)) * k;
-    canvas.style.filter = 'hue-rotate(' + hue.toFixed(0) + 'deg) saturate(' + sat.toFixed(2)
+    // surreal liquid WARP (desktop): an SVG displacement that breathes — the
+    // world melts and bends, not just a neon color shift.
+    let warp = '';
+    if (_warpDisp) {
+      _warpDisp.setAttribute('scale', (IS_TOUCH ? 0 : (10 + lv * 10) * k * (1 - heaven * 0.7)).toFixed(1));
+      if (!IS_TOUCH) warp = 'url(#warp) ';
+    }
+    canvas.style.filter = warp + 'hue-rotate(' + hue.toFixed(0) + 'deg) saturate(' + sat.toFixed(2)
       + ') contrast(' + con.toFixed(2) + ') brightness(' + bri.toFixed(2)
       + ') blur(' + blur.toFixed(2) + 'px)';
-    // a slow, oceanic swell + drift — gentle, never a fast spin
+    // a slow oceanic swell + drift + a melting SKEW — surreal, not a fast spin
     const sc = 1 + (0.02 + 0.01 * lv) * Math.sin(t * 0.8) * k;
     const rot = (0.3 + 0.14 * lv) * Math.sin(t * 0.3) * k;
+    const skx = (1.4 + lv * 0.9) * Math.sin(t * 0.6) * k;       // the picture leans + warps
+    const sky = (1.4 + lv * 0.9) * Math.cos(t * 0.42) * k;
     canvas.style.transformOrigin = 'center';
-    canvas.style.transform = 'scale(' + sc.toFixed(3) + ') rotate(' + rot.toFixed(2) + 'deg)';
+    canvas.style.transform = 'scale(' + sc.toFixed(3) + ') rotate(' + rot.toFixed(2)
+      + 'deg) skewX(' + skx.toFixed(2) + 'deg) skewY(' + sky.toFixed(2) + 'deg)';
     if (_heaven) _heaven.style.opacity = (heaven * 0.42).toFixed(3);   // a heavenly haze, not a whiteout
     if (tripT <= 0) { tripLevel = 0; clearClouds(); }   // sober up
   } else if (canvas.style.filter) {
@@ -6120,12 +6130,25 @@ function tickBody() {
       const hover = (tripLevel >= 3 ? 7 : 1.6) + (tripLevel >= 3 ? 3.5 : 0.7) * Math.sin(t * 0.5 + ph);
       a.obj.position.y = gy + Math.max(0, hover) + Math.sin(t * 0.9 + ph) * 0.4;
       a.obj.rotation.z = Math.sin(t * 0.45 + ph) * 0.22;   // a slow, fishy sway
+      // ── they PLAY ── deep in the trip the animals do things they never do:
+      // slow barrel-rolls and lazy spins, drifting around each other, dreamlike.
+      if (tripLevel >= 3) {
+        a.obj.rotation.y += dt * (0.6 + 0.5 * Math.sin(t * 0.3 + ph));   // lazy spin
+        a.obj.rotation.x = Math.sin(t * 0.6 + ph) * 0.5;                 // barrel-roll tumble
+        // drift toward a dance partner — they cluster and circle in the air
+        const partner = animals[(a._partnerIx ?? (a._partnerIx = (Math.random() * animals.length) | 0)) % animals.length];
+        if (partner && partner !== a && !partner.dead) {
+          a.obj.position.x += (partner.obj.position.x - a.obj.position.x) * dt * 0.12;
+          a.obj.position.z += (partner.obj.position.z - a.obj.position.z) * dt * 0.12;
+        }
+      }
     }
   }
   arrowUpdate(wdt);
   treeFireUpdate(dt);              // burning trees climb, spread, then fall
   trailUpdate(dt);                 // rocket-fuel embers fade
   arrivalUpdate(dt);              // the genesis blast: ring/flash/beam + the home growing in
+  extendClouds();                 // the endless climb — generate clouds above, prune below
   if (USE_POST) {
     // night needs a softer bloom threshold so fireflies/stars breathe
     bloomPass.threshold = 0.85 - (window._night || 0) * 0.38;
