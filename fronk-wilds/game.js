@@ -189,8 +189,26 @@ const hemi = new THREE.HemisphereLight(0xe6b277, 0x2c3220, 0.5);
 scene.add(hemi);
 // a warm light you carry — a lantern glow that follows you and BLOOMS at
 // night so the dark is navigable, not pitch black. Cheap: one point light.
-const playerLight = new THREE.PointLight(0xffd9a0, 0, 30, 1.5);
+const playerLight = new THREE.PointLight(0xffcf86, 0, 24, 1.7);
 scene.add(playerLight);
+// a VISIBLE lantern you hold — a glowing amber lamp in the corner of view.
+// It's the horror-movie light: a bright pool ~20ft, pitch dark beyond it.
+const lanternHeld = new THREE.Group();
+{
+  const glass = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.08, 0.16, 8),
+    new THREE.MeshStandardMaterial({ color: 0xffcf6e, emissive: 0xffb43a, emissiveIntensity: 3.2,
+      transparent: true, opacity: 0.92 }));
+  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.085, 0.05, 8),
+    new THREE.MeshStandardMaterial({ color: 0x20160c, roughness: 0.7 }));
+  cap.position.y = 0.11;
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(0.085, 0.07, 0.04, 8),
+    new THREE.MeshStandardMaterial({ color: 0x20160c, roughness: 0.7 }));
+  base.position.y = -0.1;
+  lanternHeld.add(glass, cap, base);
+  lanternHeld.position.set(0.42, -0.34, -0.7);   // held low-right in view
+  camera.add(lanternHeld);
+  scene.add(camera);                              // ensure the camera's children render
+}
 
 // sky dome — sunset gradient + sun glow
 const skyUniforms = {
@@ -633,6 +651,28 @@ const trampleUniform = { value: new THREE.Vector4(0, 0, 0, 26) };
   };
 }
 
+// ── the 5 landing beds ── flower clearings you can drop into. The first is
+// the classic spawn meadow; the rest are spread across the valley. Each is
+// nudged onto solid, fairly flat ground. You pick one by WHEN you tap out of
+// the drone shot — the dive goes to whichever bed the camera is nearest.
+const FLOWERBEDS = (() => {
+  const want = [[0, 26], [72, -34], [-80, 20], [36, 98], [-48, -78]];
+  const out = [];
+  for (const [tx, tz] of want) {
+    let bx = tx, bz = tz, best = -1e9;
+    for (let r = 0; r <= 34; r += 6) for (let a = 0; a < 6.28; a += 0.6) {
+      const x = tx + Math.cos(a) * r, z = tz + Math.sin(a) * r, y = heightAt(x, z);
+      if (y < WATER_Y + 1.6 || y > 18) continue;
+      const slope = Math.abs(heightAt(x + 2.5, z) - y) + Math.abs(heightAt(x, z + 2.5) - y);
+      const score = -slope - r * 0.01;          // flattest, closest to the target
+      if (score > best) { best = score; bx = x; bz = z; }
+    }
+    out.push({ x: bx, z: bz });
+  }
+  return out;
+})();
+window._beds = () => FLOWERBEDS;
+
 // ───────────────────── flowers + ground detail ──────────────────────
 // Three instanced layers, all pre-built once, zero per-frame allocation:
 //   • wildflowers  — player-following toroidal field (reuses grass pattern)
@@ -836,17 +876,18 @@ const FLOWER_PALETTE = [
   }
   scene.add(mushM);
 
-  // ── 4. STATIC DENSE WAKE-BED — a bright flower disc at SPAWN ──
+  // ── 4. STATIC DENSE WAKE-BEDS — a bright flower disc at EACH of the 5 beds ──
   const bedM = new THREE.InstancedMesh(flowerGeoBase, flowerMat, CFG.bedFlowers);
   bedM.frustumCulled = false; bedM.castShadow = false;
   {
     let placed = 0, guard = 0;
     const BED_R = 11;
     while (placed < CFG.bedFlowers && guard++ < CFG.bedFlowers * 30) {
+      const bed = FLOWERBEDS[placed % FLOWERBEDS.length];   // round-robin across all 5
       const a = Math.random() * Math.PI * 2, rr = Math.sqrt(Math.random()) * BED_R;
-      const x = SPAWN.x + Math.cos(a) * rr, z = SPAWN.z + Math.sin(a) * rr,
+      const x = bed.x + Math.cos(a) * rr, z = bed.z + Math.sin(a) * rr,
             y = heightAt(x, z);
-      if (y < WATER_Y + 0.6 || y > 17) continue;
+      if (y < WATER_Y + 0.6 || y > 19) continue;
       const s = 0.8 + Math.random() * 0.9;
       P.set(x, y - 0.04, z);
       E.set(0, Math.random() * Math.PI * 2, 0); Q.setFromEuler(E);
@@ -1215,9 +1256,8 @@ function mergeGeoms(list) {
     E.set(Math.random(), Math.random() * 6, Math.random()); Q.setFromEuler(E);
     const s = 0.5 + Math.random() * 1.6; S.set(s, s * (0.6 + Math.random() * 0.6), s);
     rocks.setMatrixAt(placed++, M.compose(P, Q, S));
-    // EVERY rock is solid now — no more walking through them. Big ones (s>1)
-    // you must jump; the small ones still block but read as low stones.
-    TREES.push({ x, z, r: s * 0.62, top: s > 1 ? undefined : y + s * 0.5 });
+    // "no more rocks" — rocks are pure scenery now, no collision walls. The
+    // crater you land in is the thing you climb; rocks never block you again.
   }
   rocks.count = placed;
   scene.add(rocks);
@@ -2282,26 +2322,10 @@ function buildBase(bx, bz) {
   const boneMat = new THREE.MeshStandardMaterial({ color: 0xe8e0cf, roughness: 0.9 });
   const cdir = Math.PI * 0.5;                 // the cove's bearing (its gap in the wall)
 
-  // ── the wall ── a real ring of boulders you must JUMP to clear, set
-  // shoulder-high. Solid (no walking through) and tall enough that
-  // animals can't get in — but a hop puts you up and over. A gap is
-  // left where the cove sits.
-  const RING = 9.5, WALL_H = 1.6;             // 1.6m ABOVE LOCAL GROUND → blocks a walk, clears a jump
-  for (let i = 0; i < 38; i++) {
-    const a = i / 38 * Math.PI * 2;            // a COMPLETE ring — you must jump out anywhere
-    const rr = RING + Math.sin(i * 2.3) * 0.5;
-    const wx = bx + Math.cos(a) * rr, wz = bz + Math.sin(a) * rr;
-    const gY = heightAt(wx, wz);               // sit each boulder on its OWN ground
-    const sc = 1.3 + (i % 4) * 0.18;
-    const s = new THREE.Mesh(bigStoneGeo, stoneMat);
-    s.position.set(Math.cos(a) * rr, (gY - baseY) + WALL_H * 0.55, Math.sin(a) * rr);
-    s.rotation.set(i * 0.3, a, i * 0.25);
-    s.scale.set(sc, WALL_H * 0.9, sc);
-    g.add(s);
-    // solid + clamber-on-jump: top is 1.6m over its own footing, so a
-    // grounded walk is blocked but a jump puts your feet over it
-    STEPPROPS.push({ x: wx, z: wz, r: sc * 0.92, top: gY + WALL_H });
-  }
+  // (the boulder wall ring is gone — "no more rocks". The crater you punched
+  //  into the earth on landing is the wall now; see buildDivot, built at the
+  //  landing point. You boulder your way UP its tiers to get out.)
+  const RING = 9.5;
   BASE_RING = { x: bx, z: bz, r: RING - 1.2 };   // animals deflected at this radius
 
   // ── the campfire — OFF to one side so you wake NEXT to it, not in it ──
@@ -2355,6 +2379,56 @@ function buildBase(bx, bz) {
 
   scene.add(g);
   window._base = { group: g, COVE, BASE_FIRE };
+}
+
+// ── the CRATER ── the divot your fall punched into the earth. Two ascending
+// tiers of raw dirt ledges ring the home; you wake at the floor and must
+// BOULDER your way up them (a jump per tier) to get out into the valley. A
+// gap is left toward the cove. Rebuilt wherever you land.
+const _dirtGeo = new THREE.BoxGeometry(1, 1, 1);
+const _dirtMat = new THREE.MeshStandardMaterial({ color: 0x4e3a26, roughness: 1, flatShading: true });
+const _dirtDarkMat = new THREE.MeshStandardMaterial({ color: 0x33251a, roughness: 1, flatShading: true });
+let _divotGroup = null;
+function buildDivot(cx, cz) {
+  if (_divotGroup) { scene.remove(_divotGroup); _divotGroup = null; }
+  for (let i = STEPPROPS.length - 1; i >= 0; i--) if (STEPPROPS[i]._divot) STEPPROPS.splice(i, 1);
+  const g = new THREE.Group(); const gy = heightAt(cx, cz); g.position.set(cx, gy, cz);
+  // scorched crater floor
+  const floor = new THREE.Mesh(new THREE.CircleGeometry(13, 26), _dirtDarkMat);
+  floor.rotation.x = -Math.PI / 2; floor.position.y = 0.03; g.add(floor);
+  const coveDir = Math.PI * 0.5;               // leave the wall open toward the cove
+  const tiers = [{ r: 7.5, h: 2.0, n: 20 }, { r: 11, h: 4.0, n: 26 }];
+  for (const tier of tiers) {
+    for (let i = 0; i < tier.n; i++) {
+      const a = i / tier.n * Math.PI * 2 + cx * 0.07;
+      // skip a span toward the cove so you can reach it / step out there
+      let da = Math.abs(((a - coveDir + Math.PI) % (Math.PI * 2)) - Math.PI);
+      if (da < 0.55) continue;
+      const wx = cx + Math.cos(a) * tier.r, wz = cz + Math.sin(a) * tier.r;
+      const blk = new THREE.Mesh(_dirtGeo, (i % 2) ? _dirtMat : _dirtDarkMat);
+      const sh = tier.h + 3;                    // buried base, top stands tier.h proud
+      blk.position.set(Math.cos(a) * tier.r, tier.h - sh / 2, Math.sin(a) * tier.r);
+      blk.scale.set(2.0 + (i % 3) * 0.3, sh, 1.8);
+      blk.rotation.y = a; blk.castShadow = true; g.add(blk);
+      STEPPROPS.push({ x: wx, z: wz, r: 1.35, top: gy + tier.h, _divot: true });
+    }
+  }
+  scene.add(g); _divotGroup = g;
+}
+window._buildDivot = (x, z) => buildDivot(x, z);
+
+// move the whole home (campfire, cove, cache, anchors) to the bed you landed
+// in, then punch the crater there. A clean translation — everything was built
+// once at the first bed; this just slides it over to wherever you dropped.
+function relocateHome(x, z) {
+  const b = window._base; if (!b) { buildDivot(x, z); return; }
+  const dx = x - BASE_RING.x, dz = z - BASE_RING.z;
+  b.group.position.x += dx; b.group.position.z += dz;
+  b.group.position.y = heightAt(x, z);
+  if (BASE_FIRE) { BASE_FIRE.cx += dx; BASE_FIRE.cz += dz; }
+  if (COVE) { COVE.x += dx; COVE.z += dz; }
+  BASE_RING.x = x; BASE_RING.z = z;
+  buildDivot(x, z);
 }
 
 // nearest wild fire to the player, and whether you're inside its safe ring
@@ -3780,7 +3854,11 @@ scene.add(canoe);
 // ───────────────────────── player ─────────────────────────
 // the calm clearing you wake in — every life starts and respawns here
 // wake looking UP at the sky (orange→blue), not forced down
-const SPAWN = { x: 0, z: 26, yaw: Math.PI, pitch: 0.5 };
+const SPAWN = { x: FLOWERBEDS[0].x, z: FLOWERBEDS[0].z, yaw: Math.PI, pitch: 0.5 };
+// LAND = the bed you actually drop into (chosen from the drone shot). Defaults
+// to the first bed; set when you tap out of the orbit, and where you respawn.
+let LAND = { x: SPAWN.x, z: SPAWN.z };
+window._land = () => LAND;
 const player = { x: SPAWN.x, z: SPAWN.z, yaw: SPAWN.yaw, pitch: SPAWN.pitch,
                  hp: 100, lastHit: -99, meat: 0, stored: 0, lastAte: 0, arrows: 10 };
 const ARROW_MAX = 30;   // a full quiver
@@ -3845,7 +3923,7 @@ const _beamGeo = new THREE.CylinderGeometry(1.6, 3.2, 200, 16, 1, true);
 const _beamMat = new THREE.MeshBasicMaterial({ color: 0xfff2cf, transparent: true,
   opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
 function explodeArrival() {
-  const gx = SPAWN.x, gz = SPAWN.z, gy = heightAt(gx, gz);
+  const gx = LAND.x, gz = LAND.z, gy = heightAt(gx, gz);   // the blast lands where you chose
   // shockwave ring on the ground
   const ring = new THREE.Mesh(_ringGeo, _ringMat.clone()); ring.position.set(gx, gy + 0.2, gz);
   scene.add(ring);
@@ -4107,6 +4185,9 @@ function forageUpdate(t) {
   for (const f of FORAGE) {
     if (f.taken) continue;
     const d = Math.hypot(player.x - f.x, player.z - f.z);
+    // you must be on the SAME plane as the plant — no eating a cap from 400ft
+    // up in the clouds just because you're over it horizontally
+    if (Math.abs(player.y - (f.mesh.position.y || 0)) > 3.2) continue;
     if (f.kind === 'berry') {
       if (d > 2.0) continue;
       f.taken = true; f.mesh.visible = false;
@@ -4194,7 +4275,7 @@ function hurtPlayer(dmg) {
 // While it burns the fire JUMPS to 1-2 nearby trees — so a careless trip
 // can sweep a whole grove to ash. Bounded by MAX_TREEFIRE for the phone.
 const TREEFIRES = [];
-const MAX_TREEFIRE = IS_TOUCH ? 9 : 18;
+const MAX_TREEFIRE = IS_TOUCH ? 14 : 28;   // a real wildfire that runs
 const _fmA = new THREE.MeshBasicMaterial({ color: 0xff6a18, transparent: true, opacity: 0.95 });
 const _fmB = new THREE.MeshBasicMaterial({ color: 0xffab3a, transparent: true, opacity: 0.95 });
 const _fmC = new THREE.MeshBasicMaterial({ color: 0xffe7a0, transparent: true, opacity: 0.95 });
@@ -4226,11 +4307,27 @@ function igniteTree(tr) {
     light.position.set(tr.x, gy + h * 0.5, tr.z); scene.add(light);
   }
   if (audio.impact) audio.impact('wood', 0.4);
-  TREEFIRES.push({ tr, grp, light, t: 0, dur: 5.5 + Math.random() * 2.5,
-                   spreadAt: 1.0 + Math.random() * 1.2, spread: 0, gy, h });
+  TREEFIRES.push({ tr, grp, light, t: 0, dur: 4.5 + Math.random() * 2,
+                   spreadAt: 0.6 + Math.random() * 0.7, spread: 0, gy, h });   // catches sooner
   return true;
 }
+// scorched-earth wake: each felled tree leaves a sandy/ash scar on the ground.
+// Enough of them and the burned swath reads as a DESERT the fire left behind.
+const _scarGeo = new THREE.CircleGeometry(1, 10);
+const _scarMat = new THREE.MeshStandardMaterial({ color: 0xb89b6a, roughness: 1 });   // sun-bleached sand/ash
+let _scarGroup = null;
+function scorch(x, z, r) {
+  if (!_scarGroup) { _scarGroup = new THREE.Group(); scene.add(_scarGroup); }
+  if (_scarGroup.children.length > 400) return;   // bound the count
+  const s = new THREE.Mesh(_scarGeo, _scarMat);
+  s.rotation.x = -Math.PI / 2; s.rotation.z = Math.random() * Math.PI;
+  s.position.set(x, heightAt(x, z) + 0.05, z);
+  s.scale.setScalar(r * (0.8 + Math.random() * 0.6));
+  _scarGroup.add(s);
+}
+window._scars = () => (_scarGroup ? _scarGroup.children.length : 0);   // debug/test hook
 function fellTree(tr) {                           // char the instance down to a black stump, then it's gone
+  scorch(tr.x, tr.z, 4 + (tr.sc || 1) * 2);       // leave desert in the wake
   if (!tr.inst) { tr._gone = true; tr.r = 0; tr.top = -999; return; }
   _mat4 = _mat4 || new THREE.Matrix4();
   _q0 = _q0 || new THREE.Quaternion();
@@ -4264,11 +4361,11 @@ function treeFireUpdate(dt) {
     if (!f.spread && f.t > f.spreadAt) {
       f.spread = 1;
       let lit = 0;
-      const want = 1 + (Math.random() < 0.5 ? 1 : 0);   // 1-2 neighbours
+      const want = 2 + (Math.random() < 0.6 ? 1 : 0);   // 2-3 neighbours — runs hard
       for (const o of TREES) {
         if (lit >= want) break;
         if (o === f.tr || o._burning || o._gone || o.top === undefined) continue;
-        if (Math.hypot(o.x - f.tr.x, o.z - f.tr.z) > 9) continue;
+        if (Math.hypot(o.x - f.tr.x, o.z - f.tr.z) > 16) continue;   // reaches FARTHER
         if (igniteTree(o)) lit++;
       }
     }
@@ -5192,15 +5289,18 @@ function tickBody() {
   const dawn = (phase > 0.7 ? Math.max(0, 1 - Math.abs(phase - 0.88) / 0.12) : 0) * (1 - night);
   sun.color.copy(SUN_WARM).lerp(SUN_NIGHT, night);
   if (dawn > 0) sun.color.lerp(SUN_DAWN, dawn * 0.7);
-  // night stays MOODY but clearly playable — lifted well off the floor
-  hemi.intensity = (0.62 - night * 0.06) * (1 - dawn * 0.18);
-  if ('environmentIntensity' in scene) scene.environmentIntensity = 0.9 - night * 0.26;
-  // a touch more exposure after dark so shadows don't crush to black
-  renderer.toneMappingExposure = 1.14 + night * 0.34;
-  // your carried lantern: faint by day, BRIGHT at night — a wide warm pool
-  playerLight.intensity = 0.8 + night * 7.5;
-  playerLight.distance = 38;
-  playerLight.position.set(player.x, player.y + 2.2, player.z);
+  // night: a moody floor you can just make out shapes by — the lantern does
+  // the real lighting. Bright pool close, darkness (and whatever's in it) beyond.
+  hemi.intensity = (0.52 - night * 0.08) * (1 - dawn * 0.18);
+  if ('environmentIntensity' in scene) scene.environmentIntensity = 0.88 - night * 0.32;
+  renderer.toneMappingExposure = 1.14 + night * 0.28;
+  // your carried lantern — a STRONG warm pool (~20-70ft) with a live flicker;
+  // beyond it, the dark. Faint by day, the hero light after dark.
+  const flick = 1 + Math.sin(t * 13) * 0.05 + Math.sin(t * 27) * 0.03;
+  playerLight.intensity = (1.0 + night * 9.5) * flick;
+  playerLight.distance = 24;
+  playerLight.position.set(player.x, player.y + 1.6, player.z);
+  if (lanternHeld) lanternHeld.children[0].material.emissiveIntensity = (1.6 + night * 4) * flick;
   scene.fog.color.copy(FOG_DAY).lerp(FOG_NIGHT, night);
   if (dawn > 0) scene.fog.color.lerp(FOG_DAWN, dawn * 0.65);
   scene.background.copy(scene.fog.color);
@@ -5452,8 +5552,9 @@ function tickBody() {
       player.y = player.airY;
     } else { player.y = groundY; player.airY = groundY; }
     // stepped off the bank into deep water → board the canoe (carry your
-    // walking momentum in as the boat's starting drift)
-    if (ny <= WATER_Y - 0.4 && stickMag > 0.02) {
+    // walking momentum in as the boat's starting drift). ONLY when you're
+    // actually down at the water — never while jumping/flying high above it.
+    if (ny <= WATER_Y - 0.4 && stickMag > 0.02 && grounded && player.y < WATER_Y + 2.5) {
       inCanoe = true;
       const sinY = Math.sin(player.yaw), cosY = Math.cos(player.yaw);
       canoeVX = (-sinY * mz + cosY * mx) * 2.0; canoeVZ = (-cosY * mz - sinY * mx) * 2.0;
@@ -5618,7 +5719,7 @@ function tickBody() {
     launchT += dt;
     const lp = Math.min(1, launchT / LAUNCH_DUR);
     const e = lp * lp * lp;               // cubic ease-IN — accelerating swoop
-    const tx = SPAWN.x, tz = SPAWN.z, ty = heightAt(tx, tz) + EYE;
+    const tx = LAND.x, tz = LAND.z, ty = heightAt(tx, tz) + EYE;   // dive to the chosen bed
     camera.position.set(
       _diveFrom.x + (tx - _diveFrom.x) * e,
       _diveFrom.y + (ty - _diveFrom.y) * e,
@@ -5637,12 +5738,12 @@ function tickBody() {
       launching = false;
       started = true; bow.visible = true; updateBowString(0);
       document.getElementById('hud').style.opacity = 1;
-      // land standing at spawn, looking down at the blast you made — eyes
-      // already open (the white flash IS the coming-to). No eyelid wake here.
-      player.x = SPAWN.x; player.z = SPAWN.z;
-      player.y = heightAt(SPAWN.x, SPAWN.z);
+      // land at the chosen bed — slide the home here and punch the crater,
+      // eyes already open (the white flash IS the coming-to).
+      relocateHome(LAND.x, LAND.z);
+      player.x = LAND.x; player.z = LAND.z;
+      player.y = heightAt(LAND.x, LAND.z);
       // keep facing the way you came in — inherit the camera's incoming yaw
-      // (it leveled to forward over the last stretch) so the view doesn't snap
       player.yaw = camera.rotation.y; player.pitch = 0.16;
       grounded = true; player.airY = player.y;
       setLids(-100, 0);                   // make sure no eyelids are covering the genesis
@@ -5864,7 +5965,8 @@ function onTitleTap() {
 // as the first arrival, but the game's already running (started stays true).
 function respawnArrival() {
   if (window._base && window._base.group) window._base.group.visible = false;
-  _diveFrom.set(SPAWN.x, heightAt(SPAWN.x, SPAWN.z) + 130, SPAWN.z);
+  // cast back down onto the bed you call home
+  _diveFrom.set(LAND.x, heightAt(LAND.x, LAND.z) + 130, LAND.z);
   launching = true; launchT = 0; intro = false; dead = false;
   tripT = 0; tripLevel = 0; clearClouds();
   if (audio.tripMusic) audio.tripMusic(false);
@@ -5873,6 +5975,14 @@ function respawnArrival() {
 function beginLaunch() {
   if (launching || started) return;
   launching = true; launchT = 0;
+  // WHERE you land = the flower bed the drone is nearest right now. Your tap
+  // timing out of the orbit picks which of the 5 you drop into.
+  let best = FLOWERBEDS[0], bd = 1e9;
+  for (const bed of FLOWERBEDS) {
+    const d = Math.hypot(camera.position.x - bed.x, camera.position.z - bed.z);
+    if (d < bd) { bd = d; best = bed; }
+  }
+  LAND = { x: best.x, z: best.z };
   // ONE continuous shot: the dive begins from exactly where the orbit camera
   // is right now — your second tap's timing picks the approach. No cut.
   _diveFrom.copy(camera.position);

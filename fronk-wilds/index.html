@@ -32,10 +32,12 @@
     font-size:17px;font-weight:600;letter-spacing:.04em;text-align:center;
     text-shadow:0 2px 10px rgba(0,0,0,.9);opacity:0;transition:opacity .4s;max-width:88%}
   /* cinematic line — big, centered, no box; feels like he says it */
-  #cinematic{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
-    font-family:'Cinzel',Georgia,serif;font-size:30px;font-weight:600;letter-spacing:.12em;
-    text-align:center;color:#f5ead8;text-shadow:0 3px 18px rgba(0,0,0,.95);
-    opacity:0;transition:opacity 1.8s ease;max-width:80%;pointer-events:none}
+  /* cinematic line = a movie SUBTITLE: one line, lower third, never over the
+     reticle, never wrapping/splitting */
+  #cinematic{position:absolute;left:50%;bottom:14%;top:auto;transform:translateX(-50%);
+    font-family:'Cinzel',Georgia,serif;font-size:clamp(18px,3.4vw,28px);font-weight:600;letter-spacing:.1em;
+    white-space:nowrap;text-align:center;color:#f5ead8;text-shadow:0 2px 14px rgba(0,0,0,.98);
+    opacity:0;transition:opacity 1.4s ease;max-width:94vw;pointer-events:none}
   #hp{position:absolute;top:max(14px,env(safe-area-inset-top));right:16px;width:120px;height:10px;
     border:1px solid rgba(245,234,216,.5);border-radius:6px;overflow:hidden;
     opacity:0;transition:opacity .6s}
