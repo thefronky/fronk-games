@@ -2798,6 +2798,48 @@ function updateBirds(t, dt, night) {
   }
 }
 
+// ── things in the dark ── after nightfall, shapes you can't quite make out
+// lope past you and are gone. You don't know what they are or why. Unsettling.
+const _darters = [];
+const _darterGeo = new THREE.IcosahedronGeometry(0.6, 0);
+const _darterBaseMat = new THREE.MeshStandardMaterial({ color: 0x05070b, roughness: 0.85, transparent: true, opacity: 0 });
+const _darterLines = ['What was that.', 'Did I hear something.', 'Something moved.',
+  'Something out there.', 'That wasn’t the wind.'];
+let _darterCd = 7;
+window._darterActive = () => _darters.some(d => d.active);   // debug/test hook
+window._spawnDarter = () => spawnDarter();                    // debug/test hook
+function spawnDarter() {
+  let d = _darters.find(x => !x.active);
+  if (!d) {
+    if (_darters.length >= 3) return;
+    const m = new THREE.Mesh(_darterGeo, _darterBaseMat.clone());
+    m.scale.set(1.9, 0.7, 0.85); scene.add(m);
+    d = { mesh: m, active: false }; _darters.push(d);
+  }
+  const ang = Math.random() * 6.28, perp = ang + Math.PI / 2;
+  const off = 11 + Math.random() * 11;                 // passes 11-22m off
+  const cx = player.x + Math.cos(ang) * off, cz = player.z + Math.sin(ang) * off, span = 44;
+  d.sx = cx - Math.cos(perp) * span; d.sz = cz - Math.sin(perp) * span;
+  d.ex = cx + Math.cos(perp) * span; d.ez = cz + Math.sin(perp) * span;
+  d.t = 0; d.dur = 2.0 + Math.random() * 1.2; d.active = true; d.mesh.visible = true;
+}
+function updateDarters(dt, night) {
+  _darterCd -= dt;
+  if (night > 0.5 && _darterCd <= 0 && !dead) {
+    _darterCd = 10 + Math.random() * 16; spawnDarter();
+    if (Math.random() < 0.45) toast(_darterLines[(Math.random() * _darterLines.length) | 0], 2600);
+  }
+  for (const d of _darters) {
+    if (!d.active) continue;
+    d.t += dt; const p = d.t / d.dur;
+    if (p >= 1) { d.active = false; d.mesh.visible = false; continue; }
+    const x = d.sx + (d.ex - d.sx) * p, z = d.sz + (d.ez - d.sz) * p;
+    d.mesh.position.set(x, heightAt(x, z) + 0.5 + Math.abs(Math.sin(p * Math.PI * 7)) * 0.35, z);
+    d.mesh.lookAt(d.ex, d.mesh.position.y, d.ez);
+    d.mesh.material.opacity = Math.sin(p * Math.PI) * 0.85;   // fade in then out across the run
+  }
+}
+
 function updateFireflies(t, night) {
   fireflies.material.opacity = night * 0.95;
   if (night < 0.02) return;
@@ -4340,9 +4382,10 @@ function eatMushroom(f) {
   tripLevel = tripT > 0 ? Math.min(3, tripLevel + 1) : 1;
   tripT = 60; player.lastAte = clock.elapsedTime;     // a full minute
   if (audio.tripMusic) audio.tripMusic(true);         // the magic carpet starts
-  if (tripLevel >= 3) { spawnClouds(); toast('the clouds. climb.', 2600); }
-  else if (tripLevel === 2) toast('everything is jumping.', 2200);
-  else toast('…oh.', 2200);
+  // level 1: the world goes drunk + you hop a little higher. level 2: the
+  // clouds appear and you can climb them. NO announcements — let it be found.
+  if (tripLevel >= 2 && !_cloudGroup) spawnClouds();
+  if (tripLevel === 1) toast('…oh.', 2000);           // one ambiguous breath, nothing more
   if (audio.cue) audio.cue(Math.min(2, tripLevel - 1));
   _nearMush = null; if (_consumeBtn) _consumeBtn.classList.remove('show');
   // once you're tripping, the world FLOODS with caps — they're everywhere
@@ -4609,8 +4652,19 @@ function igniteTree(tr) {
 }
 // scorched-earth wake: each felled tree leaves a sandy/ash scar on the ground.
 // Enough of them and the burned swath reads as a DESERT the fire left behind.
-const _scarGeo = new THREE.CircleGeometry(1, 10);
-const _scarMat = new THREE.MeshStandardMaterial({ color: 0xb89b6a, roughness: 1 });   // sun-bleached sand/ash
+const _scarGeo = new THREE.CircleGeometry(1, 14);
+// a SOFT-edged scar texture so the burned ground blends into irregular sandy
+// patches instead of hard flat discs with visible plane edges.
+const _scarTex = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const x = c.getContext('2d'); const g = x.createRadialGradient(32, 32, 4, 32, 32, 32);
+  g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.6, 'rgba(255,255,255,0.7)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+  x.fillStyle = g; x.fillRect(0, 0, 64, 64);
+  return new THREE.CanvasTexture(c);
+})();
+const _scarMat = new THREE.MeshStandardMaterial({ color: 0xb89b6a, roughness: 1,
+  map: _scarTex, alphaMap: _scarTex, transparent: true, depthWrite: false,
+  polygonOffset: true, polygonOffsetFactor: -2 });   // sun-bleached sand/ash, soft edges
 let _scarGroup = null;
 function scorch(x, z, r) {
   if (!_scarGroup) { _scarGroup = new THREE.Group(); scene.add(_scarGroup); }
@@ -4774,8 +4828,12 @@ function trailUpdate(dt) {
 }
 
 function loose() {
-  const power = Math.min(1, drawT);
-  if (power < 0.04) { drawT = 0; return; }   // a true non-draw, ignore
+  // a real press always looses a shot — even a quick tap (raiseT confirms the
+  // bow came up). Only a true no-draw is ignored. Floor the power so a fast
+  // tap still fires a (weak) arrow instead of silently doing nothing.
+  let power = Math.min(1, drawT);
+  if (power < 0.03 && raiseT < 0.08) { drawT = 0; return; }
+  power = Math.max(power, 0.22);
   if (player.arrows <= 0) {                   // out of ammo — dry, go collect some
     drawT = 0; if (audio.drawCreak) audio.drawCreak(0);
     toast('Out of arrows.', 2400);
@@ -5653,7 +5711,7 @@ function tickBody() {
   moon.material.opacity = night * Math.max(0, Math.min(1, (_moonDir.y - 0.06) * 6)) * 0.9;
   updateFireflies(t, night);
   updateButterflies(dt, t);
-  if (started) { updatePollen(t, dt, night); updateBirds(t, dt, night); }
+  if (started) { updatePollen(t, dt, night); updateBirds(t, dt, night); updateDarters(dt, night); }
   corruptionUpdate(dt, t);
   updateMist(t, night);
   // flower trample: live player bends instantly; the wake (zw) trails and
@@ -5769,6 +5827,7 @@ function tickBody() {
     // 0..1 gait level for audio footsteps + head-bob: stalk is quiet/slow.
     _moveLvl = stickMag <= 0.02 ? 0
       : (sprinting ? 1 : 0.4 + stickMag * 0.4);
+    if (!grounded) _moveLvl = 0;   // no footsteps / head-bob while airborne
     if (stickMag > 0.05 && !bflyUsed) releaseButterflies();   // first steps stir them up
     const sprint = sprinting ? 1.65 : 1;
     const sp = 5.4 * sprint * (drawing ? 0.5 : 1) * (IS_TOUCH ? Math.max(stickMag, 0.25) : 1);
@@ -5842,11 +5901,13 @@ function tickBody() {
         if (Math.hypot(nx - tr.x, nz - tr.z) >= tr.r + 1.8) continue;   // wide canopy pad
         if (tr.top <= feetY + TRIP_REACH && tr.top > stepGround) stepGround = tr.top;
       }
-      // L3: the clouds are solid — land on them and climb the spiral
-      if (tripLevel >= 3) {
+      // L2+: the clouds are solid — but you must AIM your jumps and actually
+      // land ON one. Tighter pad + short reach so jumping in place won't catch
+      // the next layer — you have to look, pick a cloud, and leap to it.
+      if (tripLevel >= 2) {
         for (const cs of CLOUDSTEPS) {
-          if (Math.hypot(nx - cs.x, nz - cs.z) >= cs.r) continue;
-          if (cs.y <= feetY + 5.5 && cs.y > stepGround) stepGround = cs.y;
+          if (Math.hypot(nx - cs.x, nz - cs.z) >= cs.r * 0.6) continue;   // land squarely on it
+          if (cs.y <= feetY + 1.6 && cs.y > stepGround) stepGround = cs.y; // only as you come DOWN onto it
         }
       }
     }
@@ -5868,11 +5929,10 @@ function tickBody() {
     if (grounded && groundY < player.y - 0.35) {
       grounded = false; playerVy = 0; player.airY = player.y;
     }
-    // a big, floaty Halo-style hop — higher apex (~2.2m), more hang time.
-    // On a mushroom trip it's a soaring moon-jump; each LEVEL goes higher
-    // and floatier — L3 launches you up to the clouds.
-    // L0 7.7/g13 · L1 16.5/g5 · L2 21/g4.2 · L3 26/g3.6 (apex ~94m — cloud height)
-    const TRIP_VY = [16.5, 21, 26], TRIP_G = [5, 4.2, 3.6];
+    // sober hop ~2.2m. L1 = a DRUNK floaty hop (no clouds yet). L2 = cloud
+    // PLATFORMING — modest aimed hops, ~1-2 clouds up, you must land on them.
+    // L3 = ethereal, bigger leaps. (apex L1~5.8m · L2~10m · L3~22m)
+    const TRIP_VY = [9, 11, 14], TRIP_G = [7, 6, 4.5];
     if (jumpQ && grounded) {
       playerVy = tripLevel > 0 ? TRIP_VY[tripLevel - 1] : 7.7; grounded = false;
     }
@@ -6152,6 +6212,14 @@ function tickBody() {
       camera.rotation.x += Math.sin(t * 97) * 0.011 * s;
       camera.rotation.y += Math.sin(t * 83) * 0.009 * s;
     }
+    // ── the trip is DRUNK ── the whole view lurches and rolls, gentle and
+    // woozy, deeper the higher the level. The world sways; the trees lean.
+    if (tripT > 0) {
+      const lv = Math.max(1, tripLevel);
+      camera.rotation.z = Math.sin(t * 0.8) * 0.05 * lv + Math.sin(t * 1.7) * 0.02 * lv;
+      camera.rotation.x += Math.sin(t * 0.55) * 0.03 * lv;
+      camera.rotation.y += Math.cos(t * 0.47) * 0.03 * lv;
+    } else if (camera.rotation.z) camera.rotation.z = 0;
   }
   sun.target.position.set(player.x, player.y, player.z);
   sun.position.set(player.x - 180, player.y + 95, player.z - 60);
