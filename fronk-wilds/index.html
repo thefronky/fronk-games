@@ -75,6 +75,8 @@
   #loadmsg{position:absolute;bottom:max(26px,env(safe-area-inset-bottom));
     font-size:11px;letter-spacing:.18em;opacity:.45}
   #veil{position:fixed;inset:0;z-index:18;background:#050302;opacity:0;pointer-events:none;transition:opacity .25s linear}
+  /* arrival flash — the white blast of impact when you strike the earth */
+  #flash{position:fixed;inset:0;z-index:19;background:#fff6e6;opacity:0;pointer-events:none !important}
   #vignette{position:fixed;inset:0;pointer-events:none;z-index:5;
     background:radial-gradient(ellipse at center,transparent 52%,rgba(5,3,2,.52) 100%)}
   /* exhaustion — hunger closes in at the edges. soft, feathered, breathing.
@@ -174,6 +176,7 @@
 </div>
 <div id="hurt"></div>
 <div id="veil"></div>
+<div id="flash"></div>
 <div id="eyelids"><div class="lid" id="lidTop"></div><div class="lid" id="lidBot"></div></div>
 
 <div id="stickL" class="stick"><div class="knob" id="knobL"></div></div>

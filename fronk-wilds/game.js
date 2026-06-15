@@ -2324,20 +2324,7 @@ function buildBase(bx, bz) {
     w.position.set(Math.cos(a) * 10.5, 0.7, Math.sin(a) * 10.5);
     w.scale.set(1, 1.5 + (i % 2) * 0.4, 1); w.rotation.y = a; g.add(w);
   }
-  // two stakes + a crossbar with hides hung to cure
-  const stakeGeo = new THREE.CylinderGeometry(0.07, 0.07, 2.0, 5);
-  for (const dx of [-1.3, 1.3]) {
-    const st = new THREE.Mesh(stakeGeo, logMat);
-    st.position.set(cx + dx, 1.0, cz - 0.4); g.add(st);
-  }
-  const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 3.0, 5), logMat);
-  bar.rotation.z = Math.PI / 2; bar.position.set(cx, 1.85, cz - 0.4); g.add(bar);
-  const hideMat = new THREE.MeshStandardMaterial({ color: 0x6b4a2e, roughness: 1, side: THREE.DoubleSide });
-  hideMat.onBeforeCompile = clothWind(0.045);          // hung hides flutter in the wind
-  for (const [hx, hw] of [[-0.9, 1.0], [0.5, 1.2]]) {
-    const hide = new THREE.Mesh(new THREE.PlaneGeometry(hw, 1.3, 6, 6), hideMat);
-    hide.position.set(cx + hx, 1.15, cz - 0.4); hide.rotation.y = 0.1; g.add(hide);
-  }
+  // (the hung-hide drying rack — "the sign" — was removed by request)
   // a small cache fire inside the cove
   buildFire(g, cx, cz + 0.6, true);
   g.userData.fire.light.distance = 16;
@@ -3746,7 +3733,7 @@ let inCanoe = false, canoeVX = 0, canoeVZ = 0, _wasCanoe = false;
 const INTRO_DUR = 3.5;
 // the opening: a vast aerial of the whole valley; tap and the camera
 // dives toward the clearing, blacks out, and you wake there.
-let launching = false, launchT = 0; const LAUNCH_DUR = 3.2;
+let launching = false, launchT = 0; const LAUNCH_DUR = 2.2;
 const _diveFrom = new THREE.Vector3();   // frozen aerial origin of the dive
 // arrow-cam: a brief cinematic chase that rides each loosed arrow
 let arrowCam = null;        // { rec, mode:'follow'|'return', rt }
@@ -3765,6 +3752,78 @@ function beginIntro() {               // arm the wake-up for a fresh life
   // the breath of coming alive — a deep gasp that swells AS the eyes open
   if (audio.wakeBreath) audio.wakeBreath();
   else if (audio.breath) audio.breath();
+}
+
+// ════ the arrival ════════════════════════════════════════════════════
+// You are cast down from somewhere higher. You fall, you strike the earth,
+// and the impact BLOWS THE HOME INTO BEING — fire, wall, and cache rising
+// out of the blast. A one-time genesis; respawns just wake in the clearing.
+let _arrival = null;     // {t, ring, sphere, beam, light, baseScaleT}
+const _ringGeo = new THREE.RingGeometry(0.6, 1.0, 40); _ringGeo.rotateX(-Math.PI / 2);
+const _ringMat = new THREE.MeshBasicMaterial({ color: 0xffd27a, transparent: true,
+  opacity: 1, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+const _flashGeo = new THREE.SphereGeometry(1, 16, 12);
+const _flashMat = new THREE.MeshBasicMaterial({ color: 0xfff0d0, transparent: true,
+  opacity: 1, blending: THREE.AdditiveBlending, depthWrite: false });
+const _beamGeo = new THREE.CylinderGeometry(1.6, 3.2, 200, 16, 1, true);
+const _beamMat = new THREE.MeshBasicMaterial({ color: 0xfff2cf, transparent: true,
+  opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+function explodeArrival() {
+  const gx = SPAWN.x, gz = SPAWN.z, gy = heightAt(gx, gz);
+  // shockwave ring on the ground
+  const ring = new THREE.Mesh(_ringGeo, _ringMat.clone()); ring.position.set(gx, gy + 0.2, gz);
+  scene.add(ring);
+  // a bloom of white-hot light at the impact
+  const sphere = new THREE.Mesh(_flashGeo, _flashMat.clone()); sphere.position.set(gx, gy + 1.2, gz);
+  sphere.scale.setScalar(0.5); scene.add(sphere);
+  // a pillar of light from above — the higher power that threw you down
+  const beam = new THREE.Mesh(_beamGeo, _beamMat.clone()); beam.position.set(gx, gy + 100, gz);
+  scene.add(beam);
+  // a brilliant flare that decays
+  const light = new THREE.PointLight(0xffe6b0, 0, 80, 2); light.position.set(gx, gy + 3, gz);
+  scene.add(light);
+  // a radial spray of embers blown out of the crater
+  for (let i = 0; i < 26; i++) {
+    const a = (i / 26) * Math.PI * 2, rr = 1 + Math.random() * 4;
+    trailPuff(gx + Math.cos(a) * rr, gy + 0.4 + Math.random() * 2.2, gz + Math.sin(a) * rr);
+  }
+  // reveal the home and grow it out of the blast
+  if (window._base && window._base.group) { window._base.group.visible = true; window._base.group.scale.setScalar(0.04); }
+  // screen flash + a hard shake + the boom
+  const fl = document.getElementById('flash'); if (fl) { fl.style.transition = 'none'; fl.style.opacity = '0.92'; }
+  camShakeT = SHAKE_DUR * 3;
+  if (audio.killStinger) audio.killStinger();
+  if (audio.impact) audio.impact('ground', 1);
+  _arrival = { t: 0, ring, sphere, beam, light, gx, gy, gz };
+}
+function arrivalUpdate(dt) {
+  if (!_arrival) return;
+  const A = _arrival; A.t += dt;
+  const k = A.t;
+  // ring: punch outward and fade over ~1s
+  const rs = 1 + k * 26;
+  A.ring.scale.set(rs, 1, rs); A.ring.material.opacity = Math.max(0, 1 - k / 1.1);
+  // sphere: bloom then vanish fast
+  A.sphere.scale.setScalar(0.5 + k * 14); A.sphere.material.opacity = Math.max(0, 0.95 - k / 0.5);
+  // beam: flares bright instantly, lingers, fades over ~1.6s
+  A.beam.material.opacity = Math.max(0, 0.7 * (1 - k / 1.6));
+  // light: a hard flash that decays
+  A.light.intensity = Math.max(0, 60 * (1 - k / 0.9));
+  // the home swells into being with a little overshoot
+  if (window._base && window._base.group) {
+    const bp = Math.min(1, k / 0.9);
+    const e = 1 - Math.pow(1 - bp, 3);                 // ease-out
+    const overshoot = 1 + Math.sin(bp * Math.PI) * 0.06;
+    window._base.group.scale.setScalar(Math.max(0.04, e * overshoot));
+  }
+  // screen flash fades out
+  const fl = document.getElementById('flash');
+  if (fl) { fl.style.transition = 'opacity 0.5s ease-out'; fl.style.opacity = '0'; }
+  if (k > 1.7) {
+    scene.remove(A.ring); scene.remove(A.sphere); scene.remove(A.beam); scene.remove(A.light);
+    if (window._base && window._base.group) window._base.group.scale.setScalar(1);
+    _arrival = null;
+  }
 }
 function endIntro() {                  // hand control to the player
   intro = false;
@@ -5339,30 +5398,31 @@ function tickBody() {
     camera.lookAt(0, 6, 0);
     camera.rotation.order = 'YXZ';
   } else if (launching) {
-    // the dive: a single smooth dolly from the frozen aerial down to the
-    // spawn eye. Position AND look-target both ease from exactly where the
-    // title left them — no snap, no jitter — while a black veil rises.
+    // the PLUMMET: cast down from on high, you accelerate straight at the
+    // earth — ease-IN so it SLAMS — looking down the whole way. At the
+    // ground, the impact explodes and the home is blown into being.
     launchT += dt;
     const lp = Math.min(1, launchT / LAUNCH_DUR);
-    const e = lp * lp * (3 - 2 * lp);     // smoothstep — eases in AND out
+    const e = lp * lp * lp;               // cubic ease-IN — a real accelerating fall
     const tx = SPAWN.x, tz = SPAWN.z, ty = heightAt(tx, tz) + EYE;
-    camera.position.set(
-      _diveFrom.x + (tx - _diveFrom.x) * e,
-      _diveFrom.y + (ty - _diveFrom.y) * e,
-      _diveFrom.z + (tz - _diveFrom.z) * e);
-    // look-target eases from the title's (0,6,0) to the spawn ground —
-    // starting identical to the title means the first frame doesn't jump
-    const lgy = heightAt(tx, tz) + 1.5;
-    camera.lookAt(0 + (tx - 0) * e, 6 + (lgy - 6) * e, 0 + (tz - 0) * e);
+    camera.position.set(tx, _diveFrom.y + (ty - _diveFrom.y) * e, tz);
+    // look mostly straight down as you drop, leveling toward the horizon at the end
+    const lookE = Math.max(0, (lp - 0.7) / 0.3);
+    camera.lookAt(tx, ty + (6 - ty) * lookE, tz + 0.001 + lookE * 14);
     camera.rotation.order = 'YXZ';
-    const veil = document.getElementById('veil');
-    if (veil) veil.style.opacity = Math.max(0, (lp - 0.62) / 0.38);  // black in over the last ~38%
-    if (lp >= 1) {                        // arrive → wake up
+    if (lp >= 1) {                        // STRIKE
       launching = false;
       started = true; bow.visible = true; updateBowString(0);
       document.getElementById('hud').style.opacity = 1;
-      beginIntro();                       // lids shut → eyes open in the grass
-      if (veil) veil.style.opacity = 0;   // the eyelids take over the black
+      // land standing at spawn, looking down at the blast you made — eyes
+      // already open (the white flash IS the coming-to). No eyelid wake here.
+      player.x = SPAWN.x; player.z = SPAWN.z;
+      player.y = heightAt(SPAWN.x, SPAWN.z);
+      player.yaw = SPAWN.yaw; player.pitch = 0.16;
+      grounded = true; player.airY = player.y;
+      setLids(-100, 0);                   // make sure no eyelids are covering the genesis
+      explodeArrival();                   // you hit the ground and the world is BORN
+      if (audio.wakeBreath) audio.wakeBreath();   // the gasp of being made
     }
   } else if (intro) {
     // waking: camera starts LOW in the grass, pitched up at the sky,
@@ -5474,6 +5534,7 @@ function tickBody() {
   arrowUpdate(wdt);
   treeFireUpdate(dt);              // burning trees climb, spread, then fall
   trailUpdate(dt);                 // rocket-fuel embers fade
+  arrivalUpdate(dt);              // the genesis blast: ring/flash/beam + the home growing in
   if (USE_POST) {
     // night needs a softer bloom threshold so fireflies/stars breathe
     bloomPass.threshold = 0.85 - (window._night || 0) * 0.38;
@@ -5562,9 +5623,12 @@ function onTitleTap() {
 function beginLaunch() {
   if (launching || started) return;
   launching = true; launchT = 0;
-  _diveFrom.copy(camera.position);    // freeze the dive origin — a clean dolly, no more orbit
+  // the plummet: you are flung down from directly overhead, not dollied in
+  _diveFrom.set(SPAWN.x, heightAt(SPAWN.x, SPAWN.z) + 130, SPAWN.z);
+  // hide the home — it doesn't exist yet. The impact will blow it into being.
+  if (window._base && window._base.group) window._base.group.visible = false;
   try { audio.start(); } catch (e) {}
-  if (audio.fadeTitle) audio.fadeTitle(LAUNCH_DUR + 0.6);   // the theme fades as the world rushes up
+  if (audio.fadeTitle) audio.fadeTitle(LAUNCH_DUR + 0.4);   // the theme fades as you fall
   document.getElementById('title').style.opacity = 0;
   setTimeout(() => document.getElementById('title').style.display = 'none', 800);
   if (!IS_TOUCH) canvas.requestPointerLock();
