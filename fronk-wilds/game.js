@@ -1662,7 +1662,7 @@ function corruptionUpdate(dt, t) {
     if (_stingSayT <= 0) { _stingSayT = 6; say('corrupt'); }
     if (player.hp <= 0 && !dead) { dead = true; say('death', 4200);
       setTimeout(() => { player.hp = 100; player.x = SPAWN.x; player.z = SPAWN.z;
-        player.y = heightAt(SPAWN.x, SPAWN.z); dead = false; renderHP(); beginIntro(); }, 3500); }
+        player.y = heightAt(SPAWN.x, SPAWN.z); dead = false; renderHP(); respawnArrival(); }, 3500); }
   } else if (_stingThudT < 0.4) {
     document.getElementById('hurt').style.opacity = '0';
   }
@@ -2159,7 +2159,7 @@ function buildPsyMush() {
     }
   };
   place(IS_TOUCH ? 14 : 20, buildBerry, 'berry');
-  place(IS_TOUCH ? 6 : 9, buildPsyMush, 'mush');
+  place(IS_TOUCH ? 14 : 20, buildPsyMush, 'mush');   // plenty to experiment with
 }
 
 // ── the lights ── pale wisps that only show in the deep dark, drifting
@@ -3737,6 +3737,8 @@ let breathLoad = 0; // 0..1 exertion — rises running / holding a draw, recover
 let _landDip = 0;   // camera knee-bend on landing, decays back up
 let _curGround = 'grass';   // footstep material under the player
 let tripT = 0;      // seconds left of a mushroom trip (trippy visuals + moon-jump)
+let tripLevel = 0;  // 0=sober, 1=jump+vibrant, 2=animals bounce+higher+bullet arrows, 3=cloud-climb
+window._tripLevel = () => tripLevel;   // debug/test hook
 let playerVy = 0, grounded = true, jumpQ = false;
 let inCanoe = false, canoeVX = 0, canoeVZ = 0, _wasCanoe = false;
 // the canoe is a real boat: you push it with the move stick like walking,
@@ -3979,14 +3981,56 @@ function respawnMushroomNear() {
 function eatMushroom(f) {
   if (!f || f.taken) return;
   f.taken = true; f.mesh.visible = false;
+  // each one eaten while still tripping deepens the trip a LEVEL (max 3):
+  // 1 = you jump + the world goes vibrant; 2 = animals bounce too + everyone
+  // jumps higher + arrows become fiery bullets; 3 = the cloud-climbing game.
+  tripLevel = tripT > 0 ? Math.min(3, tripLevel + 1) : 1;
   tripT = 60; player.lastAte = clock.elapsedTime;     // a full minute
   if (audio.tripMusic) audio.tripMusic(true);         // the magic carpet starts
-  toast('…oh.', 2200);
+  if (tripLevel >= 3) { spawnClouds(); toast('the clouds. climb.', 2600); }
+  else if (tripLevel === 2) toast('everything is jumping.', 2200);
+  else toast('…oh.', 2200);
+  if (audio.cue) audio.cue(Math.min(2, tripLevel - 1));
   _nearMush = null; if (_consumeBtn) _consumeBtn.classList.remove('show');
   clearTimeout(eatMushroom._re);
   eatMushroom._re = setTimeout(respawnMushroomNear, 6000);   // another rises soon after
 }
 window._eatMushroom = () => eatMushroom(_nearMush || FORAGE.find(f => f.kind === 'mush' && !f.taken));
+
+// ── LEVEL 3: the cloud-climbing game ── a rising spiral of soft, glowing
+// clouds blooms around you. They become LANDABLE (see the step scan), and
+// with the level-3 launch you bound up them — a vertical, heavenly climb.
+const CLOUDSTEPS = [];
+let _cloudGroup = null;
+const _cloudBlobGeo = new THREE.IcosahedronGeometry(2.4, 1);
+const _cloudMat3 = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xcfe2ff,
+  emissiveIntensity: 0.3, roughness: 1, transparent: true, opacity: 0.96, flatShading: true });
+function spawnClouds() {
+  clearClouds();
+  _cloudGroup = new THREE.Group(); scene.add(_cloudGroup);
+  const cx = player.x, cz = player.z, baseY = player.y;
+  const N = IS_TOUCH ? 24 : 36;
+  for (let i = 0; i < N; i++) {
+    const ang = i * 0.85 + Math.random() * 0.5;          // spiral up
+    const rad = 7 + i * 0.7 + Math.random() * 5;
+    const x = cx + Math.cos(ang) * rad, z = cz + Math.sin(ang) * rad;
+    const y = baseY + 8 + i * 4.2 + Math.random() * 2.5;  // ascending staircase
+    const r = 3.2 + Math.random() * 2.4;
+    const g = new THREE.Group(); g.position.set(x, y, z);
+    for (let b = 0; b < 4; b++) {
+      const s = new THREE.Mesh(_cloudBlobGeo, _cloudMat3);
+      s.position.set((Math.random() - 0.5) * r * 1.5, (Math.random() - 0.5) * 0.7, (Math.random() - 0.5) * r * 1.5);
+      s.scale.setScalar(0.7 + Math.random() * 0.9); g.add(s);
+    }
+    _cloudGroup.add(g);
+    CLOUDSTEPS.push({ x, z, y: y + 0.8, r: r + 2.0 });    // landable top, generous pad
+  }
+}
+function clearClouds() {
+  if (_cloudGroup) { scene.remove(_cloudGroup); _cloudGroup = null; }
+  CLOUDSTEPS.length = 0;
+}
+window._spawnClouds = () => { spawnClouds(); return CLOUDSTEPS.length; };
 function forageUpdate(t) {
   let mush = null;
   for (const f of FORAGE) {
@@ -4067,7 +4111,7 @@ function hurtPlayer(dmg) {
       player.y = heightAt(player.x, player.z); dead = false;
       player.lastAte = clock.elapsedTime;   // restarted, not starved
       renderHP();
-      beginIntro();                         // wake again in the clearing
+      respawnArrival();                     // cast back down from the sky
     }, 3500);
   }
   renderHP();
@@ -4274,9 +4318,11 @@ function loose() {
     return;
   }
   player.arrows--; renderNotes();
-  // speed scales STEEPLY with how far you pulled: a flick (~0.1) limps out
-  // at ~9 m/s and drops in front of you; a full draw rips at ~96 m/s.
-  const speed = 6 + Math.pow(power, 1.5) * 66;   // strong at full draw, not map-crossing
+  const onFire = tripT > 0;
+  // sober: speed scales with draw, arrows arc. TRIPPING: every shot is a
+  // FIERY BULLET — full power regardless of pull, dead flat, no gravity,
+  // straight at whatever the reticle marks. It just hits.
+  const speed = onFire ? 150 : (6 + Math.pow(power, 1.5) * 66);
   const dir = new THREE.Vector3();
   camera.getWorldDirection(dir);
   const m = arrowTemplate.clone();
@@ -4287,13 +4333,13 @@ function loose() {
   const streak = new THREE.Mesh(_streakGeo, _streakMat.clone());
   streak.position.z = -1.9;          // trails behind (arrow forward = +z)
   m.add(streak); m.userData.streak = streak;
-  // ── fire-arrow ── while you're tripping, the shot burns: a hot rocket-fuel
-  // tail and a head that sets trees alight where it sticks.
-  const onFire = tripT > 0;
+  // ── fire-arrow ── while you're tripping, the shot burns: a fat hot
+  // rocket-fuel tail, a bigger blazing head, no gravity, sets trees alight.
   if (onFire) {
-    streak.material.color.setHex(0xffae2e);
-    streak.material.opacity = 0.95;
-    streak.scale.set(1.7, 1.7, 1.5);              // a fatter, longer plume
+    streak.material.color.setHex(0xffc24e);
+    streak.material.opacity = 1;
+    streak.scale.set(2.4, 2.4, 2.0);              // a big blazing plume
+    m.scale.setScalar(1.6);                       // the shaft reads heavier/hotter
   }
   scene.add(m);
   const rec = { m, v: dir.multiplyScalar(speed),
@@ -4345,7 +4391,7 @@ function arrowUpdate(dt) {
     const a = arrows[i];
     if (a.stuck) { a.t -= dt; if (a.t <= 0) { scene.remove(a.m); arrows.splice(i, 1); } continue; }
     a._px = a.m.position.x; a._py = a.m.position.y; a._pz = a.m.position.z;  // last pos (swept tests)
-    a.v.y -= ARROW_GRAVITY * dt;
+    if (!a.fire) a.v.y -= ARROW_GRAVITY * dt;   // fire-arrows fly dead flat — no gravity, like a bullet
     a.m.position.addScaledVector(a.v, dt);
     // streak fades as the arrow ages and as it slows (drag illusion)
     const st = a.m.userData.streak;
@@ -5014,23 +5060,27 @@ function tickBody() {
   if (tripT > 0) {
     tripT -= dt;
     const k = Math.max(0, Math.min(1, tripT / 2));
-    // colors surge and wander — faster hue, deeper saturation, a hue that
-    // also pulses so it never sits still
-    const hue = (t * 130 + 50 * Math.sin(t * 0.7)) % 360;
-    const sat = 1 + (1.9 + 0.5 * Math.sin(t * 1.3)) * k;
-    const con = 1 + 0.35 * k;
-    const bri = 1 + (0.10 * Math.sin(t * 3.1) + 0.05 * Math.sin(t * 7.3)) * k;
-    const blur = (0.6 + 0.6 * Math.sin(t * 0.9)) * k;            // soft swimming focus
+    const lv = Math.max(1, tripLevel);          // depth scales the whole look
+    // colors SURGE — super-bright, vibrant, pop. Deeper and faster the
+    // higher the level: the whole world goes neon and starts to swim.
+    const hue = (t * (150 + lv * 55) + 60 * Math.sin(t * 0.7)) % 360;
+    const sat = 1 + (2.2 + 0.7 * lv + 0.6 * Math.sin(t * 1.3)) * k;     // L1~3.3x, L3~5x saturation
+    const con = 1 + (0.4 + 0.18 * lv) * k;
+    // keep brightness modest so the heavy saturation POPS instead of blowing to white
+    const bri = 1 + (0.05 + 0.02 * lv) + (0.10 * Math.sin(t * 3.1) + 0.05 * Math.sin(t * 7.3)) * k;
+    const blur = (0.5 + 0.5 * Math.sin(t * 0.9)) * k;
     canvas.style.filter = 'hue-rotate(' + hue.toFixed(0) + 'deg) saturate(' + sat.toFixed(2)
       + ') contrast(' + con.toFixed(2) + ') brightness(' + bri.toFixed(2)
       + ') blur(' + blur.toFixed(2) + 'px)';
-    // the whole picture breathes + sways — a gentle warp, never nauseating
-    const sc = 1 + 0.03 * Math.sin(t * 1.7) * k;
-    const rot = 0.6 * Math.sin(t * 0.6) * k;
+    // the whole picture BREATHES + sways — deeper warp the higher you go
+    const sc = 1 + (0.03 + 0.02 * lv) * Math.sin(t * 1.7) * k;
+    const rot = (0.6 + 0.3 * lv) * Math.sin(t * 0.6) * k;
     canvas.style.transformOrigin = 'center';
     canvas.style.transform = 'scale(' + sc.toFixed(3) + ') rotate(' + rot.toFixed(2) + 'deg)';
+    if (tripT <= 0) { tripLevel = 0; clearClouds(); }   // sober up
   } else if (canvas.style.filter) {
     canvas.style.filter = ''; canvas.style.transform = '';
+    tripLevel = 0; clearClouds();
     if (audio.tripMusic) audio.tripMusic(false);
   }
   // auto-launch: after the theme's opening swell, the cinematic dive begins
@@ -5264,6 +5314,13 @@ function tickBody() {
         if (Math.hypot(nx - tr.x, nz - tr.z) >= tr.r + 1.8) continue;   // wide canopy pad
         if (tr.top <= feetY + TRIP_REACH && tr.top > stepGround) stepGround = tr.top;
       }
+      // L3: the clouds are solid — land on them and climb the spiral
+      if (tripLevel >= 3) {
+        for (const cs of CLOUDSTEPS) {
+          if (Math.hypot(nx - cs.x, nz - cs.z) >= cs.r) continue;
+          if (cs.y <= feetY + 5.5 && cs.y > stepGround) stepGround = cs.y;
+        }
+      }
     }
     const lim = WORLD * 0.47;
     nx = Math.max(-lim, Math.min(lim, nx)); nz = Math.max(-lim, Math.min(lim, nz));
@@ -5271,6 +5328,12 @@ function tickBody() {
     // ── jump / fall: light, forgiving hop (Apple-simple) ──
     let groundY = (ny > WATER_Y - 0.4) ? ny : player.y;
     if (stepGround > groundY) groundY = stepGround;       // standing on a prop
+    // ── breathing ground ── while tripping the earth itself swells and
+    // sinks, and your footing rides it: the ground you stand on physically
+    // moves, so the same jump lands differently depending on the breath.
+    if (tripT > 0 && stepGround === -Infinity) {
+      groundY += Math.sin(t * 1.25 + player.x * 0.14 + player.z * 0.12) * (0.22 * tripLevel);
+    }
     if (ny > WATER_Y - 0.4) { player.x = nx; player.z = nz; }
     // walking off a ledge (stepped down >0.35m) starts a real fall through
     // the existing jump integrator instead of snapping the camera down.
@@ -5278,11 +5341,17 @@ function tickBody() {
       grounded = false; playerVy = 0; player.airY = player.y;
     }
     // a big, floaty Halo-style hop — higher apex (~2.2m), more hang time.
-    // On a mushroom trip it's a slow, soaring moon-jump.
-    if (jumpQ && grounded) { playerVy = tripT > 0 ? 16.5 : 7.7; grounded = false; }   // trip = soar over the treetops
+    // On a mushroom trip it's a soaring moon-jump; each LEVEL goes higher
+    // and floatier — L3 launches you up to the clouds.
+    // L0 7.7/g13 · L1 16.5/g5 · L2 21/g4.2 · L3 26/g3.6 (apex ~94m — cloud height)
+    const TRIP_VY = [16.5, 21, 26], TRIP_G = [5, 4.2, 3.6];
+    if (jumpQ && grounded) {
+      playerVy = tripLevel > 0 ? TRIP_VY[tripLevel - 1] : 7.7; grounded = false;
+    }
     jumpQ = false;
     if (!grounded) {
-      playerVy -= (tripT > 0 ? 5 : 13) * dt; player.airY = (player.airY ?? groundY) + playerVy * dt;
+      const g = tripLevel > 0 ? TRIP_G[tripLevel - 1] : 13;
+      playerVy -= g * dt; player.airY = (player.airY ?? groundY) + playerVy * dt;
       if (player.airY <= groundY) {
         const impact = -playerVy;                 // how hard you came down
         player.airY = groundY; playerVy = 0; grounded = true;
@@ -5375,7 +5444,7 @@ function tickBody() {
           player.lastAte = clock.elapsedTime; player.x = SPAWN.x; player.z = SPAWN.z;
           player.yaw = SPAWN.yaw; player.pitch = SPAWN.pitch;
           player.y = heightAt(player.x, player.z);
-          dead = false; renderHP(); beginIntro(); }, 3500);
+          dead = false; renderHP(); respawnArrival(); }, 3500);
       }
     }
     // packed meat saves you automatically when it gets bad
@@ -5588,7 +5657,18 @@ function tickBody() {
   // juiceT burns down on real dt, world dt gets scaled while it lasts.
   let wdt = dt;
   if (juiceT > 0) { juiceT -= dt; wdt = dt * 0.05; }
-  for (const a of animals) animalUpdate(a, wdt);
+  for (const a of animals) {
+    animalUpdate(a, wdt);
+    // L2+: the whole world is tripping — the animals BOUNCE too, every step
+    // a hop, soaring higher the deeper the trip. Absolute lift off the
+    // terrain (never accumulates) on top of their normal walking/avoiding.
+    if (tripLevel >= 2 && !a.dead && a.obj) {
+      const ph = a._bouncePh ?? (a._bouncePh = Math.random() * 6.283);
+      const hgt = tripLevel >= 3 ? 3.4 : 1.5;
+      const gy = heightAt(a.obj.position.x, a.obj.position.z);
+      a.obj.position.y = gy + Math.abs(Math.sin(t * 4.4 + ph)) * hgt;
+    }
+  }
   arrowUpdate(wdt);
   treeFireUpdate(dt);              // burning trees climb, spread, then fall
   trailUpdate(dt);                 // rocket-fuel embers fade
@@ -5677,6 +5757,16 @@ function onTitleTap() {
   window.addEventListener('pointerdown', wake, true);
   window.addEventListener('touchstart', wake, true);
   window.addEventListener('keydown', wake, true);
+}
+// death → you're cast down from the sky AGAIN. Same plummet + genesis blast
+// as the first arrival, but the game's already running (started stays true).
+function respawnArrival() {
+  if (window._base && window._base.group) window._base.group.visible = false;
+  _diveFrom.set(SPAWN.x, heightAt(SPAWN.x, SPAWN.z) + 130, SPAWN.z);
+  launching = true; launchT = 0; intro = false; dead = false;
+  tripT = 0; tripLevel = 0; clearClouds();
+  if (audio.tripMusic) audio.tripMusic(false);
+  const mb = document.getElementById('maul'); if (mb) mb.style.opacity = '0';
 }
 function beginLaunch() {
   if (launching || started) return;
