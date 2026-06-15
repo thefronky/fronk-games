@@ -642,14 +642,21 @@ const FLOWER_PALETTE = [
 ];
 {
   const mkFlower = () => {
-    const stem = new THREE.CylinderGeometry(0.018, 0.03, 0.62, 4, 1);
+    const stem = new THREE.CylinderGeometry(0.015, 0.03, 0.62, 5, 2);
     stem.translate(0, 0.31, 0);
-    const head = new THREE.IcosahedronGeometry(0.13, 0);
-    head.translate(0, 0.66, 0);
+    // a rounder, brighter bloom-head — subdivided on desktop, cheap on phone
+    const head = new THREE.IcosahedronGeometry(0.12, IS_TOUCH ? 0 : 1);
+    head.scale(1, 0.85, 1); head.translate(0, 0.66, 0);
+    // a fuller ring of petals — gently cupped, each curved across its width
     const petals = [];
-    for (let p = 0; p < 3; p++) {
-      const pl = new THREE.PlaneGeometry(0.22, 0.1, 1, 1);
-      pl.translate(0, 0.06, 0); pl.rotateX(-0.9); pl.rotateY(p * 2.094); pl.translate(0, 0.6, 0);
+    const NP = 6;
+    for (let p = 0; p < NP; p++) {
+      const pl = new THREE.PlaneGeometry(0.2, 0.12, 2, 1);
+      const pp = pl.attributes.position;
+      for (let i = 0; i < pp.count; i++) {                 // cup the petal — tips lift
+        const x = pp.getX(i); pp.setZ(i, pp.getZ(i) - x * x * 0.5);
+      }
+      pl.translate(0, 0.06, 0); pl.rotateX(-0.8); pl.rotateY(p * (6.2832 / NP)); pl.translate(0, 0.6, 0);
       petals.push(pl);
     }
     return mergeGeoms([stem, head, ...petals]);
@@ -1087,6 +1094,7 @@ function mergeGeoms(list) {
     P.set(x, y - 0.15, z);
     E.set(0, Math.random() * Math.PI * 2, 0); Q.setFromEuler(E);
     const s = 0.8 + Math.random() * 1.1; S.set(s, s, s);
+    const ii = sp.n;                       // this tree's instance index — kept so fire can char + fell it
     sp.inst.setMatrixAt(sp.n++, M.compose(P, Q, S));
     // PERF: cap the collision/cover array. With 4500 trunks a full
     // TREES[] would bloat the per-step collision scan; the smallest
@@ -1096,7 +1104,8 @@ function mergeGeoms(list) {
     const tr = sp.r * s;
     // EVERY real trunk is solid (player + arrows). `top` = canopy height —
     // landable ONLY during a mushroom trip (treetop parkour).
-    if (tr >= 0.45) TREES.push({ x, z, r: tr, top: (y - 0.15) + sp.ch * s });
+    if (tr >= 0.45) TREES.push({ x, z, r: tr, top: (y - 0.15) + sp.ch * s,
+                                 inst: sp.inst, ii, my: y - 0.15, ch: sp.ch * s, sc: s });
     placed++;
   }
   species.forEach(s => {
@@ -3776,6 +3785,14 @@ function cinematic(text, ms = 4000) {
 }
 // CSS-var driver for the eyelids (DOM lives in index.html)
 const _eyelids = document.getElementById('eyelids');
+const _exhaust = document.getElementById('exhaust');   // hunger/exhaustion edge-darkening
+let _exhaustV = 0;                                      // eased opacity, 0..1
+const _consumeBtn = document.getElementById('consume'); // tap-to-eat the mushroom
+if (_consumeBtn) {
+  const eat = (e) => { e.preventDefault(); e.stopPropagation(); window._eatMushroom(); };
+  _consumeBtn.addEventListener('click', eat);
+  _consumeBtn.addEventListener('touchstart', eat, { passive: false });
+}
 function setLids(openPct, glow) {     // openPct: 0 = shut, -100 = wide open
   if (!_eyelids) return;
   _eyelids.style.setProperty('--lid', openPct + '%');
@@ -3864,21 +3881,37 @@ function arrowPickup() {
     toast('Arrow recovered. (' + player.arrows + ')', 1400); }
 }
 
-// ── forage ── walk over a berry bush or a glowing mushroom to take it
+// ── forage ── berries you just walk over (harmless food). The glowing
+// mushroom is a CHOICE: stand near it and a CONSUME button appears — you
+// tap it to eat (and the world goes strange). Never eaten by accident.
+let _nearMush = null;
+function eatMushroom(f) {
+  if (!f || f.taken) return;
+  f.taken = true; f.mesh.visible = false;
+  tripT = 60; player.lastAte = clock.elapsedTime;     // a full minute
+  if (audio.tripMusic) audio.tripMusic(true);         // the magic carpet starts
+  toast('…oh.', 2200);
+  _nearMush = null; if (_consumeBtn) _consumeBtn.classList.remove('show');
+}
+window._eatMushroom = () => eatMushroom(_nearMush || FORAGE.find(f => f.kind === 'mush' && !f.taken));
 function forageUpdate(t) {
+  let mush = null;
   for (const f of FORAGE) {
     if (f.taken) continue;
-    if (Math.hypot(player.x - f.x, player.z - f.z) > 2.0) continue;
-    f.taken = true; f.mesh.visible = false;
+    const d = Math.hypot(player.x - f.x, player.z - f.z);
     if (f.kind === 'berry') {
+      if (d > 2.0) continue;
+      f.taken = true; f.mesh.visible = false;
       player.lastAte = t; if (player.hp < 100) { player.hp = Math.min(100, player.hp + 12); renderHP(); }
       if (audio.impact) audio.impact('flesh', 0.5);
       toast('Berries.', 1400);
-    } else {                                    // the glowing mushroom
-      tripT = 60; player.lastAte = t;   // a full minute
-      if (audio.tripMusic) audio.tripMusic(true);   // the magic carpet starts
-      toast('…oh.', 2200);
+    } else {                                    // the glowing mushroom — needs a deliberate tap
+      if (d < 2.6 && (!mush || d < mush._d)) { mush = f; mush._d = d; }
     }
+  }
+  if (mush !== _nearMush) {
+    _nearMush = mush;
+    if (_consumeBtn) _consumeBtn.classList.toggle('show', !!mush);
   }
 }
 
@@ -3919,6 +3952,100 @@ function hurtPlayer(dmg) {
     }, 3500);
   }
   renderHP();
+}
+
+// ──────────────────────── wildfire ────────────────────────
+// During a mushroom trip your arrows burn. A fire-arrow that buries in a
+// trunk sets the tree alight: flames climb it, then it chars and falls.
+// While it burns the fire JUMPS to 1-2 nearby trees — so a careless trip
+// can sweep a whole grove to ash. Bounded by MAX_TREEFIRE for the phone.
+const TREEFIRES = [];
+const MAX_TREEFIRE = IS_TOUCH ? 9 : 18;
+const _fmA = new THREE.MeshBasicMaterial({ color: 0xff6a18, transparent: true, opacity: 0.95 });
+const _fmB = new THREE.MeshBasicMaterial({ color: 0xffab3a, transparent: true, opacity: 0.95 });
+const _fmC = new THREE.MeshBasicMaterial({ color: 0xffe7a0, transparent: true, opacity: 0.95 });
+const _charCol = new THREE.Color(0x161009);
+function igniteTree(tr) {
+  if (!tr || tr._burning || tr._gone || tr.top === undefined || !tr.inst) return false;
+  if (TREEFIRES.length >= MAX_TREEFIRE) return false;
+  tr._burning = true;
+  const gy = heightAt(tr.x, tr.z);
+  const h = (tr.top - gy);                       // trunk+canopy height to wrap in flame
+  const grp = new THREE.Group(); grp.position.set(tr.x, gy, tr.z);
+  // a stack of flame clusters climbing the trunk — bigger low, smaller high
+  const clusters = Math.max(2, Math.min(5, Math.round(h / 2.2)));
+  for (let c = 0; c < clusters; c++) {
+    const fy = 0.6 + (h * 0.85) * (c / clusters);
+    const k = 1 - c / (clusters + 1);            // taper up
+    const fa = new THREE.Mesh(flameGeoA, _fmA); fa.position.y = fy;       fa.scale.setScalar(0.8 + k);
+    const fb = new THREE.Mesh(flameGeoB, _fmB); fb.position.y = fy + 0.2; fb.scale.setScalar(0.7 + k);
+    const fc = new THREE.Mesh(flameGeoC, _fmC); fc.position.y = fy + 0.35; fc.scale.setScalar(0.6 + k);
+    fa.userData.ph = c * 1.3; fb.userData.ph = c * 1.3 + 0.5; fc.userData.ph = c * 1.3 + 1.0;
+    grp.add(fa, fb, fc);
+  }
+  grp.scale.y = 0.2;                              // grows in over the first second
+  scene.add(grp);
+  // a warm light only on desktop / only for the first few — phones stay lit by emissive alone
+  let light = null;
+  if (!IS_TOUCH && TREEFIRES.length < 6) {
+    light = new THREE.PointLight(0xff7a2a, 9, 22, 1.8);
+    light.position.set(tr.x, gy + h * 0.5, tr.z); scene.add(light);
+  }
+  if (audio.impact) audio.impact('wood', 0.4);
+  TREEFIRES.push({ tr, grp, light, t: 0, dur: 5.5 + Math.random() * 2.5,
+                   spreadAt: 1.0 + Math.random() * 1.2, spread: 0, gy, h });
+  return true;
+}
+function fellTree(tr) {                           // char the instance down to a black stump, then it's gone
+  if (!tr.inst) { tr._gone = true; tr.r = 0; tr.top = -999; return; }
+  _mat4 = _mat4 || new THREE.Matrix4();
+  _q0 = _q0 || new THREE.Quaternion();
+  const P = new THREE.Vector3(tr.x, tr.my, tr.z);
+  const S = new THREE.Vector3(tr.sc * 0.55, tr.sc * 0.16, tr.sc * 0.55);  // squat charred snag
+  tr.inst.setMatrixAt(tr.ii, _mat4.compose(P, _q0, S));
+  tr.inst.instanceMatrix.needsUpdate = true;
+  if (tr.inst.setColorAt) { tr.inst.setColorAt(tr.ii, _charCol); tr.inst.instanceColor.needsUpdate = true; }
+  tr._gone = true; tr.r = 0; tr.top = -999;       // no longer blocks / no longer climbable
+}
+let _mat4 = null, _q0 = null;
+window._ignite = (tr) => igniteTree(tr);     // debug/test hook
+window._treefires = () => TREEFIRES.length;  // debug/test hook
+function treeFireUpdate(dt) {
+  if (!TREEFIRES.length) return;
+  const t = clock.elapsedTime;
+  for (let i = TREEFIRES.length - 1; i >= 0; i--) {
+    const f = TREEFIRES[i];
+    f.t += dt;
+    // grow in, then flicker — each cluster dances on its own beat
+    const grow = Math.min(1, f.t / 1.0);
+    f.grp.scale.y = 0.2 + 0.8 * grow;
+    for (const m of f.grp.children) {
+      const ph = m.userData.ph || 0;
+      m.rotation.z = Math.sin(t * 9 + ph) * 0.18;
+      const fl = 1 + Math.sin(t * 16 + ph * 2.3) * 0.16 + Math.sin(t * 27 + ph) * 0.08;
+      m.scale.y = m.scale.x * (1.4 * fl);
+    }
+    if (f.light) f.light.intensity = 8 + Math.sin(t * 18 + f.gy) * 2.5;
+    // jump to neighbours — once, after a beat — so a grove catches and runs
+    if (!f.spread && f.t > f.spreadAt) {
+      f.spread = 1;
+      let lit = 0;
+      const want = 1 + (Math.random() < 0.5 ? 1 : 0);   // 1-2 neighbours
+      for (const o of TREES) {
+        if (lit >= want) break;
+        if (o === f.tr || o._burning || o._gone || o.top === undefined) continue;
+        if (Math.hypot(o.x - f.tr.x, o.z - f.tr.z) > 9) continue;
+        if (igniteTree(o)) lit++;
+      }
+    }
+    // burn out → fell the tree, kill the flame
+    if (f.t > f.dur) {
+      fellTree(f.tr);
+      scene.remove(f.grp);
+      if (f.light) scene.remove(f.light);
+      TREEFIRES.splice(i, 1);
+    }
+  }
 }
 
 // ───────────────────────── arrows ─────────────────────────
@@ -3992,6 +4119,33 @@ const _streakMat = new THREE.MeshBasicMaterial({
   color: 0xbfeaff, transparent: true, opacity: 0.5,
   blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
 
+// ── rocket-fuel trail ── a pool of additive embers a fire-arrow drops as it
+// flies. Billboarded to the camera, each blooms then fades. Bounded for phone.
+const _trailGeo = new THREE.PlaneGeometry(0.42, 0.42);
+const _trailMat = new THREE.MeshBasicMaterial({ color: 0xff7a1e, transparent: true,
+  opacity: 1, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+const TRAIL = []; const TRAIL_MAX = IS_TOUCH ? 26 : 46; let _trailNext = 0;
+function trailPuff(x, y, z) {
+  let p;
+  if (TRAIL.length < TRAIL_MAX) {
+    p = new THREE.Mesh(_trailGeo, _trailMat.clone()); scene.add(p); TRAIL.push(p);
+  } else { p = TRAIL[_trailNext]; _trailNext = (_trailNext + 1) % TRAIL.length; }
+  p.visible = true; p.position.set(x, y, z);
+  p.material.color.setHex(Math.random() < 0.4 ? 0xffe27a : 0xff6a14);
+  p.material.opacity = 0.95; p.scale.setScalar(0.5 + Math.random() * 0.4);
+  p.userData.life = 0.5;
+}
+function trailUpdate(dt) {
+  for (const p of TRAIL) {
+    if (!p.visible) continue;
+    p.userData.life -= dt;
+    if (p.userData.life <= 0) { p.visible = false; continue; }
+    p.material.opacity = Math.max(0, p.userData.life / 0.5) * 0.95;
+    p.scale.addScalar(dt * 2.2);                 // bloom outward as it dies
+    p.quaternion.copy(camera.quaternion);        // billboard
+  }
+}
+
 function loose() {
   const power = Math.min(1, drawT);
   if (power < 0.04) { drawT = 0; return; }   // a true non-draw, ignore
@@ -4014,9 +4168,17 @@ function loose() {
   const streak = new THREE.Mesh(_streakGeo, _streakMat.clone());
   streak.position.z = -1.9;          // trails behind (arrow forward = +z)
   m.add(streak); m.userData.streak = streak;
+  // ── fire-arrow ── while you're tripping, the shot burns: a hot rocket-fuel
+  // tail and a head that sets trees alight where it sticks.
+  const onFire = tripT > 0;
+  if (onFire) {
+    streak.material.color.setHex(0xffae2e);
+    streak.material.opacity = 0.95;
+    streak.scale.set(1.7, 1.7, 1.5);              // a fatter, longer plume
+  }
   scene.add(m);
   const rec = { m, v: dir.multiplyScalar(speed),
-                t: ARROW_LIFE, power,
+                t: ARROW_LIFE, power, fire: onFire,
                 ox: m.position.x, oy: m.position.y, oz: m.position.z };
   arrows.push(rec);
   arrowCam = { rec, mode: 'follow', rt: 0 };   // ride this one
@@ -4070,8 +4232,10 @@ function arrowUpdate(dt) {
     const st = a.m.userData.streak;
     if (st) {
       const spd = Math.hypot(a.v.x, a.v.y, a.v.z);
-      st.material.opacity = Math.max(0, Math.min(0.55, spd / 80 * 0.55)) * Math.min(1, a.t / 1.5);
+      st.material.opacity = Math.max(0, Math.min(0.95, spd / 80 * (a.fire ? 0.95 : 0.55))) * Math.min(1, a.t / 1.5);
     }
+    // a fire-arrow lays down a trail of rocket-fuel embers as it flies
+    if (a.fire) trailPuff(a.m.position.x, a.m.position.y, a.m.position.z);
     // orient along velocity — skip when v is near-vertical (apex of a
     // straight-up shot) so lookAt never degenerates against the up axis
     if (a.v.x * a.v.x + a.v.z * a.v.z > 1e-4)
@@ -4195,9 +4359,10 @@ function arrowUpdate(dt) {
       const gy = heightAt(tr.x, tr.z);
       if (cyp > gy + 0.3 && cyp < gy + 10) {            // trunk + lower canopy zone
         a.m.position.set(cxp, cyp, czp);                // snap to the trunk face
-        a.stuck = true; a.t = ARROW_STUCK_LIFE;
+        a.stuck = true; a.t = a.fire ? 2.0 : ARROW_STUCK_LIFE;   // a burning shaft is consumed by its own fire
         if (a.m.userData.streak) { a.m.remove(a.m.userData.streak); a.m.userData.streak = null; }
         if (audio.impact) audio.impact('wood', distVol);
+        if (a.fire) igniteTree(tr);                     // the trip-arrow sets the tree alight
         treeHit = true; break;
       }
     }
@@ -4831,16 +4996,15 @@ function tickBody() {
   // ── the hunter talks to himself, sparingly ──
   if (started && !dead && !intro) {
     const M = tickBody;
-    // ── hunger makes you drowsy ── the longer since you ate, the heavier
-    // the eyelids: you blink more, and the blinks linger. Eating resets it.
-    const sleepy = Math.max(0, Math.min(1, (t - player.lastAte - 55) / 70));
-    M._blinkT = (M._blinkT ?? 3) - dt;
-    if (M._blinkT <= 0 && !M._blinking && sleepy > 0.12 && tripT <= 0) {
-      M._blinkT = (3.2 - sleepy * 2.2) + Math.random() * 1.5;   // more often the hungrier you are
-      M._blinking = true;
-      setLids(-100 + (45 + sleepy * 40), 0);                    // eyes droop (heavier = lower)
-      setTimeout(() => { M._blinking = false; if (started && !dead && !intro) setLids(-100, 0); },
-        110 + sleepy * 220);                                     // and linger shut when really hungry
+    // ── hunger reads as exhaustion ── not blinking (that was awful), but a
+    // soft darkness that breathes in at the edges of vision the longer it's
+    // been since you ate. Tunnel-vision creep; clears the moment you eat.
+    const sleepy = Math.max(0, Math.min(1, (t - player.lastAte - 55) / 80));
+    if (_exhaust) {
+      const breatheE = 0.5 + 0.5 * Math.sin(t * 1.1);          // slow, living pulse
+      const target = tripT > 0 ? 0 : sleepy * (0.55 + 0.45 * breatheE);
+      _exhaustV += (target - _exhaustV) * Math.min(1, dt * 1.5);  // ease, never snap
+      _exhaust.style.opacity = _exhaustV.toFixed(3);
     }
     if (night > 0.6 && !M._saidNight) { M._saidNight = true; M._saidDawn = false; say('nightFall', 4200); }
     if (night < 0.15 && M._saidNight && !M._saidDawn) { M._saidDawn = true; M._saidNight = false; say('dawn', 4200); }
@@ -5289,6 +5453,8 @@ function tickBody() {
   if (juiceT > 0) { juiceT -= dt; wdt = dt * 0.05; }
   for (const a of animals) animalUpdate(a, wdt);
   arrowUpdate(wdt);
+  treeFireUpdate(dt);              // burning trees climb, spread, then fall
+  trailUpdate(dt);                 // rocket-fuel embers fade
   if (USE_POST) {
     // night needs a softer bloom threshold so fireflies/stars breathe
     bloomPass.threshold = 0.85 - (window._night || 0) * 0.38;

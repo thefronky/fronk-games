@@ -77,6 +77,26 @@
   #veil{position:fixed;inset:0;z-index:18;background:#050302;opacity:0;pointer-events:none;transition:opacity .25s linear}
   #vignette{position:fixed;inset:0;pointer-events:none;z-index:5;
     background:radial-gradient(ellipse at center,transparent 52%,rgba(5,3,2,.52) 100%)}
+  /* exhaustion — hunger closes in at the edges. soft, feathered, breathing.
+     opacity driven from game.js by how long since you last ate. */
+  #exhaust{position:fixed;inset:0;pointer-events:none;z-index:6;opacity:0;
+    background:radial-gradient(ellipse 78% 78% at center,transparent 30%,
+      rgba(8,5,3,.6) 72%,rgba(4,2,1,.92) 100%)}
+  /* CONSUME — appears when you stand by a glowing mushroom. tap to eat. */
+  #consume{position:fixed;left:50%;bottom:30%;transform:translate(-50%,0) scale(.9);
+    z-index:16;pointer-events:none;opacity:0;transition:opacity .25s,transform .25s;
+    font-family:'Cinzel','Times New Roman',serif;font-weight:600;font-size:17px;
+    letter-spacing:.34em;text-indent:.34em;text-transform:uppercase;color:#f6e6c2;
+    background:rgba(28,12,30,.34);border:1.5px solid rgba(180,120,255,.55);
+    border-radius:40px;padding:15px 34px;cursor:pointer;-webkit-tap-highlight-color:transparent;
+    backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);
+    box-shadow:0 0 26px rgba(150,80,255,.4),inset 0 0 18px rgba(150,80,255,.18);
+    text-shadow:0 0 14px rgba(190,130,255,.7)}
+  #consume.show{opacity:1;pointer-events:auto;transform:translate(-50%,0) scale(1);
+    animation:consumePulse 1.8s ease-in-out infinite}
+  #consume:active{transform:translate(-50%,0) scale(.95)}
+  @keyframes consumePulse{0%,100%{box-shadow:0 0 22px rgba(150,80,255,.34),inset 0 0 16px rgba(150,80,255,.16)}
+    50%{box-shadow:0 0 38px rgba(170,100,255,.6),inset 0 0 22px rgba(150,80,255,.26)}}
 
   /* ── eyelids — the wake-up. two black bars that retract like opening eyes.
        transform driven by a CSS var set from game.js (intro owns timing). ── */
@@ -182,6 +202,8 @@
 </button>
 
 <div id="vignette"></div>
+<div id="exhaust"></div>
+<button id="consume">Consume</button>
 <div id="title">
   <h1>CONSUME</h1>
   <div class="rule"><i></i>
