@@ -4116,6 +4116,7 @@ function cinematic(text, ms = 4000) {
 const _eyelids = document.getElementById('eyelids');
 const _exhaust = document.getElementById('exhaust');   // hunger/exhaustion edge-darkening
 let _exhaustV = 0;                                      // eased opacity, 0..1
+const _heaven = document.getElementById('heaven');     // overexposed-heavenly wash high in the climb
 const _consumeBtn = document.getElementById('consume'); // tap-to-eat the mushroom
 if (_consumeBtn) {
   const eat = (e) => { e.preventDefault(); e.stopPropagation(); window._eatMushroom(); };
@@ -4271,6 +4272,45 @@ let _cloudGroup = null;
 const _cloudBlobGeo = new THREE.IcosahedronGeometry(2.4, 1);
 const _cloudMat3 = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xcfe2ff,
   emissiveIntensity: 0.3, roughness: 1, transparent: true, opacity: 0.96, flatShading: true });
+// ── THE KITCHEN ── giant oversized 90s-kitchen objects you land on once you
+// climb high enough. You're shrunk to nothing; a mug is a tower, a cookie a
+// plateau. Honey-I-Shrunk-the-Kids. Each returns {topH, r} for landing.
+function buildKitchenItem(kind, col) {
+  const g = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({ color: col, roughness: 0.5, flatShading: true });
+  if (kind === 'mug') {
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(8, 7, 11, 20), mat);
+    body.position.y = 5.5; g.add(body);
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(8, 0.7, 8, 20), mat);
+    rim.rotation.x = Math.PI / 2; rim.position.y = 11; g.add(rim);
+    const handle = new THREE.Mesh(new THREE.TorusGeometry(4, 1.1, 8, 16, Math.PI), mat);
+    handle.position.set(8.5, 6, 0); handle.rotation.z = -Math.PI / 2; g.add(handle);
+    // a disc of "coffee" you stand on, inset at the rim
+    const coffee = new THREE.Mesh(new THREE.CylinderGeometry(7.2, 7.2, 0.5, 20),
+      new THREE.MeshStandardMaterial({ color: 0x3a2012, roughness: 0.4 }));
+    coffee.position.y = 10.6; g.add(coffee);
+    g.userData = { topH: 10.9, r: 7.0 };
+  } else if (kind === 'cookie') {
+    const disc = new THREE.Mesh(new THREE.CylinderGeometry(9, 9, 2.6, 18), mat);
+    disc.position.y = 1.3; g.add(disc);
+    const chip = new THREE.MeshStandardMaterial({ color: 0x2c160a, roughness: 0.5 });
+    for (let i = 0; i < 9; i++) {
+      const c = new THREE.Mesh(new THREE.IcosahedronGeometry(0.9, 0), chip);
+      const a = Math.random() * 6.28, rr = Math.random() * 7;
+      c.position.set(Math.cos(a) * rr, 2.6, Math.sin(a) * rr); g.add(c);
+    }
+    g.userData = { topH: 2.8, r: 8.0 };
+  } else {   // cereal box
+    const box = new THREE.Mesh(new THREE.BoxGeometry(11, 17, 5), mat);
+    box.position.y = 8.5; g.add(box);
+    const band = new THREE.Mesh(new THREE.BoxGeometry(11.2, 4, 5.2),
+      new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6 }));
+    band.position.y = 10; g.add(band);
+    g.userData = { topH: 17.2, r: 5.0 };
+  }
+  g.traverse(o => { if (o.isMesh) o.castShadow = true; });
+  return g;
+}
 function spawnClouds() {
   clearClouds();
   _cloudGroup = new THREE.Group(); scene.add(_cloudGroup);
@@ -4291,12 +4331,25 @@ function spawnClouds() {
     _cloudGroup.add(g);
     CLOUDSTEPS.push({ x, z, y: y + 0.8, r: r + 2.0 });    // landable top, generous pad
   }
+  // and up top, the KITCHEN — climb the clouds into it
+  const KITS = [['mug', 0xd11f2a], ['cookie', 0xc0894a], ['box', 0xf2c500],
+                ['mug', 0x2a6fd1], ['cookie', 0xa9743a], ['box', 0xe0452a]];
+  const topCloud = baseY + 8 + N * 4.2;
+  for (let i = 0; i < KITS.length; i++) {
+    const ang = i * 1.15 + 0.5, rad = 16 + i * 4;
+    const x = cx + Math.cos(ang) * rad, z = cz + Math.sin(ang) * rad;
+    const y = topCloud + 6 + i * 16;                     // higher than the clouds
+    const obj = buildKitchenItem(KITS[i][0], KITS[i][1]);
+    obj.position.set(x, y, z); _cloudGroup.add(obj);
+    CLOUDSTEPS.push({ x, z, y: y + obj.userData.topH, r: obj.userData.r });
+  }
 }
 function clearClouds() {
   if (_cloudGroup) { scene.remove(_cloudGroup); _cloudGroup = null; }
   CLOUDSTEPS.length = 0;
 }
 window._spawnClouds = () => { spawnClouds(); return CLOUDSTEPS.length; };
+window._cloudsteps = () => CLOUDSTEPS.map(c => [Math.round(c.x), Math.round(c.y), Math.round(c.z)]);
 function forageUpdate(t) {
   let mush = null;
   for (const f of FORAGE) {
@@ -5370,26 +5423,30 @@ function tickBody() {
     tripT -= dt;
     const k = Math.max(0, Math.min(1, tripT / 2));
     const lv = Math.max(1, tripLevel);          // depth scales the whole look
-    // colors SURGE — super-bright, vibrant, pop. Deeper and faster the
-    // higher the level: the whole world goes neon and starts to swim.
-    const hue = (t * (150 + lv * 55) + 60 * Math.sin(t * 0.7)) % 360;
-    const sat = 1 + (2.2 + 0.7 * lv + 0.6 * Math.sin(t * 1.3)) * k;     // L1~3.3x, L3~5x saturation
-    const con = 1 + (0.4 + 0.18 * lv) * k;
-    // keep brightness modest so the heavy saturation POPS instead of blowing to white
-    const bri = 1 + (0.05 + 0.02 * lv) + (0.10 * Math.sin(t * 3.1) + 0.05 * Math.sin(t * 7.3)) * k;
-    const blur = IS_TOUCH ? 0 : (0.5 + 0.5 * Math.sin(t * 0.9)) * k;   // full-screen blur is too costly on phones
+    // how high you've climbed — the cloud/kitchen ascent washes the world from
+    // trippy → OVEREXPOSED → HEAVENLY as you rise.
+    const alt = Math.max(0, player.y - heightAt(player.x, player.z));
+    const heaven = Math.min(1, Math.max(0, (alt - 28) / 95));
+    // a SLOW, dreamy hue drift — not a strobing disco. Underwater, not a rave.
+    const hue = (t * (16 + lv * 7) + 45 * Math.sin(t * 0.45)) % 360;
+    const sat = 1 + (1.7 + 0.5 * lv) * k * (1 - heaven * 0.75);    // colors melt toward white up high
+    const con = 1 + (0.28 + 0.1 * lv) * k * (1 - heaven * 0.6);
+    const bri = 1 + (0.05 + 0.02 * lv) + heaven * 0.38 + 0.04 * Math.sin(t * 1.3) * k;  // overexposed up high (but kitchen still visible)
+    const blur = IS_TOUCH ? 0 : (0.35 + 0.45 * Math.sin(t * 0.5)) * k;
     canvas.style.filter = 'hue-rotate(' + hue.toFixed(0) + 'deg) saturate(' + sat.toFixed(2)
       + ') contrast(' + con.toFixed(2) + ') brightness(' + bri.toFixed(2)
       + ') blur(' + blur.toFixed(2) + 'px)';
-    // the whole picture BREATHES + sways — deeper warp the higher you go
-    const sc = 1 + (0.03 + 0.02 * lv) * Math.sin(t * 1.7) * k;
-    const rot = (0.6 + 0.3 * lv) * Math.sin(t * 0.6) * k;
+    // a slow, oceanic swell + drift — gentle, never a fast spin
+    const sc = 1 + (0.02 + 0.01 * lv) * Math.sin(t * 0.8) * k;
+    const rot = (0.3 + 0.14 * lv) * Math.sin(t * 0.3) * k;
     canvas.style.transformOrigin = 'center';
     canvas.style.transform = 'scale(' + sc.toFixed(3) + ') rotate(' + rot.toFixed(2) + 'deg)';
+    if (_heaven) _heaven.style.opacity = (heaven * 0.42).toFixed(3);   // a heavenly haze, not a whiteout
     if (tripT <= 0) { tripLevel = 0; clearClouds(); }   // sober up
   } else if (canvas.style.filter) {
     canvas.style.filter = ''; canvas.style.transform = '';
     tripLevel = 0; clearClouds();
+    if (_heaven) _heaven.style.opacity = '0';
     if (audio.tripMusic) audio.tripMusic(false);
   }
   // auto-launch: after the theme's opening swell, the cinematic dive begins
@@ -5986,14 +6043,16 @@ function tickBody() {
   if (juiceT > 0) { juiceT -= dt; wdt = dt * 0.05; }
   for (const a of animals) {
     animalUpdate(a, wdt);
-    // L2+: the whole world is tripping — the animals BOUNCE too, every step
-    // a hop, soaring higher the deeper the trip. Absolute lift off the
-    // terrain (never accumulates) on top of their normal walking/avoiding.
-    if (tripLevel >= 2 && !a.dead && a.obj) {
+    // L2+: the world goes oceanic — the animals don't HOP, they FLOAT, low-
+    // gravity, drifting and swaying like fish in water. The deeper the trip,
+    // the higher they hang in the sky. Gentle, never a hyper 10ft pogo.
+    if (tripLevel >= 2 && !a.dead && a.obj && !a.cfg.spiderish) {
       const ph = a._bouncePh ?? (a._bouncePh = Math.random() * 6.283);
-      const hgt = tripLevel >= 3 ? 3.4 : 1.5;
       const gy = heightAt(a.obj.position.x, a.obj.position.z);
-      a.obj.position.y = gy + Math.abs(Math.sin(t * 4.4 + ph)) * hgt;
+      // base hover rises with the trip; a slow swell rides on top
+      const hover = (tripLevel >= 3 ? 7 : 1.6) + (tripLevel >= 3 ? 3.5 : 0.7) * Math.sin(t * 0.5 + ph);
+      a.obj.position.y = gy + Math.max(0, hover) + Math.sin(t * 0.9 + ph) * 0.4;
+      a.obj.rotation.z = Math.sin(t * 0.45 + ph) * 0.22;   // a slow, fishy sway
     }
   }
   arrowUpdate(wdt);

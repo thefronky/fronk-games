@@ -92,6 +92,10 @@
   #veil{position:fixed;inset:0;z-index:18;background:#050302;opacity:0;pointer-events:none;transition:opacity .25s linear}
   /* arrival flash — the white blast of impact when you strike the earth */
   #flash{position:fixed;inset:0;z-index:19;background:#fff6e6;opacity:0;pointer-events:none !important}
+  /* heavenly wash — climbing the clouds/kitchen overexposes the world to white */
+  #heaven{position:fixed;inset:0;z-index:7;opacity:0;pointer-events:none;
+    background:radial-gradient(ellipse at center,#ffffff 0%,#eef4ff 70%,#dfe9ff 100%);
+    transition:opacity .4s linear}
   #vignette{position:fixed;inset:0;pointer-events:none;z-index:5;
     background:radial-gradient(ellipse at center,transparent 52%,rgba(5,3,2,.52) 100%)}
   /* exhaustion — hunger closes in at the edges. soft, feathered, breathing.
@@ -196,6 +200,7 @@
 <div id="blood"></div>
 <div id="veil"></div>
 <div id="flash"></div>
+<div id="heaven"></div>
 <div id="eyelids"><div class="lid" id="lidTop"></div><div class="lid" id="lidBot"></div></div>
 
 <div id="stickL" class="stick"><div class="knob" id="knobL"></div></div>
