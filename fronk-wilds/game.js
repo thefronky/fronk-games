@@ -4416,6 +4416,12 @@ let _cloudGroup = null;
 const _cloudBlobGeo = new THREE.IcosahedronGeometry(2.4, 1);
 const _cloudMat3 = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xcfe2ff,
   emissiveIntensity: 0.3, roughness: 1, transparent: true, opacity: 0.96, flatShading: true });
+// higher up the column the clouds turn luminous and gauzy — lit from within,
+// half-dissolved, more heaven than weather. Picked by altitude band in _makeCloud.
+const _cloudMatMid = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xe6ecff,
+  emissiveIntensity: 0.7, roughness: 1, transparent: true, opacity: 0.82, flatShading: true });
+const _cloudMatHi = new THREE.MeshStandardMaterial({ color: 0xfffefb, emissive: 0xfff2da,
+  emissiveIntensity: 1.5, roughness: 1, transparent: true, opacity: 0.6, flatShading: true });
 // ── the kitchen PUZZLE ── a glowing target floats over each giant object.
 // Light them ALL with FIRE arrows and the way to heaven opens above.
 const KITCHEN_TARGETS = [];
@@ -4494,14 +4500,36 @@ function _makeCloud(i) {
   const x = _cloudCx + Math.cos(ang) * rad, z = _cloudCz + Math.sin(ang) * rad;
   const y = _cloudBaseY + 8 + i * 4.4;                   // forever upward
   const r = 3.4 + Math.random() * 2.2;
+  // altitude rises with i: clouds grow from tight puffs into wide, gauzy,
+  // self-lit sheets the higher you climb — more heaven than weather.
+  const alt = Math.min(1, i / 34);
+  const mat = alt > 0.66 ? _cloudMatHi : alt > 0.3 ? _cloudMatMid : _cloudMat3;
   const g = new THREE.Group(); g.position.set(x, y, z);
-  for (let b = 0; b < 4; b++) {
-    const s = new THREE.Mesh(_cloudBlobGeo, _cloudMat3);
-    s.position.set((Math.random() - 0.5) * r * 1.5, (Math.random() - 0.5) * 0.7, (Math.random() - 0.5) * r * 1.5);
-    s.scale.setScalar(0.7 + Math.random() * 0.9); g.add(s);
+  const blobs = (IS_TOUCH ? 4 : 5) + Math.round(alt * 3);   // fuller, more sculptural up high
+  for (let b = 0; b < blobs; b++) {
+    const s = new THREE.Mesh(_cloudBlobGeo, mat);
+    // up high they spread wider and FLATTEN into stretched shelves — interesting
+    // silhouettes (anvils, gauzy strata) instead of identical round puffs
+    const spread = 1.5 + alt * 1.4;
+    s.position.set((Math.random() - 0.5) * r * spread,
+                   (Math.random() - 0.5) * (0.7 + alt * 1.6),
+                   (Math.random() - 0.5) * r * spread);
+    const base = 0.6 + Math.random() * 0.9;
+    const flat = 1 - alt * (0.3 + Math.random() * 0.35);     // squashed vertically up high
+    s.scale.set(base * (1 + alt * (0.4 + Math.random())), base * flat, base * (1 + alt * (0.4 + Math.random())));
+    s.rotation.y = Math.random() * Math.PI;
+    g.add(s);
   }
+  // a rare tall wisp spires off the high clouds — breaks the flat horizon
+  if (alt > 0.5 && Math.random() < 0.4) {
+    const w = new THREE.Mesh(_cloudBlobGeo, mat);
+    w.position.set((Math.random() - 0.5) * r, 2.4 + Math.random() * 3, (Math.random() - 0.5) * r);
+    w.scale.set(0.5, 1.6 + Math.random() * 1.4, 0.5);
+    g.add(w);
+  }
+  g.userData.bob = Math.random() * Math.PI * 2;            // slow ethereal drift, animated in loop
   _cloudGroup.add(g);
-  CLOUDSTEPS.push({ x, z, y: y + 0.8, r: r + 2.0, grp: g });
+  CLOUDSTEPS.push({ x, z, y: y + 0.8, r: r + 2.0, grp: g });   // landing core stays tight — wisps are decorative
   if (y > _cloudTopY) _cloudTopY = y;
 }
 function spawnClouds() {
@@ -6311,6 +6339,14 @@ function tickBody() {
   trailUpdate(dt);                 // rocket-fuel embers fade
   arrivalUpdate(dt);              // the genesis blast: ring/flash/beam + the home growing in
   extendClouds();                 // the endless climb — generate clouds above, prune below
+  if (_cloudGroup) {              // slow ethereal drift — the clouds breathe and turn
+    for (const cs of CLOUDSTEPS) {
+      if (!cs.grp) continue;
+      const ph = cs.grp.userData.bob || 0;
+      cs.grp.position.y = cs.y - 0.8 + Math.sin(t * 0.35 + ph) * 0.35;
+      cs.grp.rotation.y += dt * 0.04;
+    }
+  }
   if (USE_POST) {
     // night needs a softer bloom threshold so fireflies/stars breathe
     bloomPass.threshold = 0.85 - (window._night || 0) * 0.38;
