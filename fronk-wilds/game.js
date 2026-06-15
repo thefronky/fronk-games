@@ -3788,6 +3788,15 @@ function stepAnimal(a, speed, dt) {
   }
   p.set(nx, ny, nz);
   a._moved = true;            // gait sway/bob only plays while actually moving
+  // a galloping animal throws dirt — only at a real run, only on the ground
+  // (off-trip; tripping animals float), rate-limited per beast for the phone
+  if (speed > a.cfg.speed * 1.6 && tripLevel === 0) {
+    a._dustT = (a._dustT || 0) - dt;
+    if (a._dustT <= 0) {
+      a._dustT = 0.11 + Math.random() * 0.09;
+      dustPuff(nx, ny, nz, 0xa3906f, 0.5 + (a.cfg.scale || 1) * 0.45);
+    }
+  }
 }
 
 function lerpAngle(a, b, t) {
@@ -4133,6 +4142,7 @@ let started = false, drawT = 0, holdT = 0, raiseT = 0, drawing = false, dead = f
 let _moveLvl = 0;   // 0..1 gait level — drives footstep audio + camera head-bob
 let breathLoad = 0; // 0..1 exertion — rises running / holding a draw, recovers at rest
 let _landDip = 0;   // camera knee-bend on landing, decays back up
+let _dustStepT = 0;   // sprint-dust footfall cooldown
 let _curGround = 'grass';   // footstep material under the player
 let tripT = 0;      // seconds left of a mushroom trip (trippy visuals + moon-jump)
 let tripLevel = 0;  // 0=sober, 1=jump+vibrant, 2=animals bounce+higher+bullet arrows, 3=cloud-climb
@@ -4894,6 +4904,54 @@ function trailUpdate(dt) {
     p.quaternion.copy(camera.quaternion);        // billboard
   }
 }
+
+// ── dust ── soft ground-coloured puffs kicked up by a sprint, a landing, and
+// most of all by a galloping animal — so a chase reads in the dirt, not just the
+// legs. A small billboarded pool, alpha-blended (not additive — it's earth, not
+// fire), each rising, spreading and fading. Bounded hard for the phone.
+const _dustTex = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const x = c.getContext('2d');
+  const g = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+  g.addColorStop(0, 'rgba(255,255,255,0.85)');
+  g.addColorStop(0.5, 'rgba(255,255,255,0.30)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  x.fillStyle = g; x.fillRect(0, 0, 64, 64);
+  return new THREE.CanvasTexture(c);
+})();
+const _dustGeo = new THREE.PlaneGeometry(1, 1);
+const _dustMat = new THREE.MeshBasicMaterial({ map: _dustTex, color: 0xb1997a,
+  transparent: true, opacity: 1, depthWrite: false });
+const DUST = []; const DUST_MAX = IS_TOUCH ? 26 : 46; let _dustNext = 0;
+function dustPuff(x, y, z, hex, scl) {
+  hex = hex === undefined ? 0xb1997a : hex; scl = scl || 1;
+  let p;
+  if (DUST.length < DUST_MAX) { p = new THREE.Mesh(_dustGeo, _dustMat.clone()); scene.add(p); DUST.push(p); }
+  else { p = DUST[_dustNext]; _dustNext = (_dustNext + 1) % DUST.length; }
+  p.visible = true;
+  p.position.set(x + (Math.random() - 0.5) * 0.4, y + 0.14, z + (Math.random() - 0.5) * 0.4);
+  p.material.color.setHex(hex);
+  p.material.opacity = 0.42;
+  p.scale.setScalar((0.5 + Math.random() * 0.4) * scl);
+  p.userData.life = p.userData.maxLife = 0.7 + Math.random() * 0.35;
+  p.userData.vy = 0.45 + Math.random() * 0.35;
+  p.userData.grow = 1.5 * scl;
+}
+function dustUpdate(dt) {
+  for (const p of DUST) {
+    if (!p.visible) continue;
+    p.userData.life -= dt;
+    if (p.userData.life <= 0) { p.visible = false; continue; }
+    p.position.y += p.userData.vy * dt;
+    p.userData.vy *= Math.pow(0.5, dt * 2);      // billows up, then settles
+    p.scale.addScalar(p.userData.grow * dt);
+    p.material.opacity = 0.42 * (p.userData.life / p.userData.maxLife);
+    p.quaternion.copy(camera.quaternion);        // billboard
+  }
+}
+window._dust = () => DUST.filter(p => p.visible).length;   // debug/test hook
+// tan of the ground you're standing on (rock kicks up almost nothing)
+function dustTintFor(grd) { return grd === 'sand' ? 0xccb892 : grd === 'rock' ? 0x8c857e : 0xa3906f; }
 
 function loose() {
   // a real press always looses a shot — even a quick tap (raiseT confirms the
@@ -5900,6 +5958,15 @@ function tickBody() {
     _moveLvl = stickMag <= 0.02 ? 0
       : (sprinting ? 1 : 0.4 + stickMag * 0.4);
     if (!grounded) _moveLvl = 0;   // no footsteps / head-bob while airborne
+    // sprinting kicks up dust behind your boots (not on bare rock)
+    if (grounded && sprinting && _moveLvl > 0.5 && grd !== 'rock' && !inCanoe) {
+      _dustStepT -= dt;
+      if (_dustStepT <= 0) {
+        _dustStepT = 0.27;
+        const bx = player.x - Math.sin(player.yaw) * 0.5, bz = player.z - Math.cos(player.yaw) * 0.5;
+        dustPuff(bx, heightAt(bx, bz), bz, dustTintFor(grd), 0.7);
+      }
+    } else _dustStepT = 0;
     if (stickMag > 0.05 && !bflyUsed) releaseButterflies();   // first steps stir them up
     const sprint = sprinting ? 1.65 : 1;
     const sp = 5.4 * sprint * (drawing ? 0.5 : 1) * (IS_TOUCH ? Math.max(stickMag, 0.25) : 1);
@@ -6019,6 +6086,11 @@ function tickBody() {
           _landDip = Math.min(0.13, impact * 0.014);   // the camera settles into your knees
           if (audio.impact) audio.impact(_curGround === 'rock' ? 'wood' : 'ground', 0.1);
           if (IS_TOUCH && navigator.vibrate && impact > 5.5) navigator.vibrate(14);
+          // a burst of dust at your boots — bigger the harder you hit
+          if (_curGround !== 'rock') {
+            const n = 3 + Math.min(5, impact * 0.5 | 0), tint = dustTintFor(_curGround);
+            for (let i = 0; i < n; i++) dustPuff(player.x, groundY, player.z, tint, 1.1);
+          }
         }
       }
       player.y = player.airY;
@@ -6362,6 +6434,7 @@ function tickBody() {
   arrowUpdate(wdt);
   treeFireUpdate(dt);              // burning trees climb, spread, then fall
   trailUpdate(dt);                 // rocket-fuel embers fade
+  dustUpdate(dt);                  // kicked-up dirt rises and settles
   arrivalUpdate(dt);              // the genesis blast: ring/flash/beam + the home growing in
   extendClouds();                 // the endless climb — generate clouds above, prune below
   if (_cloudGroup) {              // slow ethereal drift — the clouds breathe and turn
