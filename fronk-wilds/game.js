@@ -2274,34 +2274,45 @@ function wispUpdate(t, dt, night) {
 // predators won't follow you into the ring of one. Near-invisible by day
 // (a thread of smoke-glow), full and flickering at night.
 const NIGHTFIRES = [];
+const _logEndMat = new THREE.MeshStandardMaterial({ color: 0xb9905a, roughness: 0.9 });
 function buildWildfire(x, z, kind) {
   const g = new THREE.Group();
   const y = heightAt(x, z);
   g.position.set(x, y, z);
-  if (kind === 'tree') {
-    // a charred, split trunk — the lightning's leftover
-    const h = 7 + Math.random() * 3;
-    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.5, h, 6), charMat);
-    trunk.position.y = h / 2; trunk.rotation.z = (Math.random() - 0.5) * 0.5;
-    g.add(trunk);
-    const stub = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.22, 2.4, 5), charMat);
-    stub.position.set(0.5, h * 0.62, 0); stub.rotation.z = 1.1; g.add(stub);
-  } else {
-    // a low shrub gone to flame — a charred clump of cones
-    for (let i = 0; i < 5; i++) {
-      const c = new THREE.Mesh(new THREE.IcosahedronGeometry(0.5 + Math.random() * 0.4, 0), charMat);
-      c.position.set((Math.random() - 0.5) * 1.4, 0.4 + Math.random() * 0.5, (Math.random() - 0.5) * 1.4);
-      c.scale.y = 1.3; g.add(c);
-    }
+  // ── a felled tree's stump: someone cut this for the wood ──
+  const sa = Math.random() * 6.28;
+  const stump = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.85, 0.85, 9), logMat);
+  stump.position.set(Math.cos(sa) * 3.6, 0.42, Math.sin(sa) * 3.6); g.add(stump);
+  const stop = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.7, 0.06, 9), _logEndMat);
+  stop.position.set(stump.position.x, 0.86, stump.position.z); g.add(stop);
+  // ── the LUMBER: felled logs lying around, cut to feed the fire ──
+  for (let i = 0; i < 4; i++) {
+    const len = 3 + Math.random() * 1.8;
+    const lg = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.32, len, 7), logMat);
+    const a = Math.random() * 6.28, rr = 2.6 + Math.random() * 2.6;
+    lg.position.set(Math.cos(a) * rr, 0.3, Math.sin(a) * rr);
+    lg.rotation.z = Math.PI / 2; lg.rotation.y = Math.random() * 6.28; g.add(lg);
+  }
+  // ── the BONFIRE: a teepee of burning logs, big and beautiful ──
+  for (let i = 0; i < 7; i++) {
+    const lg = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.22, 3.0, 6), i % 2 ? logMat : charMat);
+    const a = i / 7 * 6.28;
+    lg.position.set(Math.cos(a) * 0.55, 1.0, Math.sin(a) * 0.55);
+    lg.rotation.set(Math.cos(a) * 0.5, a, 0.95); g.add(lg);
   }
   buildFire(g, 0, 0, true);
   const f = g.userData.fire;
-  if (kind === 'tree') {            // flames climb the trunk
-    f.flame.scale.set(1.5, 3.2, 1.5);
-    f.flame.position.y = 1.4;
-    f.light.position.y = 3.0; f.light.distance = 34;
-  } else { f.flame.scale.set(1.3, 1.5, 1.3); f.light.distance = 24; }
-  f.kind = kind;
+  // big, beautiful: tall layered flames, a wide warm pool, plenty of embers
+  f.flame.scale.set(2.6, 3.6, 2.6); f.flame.position.y = 1.7;
+  f.light.position.y = 3.4; f.light.distance = 42; f.light.intensity = 16; f.light.color.setHex(0xff9a3c);
+  const emMat = (f.embers[0] && f.embers[0].material) || charMat;
+  for (let i = 0; i < 7; i++) {                      // extra embers swirling up
+    const e = new THREE.Mesh(emberGeo, emMat);
+    const a = i * 1.5;
+    e.position.set(Math.cos(a) * 0.7, 1.0 + (i % 4) * 0.5, Math.sin(a) * 0.7);
+    e.userData.ph = a + 3; g.add(e); f.embers.push(e);
+  }
+  f.kind = 'bonfire';
   scene.add(g);
   NIGHTFIRES.push({ x, z, group: g, fire: f });
 }
