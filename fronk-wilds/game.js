@@ -6414,6 +6414,11 @@ function startTitleMusic() {
   titleArmed = true; titleArmT = clock.elapsedTime;
   // the cloud parts — the dark title clears to reveal the valley beneath
   const ttl = document.getElementById('title'); if (ttl) ttl.classList.add('revealed');
+  // go fullscreen NOW, on the first touch — so the viewport resize (URL bar
+  // sliding away) happens here, hidden under the 1.8s cloud-parting reveal,
+  // and NOT mid-dive where it would reframe the shot and break the seam.
+  if (IS_TOUCH && document.documentElement.requestFullscreen)
+    document.documentElement.requestFullscreen().catch(() => {});
   // the stinger that swells into the emotional theme, on that first touch
   try { audio.start(); if (audio.titleTheme) audio.titleTheme(); } catch (e) {}
 }
@@ -6466,8 +6471,9 @@ function beginLaunch() {
   if (audio.fadeTitle) audio.fadeTitle(LAUNCH_DUR + 0.4);   // the theme fades as you fall
   document.getElementById('title').style.opacity = 0;
   setTimeout(() => document.getElementById('title').style.display = 'none', 800);
+  // fullscreen was already requested on the first tap (startTitleMusic) so the
+  // resize never lands mid-dive. Desktop just grabs the pointer here.
   if (!IS_TOUCH) canvas.requestPointerLock();
-  else if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => {});
 }
 // tap ANYWHERE to begin — no button, no instructions
 document.getElementById('play').addEventListener('click', onTitleTap);
