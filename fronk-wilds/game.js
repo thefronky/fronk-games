@@ -3992,7 +3992,7 @@ function spawnCryptid() {
   setAnim(a, 'Walk');
   animals.push(a);
   cryptid = a;
-  setTimeout(() => toast('Something hunts tonight.', 3000), 2500);
+  setTimeout(() => toast('Something’s off tonight.', 3000), 2500);
 }
 
 // the staring contest — sometimes it stops DEAD at 25–40m, body frozen,
@@ -5029,7 +5029,7 @@ function arrowUpdate(dt) {
           setAnim(an, 'HitReact_Left', true);
           setTimeout(() => { if (!an.dead) an.cur = null; }, 400);
           an.aggro = true;
-          toast(an.isCryptid ? 'It felt that. It is coming to feed.' : 'Wounded. Now it knows what you are.');
+          toast(an.isCryptid ? 'It felt that — and came closer.' : 'Hit it. It didn’t back off.');
         } else {
           // prey, wounded: the zone writes the script from here
           setAnim(an, 'HitReact_Left', true);
