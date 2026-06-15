@@ -69,6 +69,12 @@ const MENAGERIE = {
            keen: 1.0,  aggroBias: 0.85,
            hpJit: true, gait: 'bound', bearish: true,
            aggroR: 34, dmg: 52, scale: 1.4, tint: 0x140d08, nightStalk: true },  // RARE, ~10-12 hits; bigger, darker, FASTER, hits harder — actually scary
+  // ── the swarm ── little Flood-ish scuttlers that FOLLOW and LEAP at you.
+  // Weak (a nip), but they come in numbers. Arrows barely faze them — FIRE is
+  // the answer: a fire-arrow or a tree fire wipes them. Not OP.
+  Spider:{ n: 6, speed: 4.4, gallop: 7, hp: 3, flee: 0, r: 0.45,
+           keen: 1.0, aggroBias: 0.7, scale: 0.5, spiderish: true,
+           hunts: true, aggroR: 32, dmg: 6 },
 };
 // SPECIES aliases MENAGERIE so every a.cfg.* reference keeps working.
 const SPECIES = MENAGERIE;
@@ -2744,11 +2750,12 @@ const PREFAB_FILE = { Bear: 'Bull' };
 
 async function loadAnimals() {
   const names = Object.keys(SPECIES);
-  // load each distinct .glb once, keyed by its filename, then alias
-  const files = [...new Set(names.map(n => PREFAB_FILE[n] || n))];
+  // procedural creatures (spider) have no .glb — don't try to load one
+  const glbNames = names.filter(n => !SPECIES[n].spiderish);
+  const files = [...new Set(glbNames.map(n => PREFAB_FILE[n] || n))];
   await Promise.all(files.map(f => new Promise((res, rej) =>
     loader.load(`assets/animals/${f}.glb`, g => { prefabs[f] = g; res(); }, undefined, rej))));
-  for (const n of names) prefabs[n] = prefabs[PREFAB_FILE[n] || n];
+  for (const n of glbNames) prefabs[n] = prefabs[PREFAB_FILE[n] || n];
   for (const n of names) {
     if (n === 'Deer') {                 // deer come in herds, 2–4 to a group
       let left = SPECIES.Deer.n, herd = 0;
@@ -2868,12 +2875,84 @@ function bearAnim(a, dt, moving) {
     + (moving ? Math.abs(s) * 0.07 : 0) + lift * Math.max(0, -b.tilt / 0.7);
 }
 
+// ════ THE SPIDERS ════ small, dark, glowing-eyed scuttlers. Procedural.
+const _spiderMat = new THREE.MeshStandardMaterial({ color: 0x160b12, roughness: 0.45, flatShading: true });
+const _spiderEyeMat = new THREE.MeshStandardMaterial({ color: 0xff2a08, emissive: 0xff1e04, emissiveIntensity: 2.4, roughness: 0.3 });
+const _spiderLegGeo = new THREE.CylinderGeometry(0.045, 0.03, 0.75, 4);
+function buildSpiderMesh() {
+  const g = new THREE.Group();
+  const abd = new THREE.Mesh(new THREE.SphereGeometry(0.5, 8, 6), _spiderMat);   // abdomen
+  abd.position.set(0, 0.55, -0.34); abd.scale.set(1, 0.82, 1.2); abd.castShadow = true; g.add(abd);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.32, 8, 6), _spiderMat);
+  head.position.set(0, 0.5, 0.34); head.scale.set(1, 0.8, 1); g.add(head);
+  for (const [ex, ey] of [[-0.12, 0.6], [0.12, 0.6], [-0.22, 0.5], [0.22, 0.5]]) {
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.05, 5, 4), _spiderEyeMat);
+    eye.position.set(ex, ey, 0.6); g.add(eye);
+  }
+  const legs = [];
+  for (let s = 0; s < 2; s++) for (let i = 0; i < 4; i++) {
+    const side = s ? 1 : -1;
+    const piv = new THREE.Group(); piv.position.set(side * 0.26, 0.55, 0.28 - i * 0.22); g.add(piv);
+    const seg = new THREE.Mesh(_spiderLegGeo, _spiderMat);
+    seg.position.set(side * 0.3, -0.12, 0); seg.rotation.z = side * -0.95; seg.rotation.x = 0.18; piv.add(seg);
+    legs.push({ piv, phase: i * 0.7 + s * 0.35 });
+  }
+  g.userData.spider = { legs, abd };
+  return g;
+}
+function spiderAnim(a, dt, moving) {
+  const sp = a.obj.userData.spider; if (!sp) return;
+  a.gaitPhase += dt * (moving ? 18 : 4);
+  for (const L of sp.legs) L.piv.rotation.x = Math.sin(a.gaitPhase + L.phase) * (moving ? 0.55 : 0.12);
+  sp.abd.position.y = 0.55 + Math.abs(Math.sin(a.gaitPhase * 0.5)) * 0.04;
+}
+function killSpider(a) {
+  if (a.dead) return;
+  a.dead = true; a.eaten = true; a.t = 1.0;   // vermin — no meat, vanishes fast
+  a.obj.rotation.z = 1.4;
+  score[a.name] = (score[a.name] || 0) + 1;
+  if (audio.impact) audio.impact('flesh', 0.35);
+}
+window._killSpider = killSpider;
+// follow + LEAP. Weak nip on contact. Fire (a fire-arrow or a tree blaze) kills.
+function spiderUpdate(a, dt, dx, dz, dist) {
+  a.attackCd -= dt;
+  // caught in a fire → it burns
+  for (const f of TREEFIRES) {
+    if (Math.hypot(a.obj.position.x - f.tr.x, a.obj.position.z - f.tr.z) < 3.6) { killSpider(a); return; }
+  }
+  const aggroR = a.cfg.aggroR || 32;
+  a._spY = a._spY ?? 0; a._leapVy = a._leapVy ?? 0;
+  let moved = false;
+  if (dist < aggroR) {
+    a.dir = Math.atan2(dx, dz);
+    a._leapCd = (a._leapCd ?? Math.random() * 2) - dt;
+    if (a._leapCd <= 0 && a._spY <= 0.02 && dist < 11 && dist > 1.5) {
+      a._leapCd = 1.1 + Math.random(); a._leapVy = 5.6; a._leaping = true;
+    }
+    stepAnimal(a, a._leaping ? a.cfg.gallop * 1.7 : a.cfg.speed, dt);
+    moved = true;
+    if (a._spY > 0 || a._leapVy > 0 || a._leaping) {
+      a._leapVy -= 14 * dt; a._spY = Math.max(0, a._spY + a._leapVy * dt);
+      if (a._spY <= 0) { a._leapVy = 0; a._leaping = false; }
+    }
+    a.obj.position.y = heightAt(a.obj.position.x, a.obj.position.z) + a._spY;
+    if (dist < 1.7 && a.attackCd <= 0 && meleeReach()) { a.attackCd = 1.0; hurtPlayer(a.cfg.dmg || 6); }
+  } else {
+    wander(a, dt); moved = true;
+  }
+  a.obj.rotation.y = lerpAngle(a.obj.rotation.y, a.dir, Math.min(1, dt * 10));
+  spiderAnim(a, dt, moved);
+}
+
 function spawn(name, near) {
   const cfg = SPECIES[name], prefab = prefabs[name];
   // ── per-individual LOOK ── a herd should read as individuals, not clones.
   const shade = 0.82 + Math.random() * 0.36;            // 0.82–1.18 brightness
   let obj;
-  if (cfg.bearish) {
+  if (cfg.spiderish) {
+    obj = buildSpiderMesh();
+  } else if (cfg.bearish) {
     // a purpose-built procedural bear (dark, humped, scary), not a tinted bull
     const bc = new THREE.Color(cfg.tint || 0x2a1d12).multiplyScalar(shade);
     obj = buildBearMesh(bc);
@@ -2909,7 +2988,7 @@ function spawn(name, near) {
   scene.add(obj);
   const mixer = new THREE.AnimationMixer(obj);
   const acts = {};
-  if (!cfg.bearish) {                       // the procedural bear is animated by bearAnim, not clips
+  if (!cfg.bearish && !cfg.spiderish) {     // procedural creatures are animated in code, not by clips
     for (const frag of ['Idle', 'Idle_2', 'Eating', 'Walk', 'Gallop', 'Death',
                         'HitReact_Left', 'Attack', 'Attack_Kick']) {
       const clip = clipOf(prefab, frag);
@@ -3103,6 +3182,10 @@ function animalUpdate(a, dt) {
     }
   }
 
+  if (a.cfg.spiderish) {                        // ── the swarm: follow + leap
+    spiderUpdate(a, dt, dx, dz, dist);
+    return;
+  }
   if (a.cfg.bearish) {                         // ── the bear has its own brain
     bearUpdate(a, dt, dx, dz, dist);
     a.obj.rotation.y = lerpAngle(a.obj.rotation.y, a.dir, Math.min(1, dt * 6));
@@ -4631,6 +4714,14 @@ function arrowUpdate(dt) {
         a.m.position.set(hx, hy, hz);               // snap to the actual contact point
         if (audio.impact) audio.impact('flesh',
           Math.min(1, Math.hypot(hx - player.x, hz - player.z) / 60));
+        // ── spiders ── a FIRE arrow wipes one instantly; a plain arrow barely
+        // fazes it (3 nips). No carcass, no meat — they just die and vanish.
+        if (an.cfg.spiderish) {
+          bloodPuff(hx, hy, hz);
+          if (a.fire) killSpider(an);
+          else { an.hp -= 1; if (an.hp <= 0) killSpider(an); }
+          scene.remove(a.m); arrows.splice(i, 1); hit = true; break;
+        }
         const zone = hitZone(an, hx, hy, hz);
         an.lastZone = zone;
         const W = WOUNDS[zone];
