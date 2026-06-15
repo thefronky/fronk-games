@@ -2448,6 +2448,7 @@ function relocateHome(x, z) {
 
 // nearest wild fire to the player, and whether you're inside its safe ring
 let nearWildFire = false, nearWildFireD = 1e9, _fireStare = 0, _revealStep = 0;
+let _wakeYaw = 0, _wakePitch = 0, _wakeT = 0;   // wake reference for the control reveal
 function updateWildfires(t, night) {
   const fl1 = Math.sin(t * 11), fl2 = Math.sin(t * 23), fl3 = Math.sin(t * 31);
   // they bank to embers in daylight, roar back up after dark
@@ -3903,6 +3904,7 @@ const INTRO_DUR = 3.5;
 // the opening: a vast aerial of the whole valley; tap and the camera
 // dives toward the clearing, blacks out, and you wake there.
 let launching = false, launchT = 0; const LAUNCH_DUR = 2.2;
+const ORBIT_PHASE = Math.random() * Math.PI * 2;   // the drone opens at a random point on the oval each run
 const _diveFrom = new THREE.Vector3();   // frozen aerial origin of the dive
 // arrow-cam: a brief cinematic chase that rides each loosed arrow
 let arrowCam = null;        // { rec, mode:'follow'|'return', rt }
@@ -5743,7 +5745,7 @@ function tickBody() {
     // TITLE: a slow, cinematic DOLLY along a banked oval track high above the
     // valley — a wide sweeping arc, gently rising and falling like a camera
     // crane, always looking in at the center. Not a flat spin.
-    const a = t * 0.05;                              // slow
+    const a = t * 0.05 + ORBIT_PHASE;               // slow, starting at a random point on the track
     const rx = 185, rz = 125;                        // an oval, not a circle
     const h = 118 + Math.sin(a * 0.9) * 34;          // banking rise/fall
     camera.position.set(Math.cos(a) * rx, h, Math.sin(a) * rz);
@@ -5777,8 +5779,10 @@ function tickBody() {
       started = true; bow.visible = true; updateBowString(0);
       player.x = LAND.x; player.z = LAND.z;
       player.y = heightAt(LAND.x, LAND.z);
-      player.yaw = camera.rotation.y; player.pitch = 0.06;
+      // wake looking UP at the sky, then the world fades in around you
+      player.yaw = camera.rotation.y; player.pitch = 0.62;
       grounded = true; player.airY = player.y;
+      _wakeYaw = player.yaw; _wakePitch = player.pitch; _wakeT = t;   // reveal reference
       blinkAwake();                       // no crater, no blast — you BLINK awake,
       respawnMushroomNear(3);             // and everything fades in around you
     }
@@ -5866,14 +5870,15 @@ function tickBody() {
   // screen. Only when YOU choose to look around / move does the left stick
   // fade in, with the single quote. After that, jump + bow reveal silently
   // as you work out of the base. (Buttons are touch-only; the quote is for all.)
-  if (started && !intro && !dead && _revealStep < 3 && BASE_RING) {
+  if (started && !intro && !dead && _revealStep < 3) {
     const bc = document.body.classList;
-    const dB = Math.hypot(player.x - BASE_RING.x, player.z - BASE_RING.z);
+    const dB = Math.hypot(player.x - LAND.x, player.z - LAND.z);   // distance from where you woke
     if (_revealStep === 0) {
-      const looked = Math.abs(player.yaw - SPAWN.yaw) > 0.08
-                  || Math.abs(player.pitch - SPAWN.pitch) > 0.08
+      const looked = Math.abs(player.yaw - _wakeYaw) > 0.08
+                  || Math.abs(player.pitch - _wakePitch) > 0.08
                   || (window.moveVec && (window.moveVec.x || window.moveVec.y))
-                  || keys.KeyW || keys.KeyA || keys.KeyS || keys.KeyD;
+                  || keys.KeyW || keys.KeyA || keys.KeyS || keys.KeyD
+                  || (t - _wakeT) > 2.6;        // FAILSAFE: controls always come up shortly after you wake
       if (looked) {
         _revealStep = 1;
         if (IS_TOUCH) bc.add('show-move');
