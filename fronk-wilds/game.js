@@ -65,10 +65,10 @@ const MENAGERIE = {
            // circles before committing; after dark the whole pack answers
   // Bull REMOVED — too big to hit cleanly, too aggressive. (The bear still
   // borrows the Bull rig via PREFAB_FILE below, so the model still loads.)
-  Bear:  { n: 3, speed: 2.6, gallop: 9.4,  hp: 9, flee: 0,  r: 1.7,
-           keen: 1.0,  aggroBias: 0.7,
+  Bear:  { n: 3, speed: 3.4, gallop: 12.6, hp: 11, flee: 0,  r: 1.85,
+           keen: 1.0,  aggroBias: 0.85,
            hpJit: true, gait: 'bound', bearish: true,
-           aggroR: 24, dmg: 42, scale: 1.05, tint: 0x2c1d12, nightStalk: true },  // RARE, 8-10 hits; procedural mesh is real-size
+           aggroR: 34, dmg: 52, scale: 1.4, tint: 0x140d08, nightStalk: true },  // RARE, ~10-12 hits; bigger, darker, FASTER, hits harder — actually scary
 };
 // SPECIES aliases MENAGERIE so every a.cfg.* reference keeps working.
 const SPECIES = MENAGERIE;
@@ -2169,7 +2169,7 @@ function buildPsyMush() {
     }
   };
   place(IS_TOUCH ? 14 : 20, buildBerry, 'berry');
-  place(IS_TOUCH ? 14 : 20, buildPsyMush, 'mush');   // plenty to experiment with
+  place(IS_TOUCH ? 22 : 30, buildPsyMush, 'mush');   // plenty — the world floods with them once you trip
 }
 
 // ── the lights ── pale wisps that only show in the deep dark, drifting
@@ -2706,37 +2706,51 @@ async function loadAnimals() {
 // so it actually reads as a bear, not the old dark-bull stand-in: a heavy
 // body with a shoulder hump, a low forward head + snout, round ears, small
 // dark eyes, and four swinging legs. Animated procedurally (bearAnim).
+const _bearEyeMat = new THREE.MeshStandardMaterial({ color: 0xff2a08, emissive: 0xff1e04,
+  emissiveIntensity: 2.6, roughness: 0.3 });   // burning eyes — shared
 function buildBearMesh(tint) {
   const g = new THREE.Group();
   const fur = new THREE.MeshStandardMaterial({ color: tint, roughness: 1, flatShading: true });
-  const dark = new THREE.MeshStandardMaterial({ color: 0x0a0807, roughness: 0.5 });
-  const body = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.9, 2.0), fur);
-  body.position.set(0, 1.0, 0); body.castShadow = true; g.add(body);
-  const rump = new THREE.Mesh(new THREE.SphereGeometry(0.55, 8, 6), fur);
-  rump.position.set(0, 1.0, -0.95); rump.scale.set(1, 0.95, 0.9); g.add(rump);
-  const hump = new THREE.Mesh(new THREE.SphereGeometry(0.56, 8, 6), fur);   // bear shoulder hump
-  hump.position.set(0, 1.45, 0.55); hump.scale.set(1, 0.8, 1.1); g.add(hump);
-  const headPiv = new THREE.Group(); headPiv.position.set(0, 1.15, 1.0); g.add(headPiv);
-  const head = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.56, 0.6), fur);
-  head.position.set(0, -0.05, 0.12); headPiv.add(head);
-  const snout = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.3, 0.42), fur);
-  snout.position.set(0, -0.14, 0.5); headPiv.add(snout);
-  const nose = new THREE.Mesh(new THREE.SphereGeometry(0.09, 6, 5), dark);
-  nose.position.set(0, -0.08, 0.73); headPiv.add(nose);
+  const dark = new THREE.MeshStandardMaterial({ color: 0x080605, roughness: 0.4 });
+  // a heavier, broader frame — reads as a wall of muscle
+  const body = new THREE.Mesh(new THREE.BoxGeometry(1.15, 1.05, 2.2), fur);
+  body.position.set(0, 1.05, 0); body.castShadow = true; g.add(body);
+  const rump = new THREE.Mesh(new THREE.SphereGeometry(0.66, 8, 6), fur);
+  rump.position.set(0, 1.05, -1.05); rump.scale.set(1.05, 1.0, 0.95); g.add(rump);
+  // a TALL grizzly shoulder hump — the signature menace silhouette
+  const hump = new THREE.Mesh(new THREE.SphereGeometry(0.7, 8, 6), fur);
+  hump.position.set(0, 1.7, 0.6); hump.scale.set(1.1, 1.05, 1.2); hump.castShadow = true; g.add(hump);
+  const headPiv = new THREE.Group(); headPiv.position.set(0, 1.2, 1.12); g.add(headPiv);
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.62, 0.66), fur);
+  head.position.set(0, -0.05, 0.12); head.castShadow = true; headPiv.add(head);
+  const snout = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.34, 0.5), fur);
+  snout.position.set(0, -0.16, 0.55); headPiv.add(snout);
+  const nose = new THREE.Mesh(new THREE.SphereGeometry(0.1, 6, 5), dark);
+  nose.position.set(0, -0.09, 0.82); headPiv.add(nose);
+  // bared lower jaw with a hint of teeth
+  const jaw = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.1, 0.4), dark);
+  jaw.position.set(0, -0.3, 0.5); headPiv.add(jaw);
   for (const sx of [-1, 1]) {
-    const ear = new THREE.Mesh(new THREE.SphereGeometry(0.14, 6, 5), fur);
-    ear.position.set(sx * 0.24, 0.32, -0.02); headPiv.add(ear);
-    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.055, 5, 4), dark);
-    eye.position.set(sx * 0.17, 0.06, 0.42); headPiv.add(eye);
+    const ear = new THREE.Mesh(new THREE.SphereGeometry(0.15, 6, 5), fur);
+    ear.position.set(sx * 0.27, 0.34, -0.04); headPiv.add(ear);
+    // burning eyes — small, low, forward; they glow in the dark
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.06, 6, 5), _bearEyeMat);
+    eye.position.set(sx * 0.19, 0.04, 0.46); headPiv.add(eye);
   }
   const legs = [];
-  const legPos = [[-0.4, 1.0, 0.72], [0.4, 1.0, 0.72], [-0.4, 1.0, -0.72], [0.4, 1.0, -0.72]];
+  const legPos = [[-0.48, 1.05, 0.8], [0.48, 1.05, 0.8], [-0.48, 1.05, -0.8], [0.48, 1.05, -0.8]];
   for (const [lx, ly, lz] of legPos) {
     const piv = new THREE.Group(); piv.position.set(lx, ly, lz); g.add(piv);
-    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.21, 1.0, 6), fur);
-    leg.position.y = -0.5; leg.castShadow = true; piv.add(leg);
-    const paw = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.18, 0.36), fur);
-    paw.position.set(0, -1.0, 0.08); piv.add(paw);
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.26, 1.05, 6), fur);
+    leg.position.y = -0.52; leg.castShadow = true; piv.add(leg);
+    const paw = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.2, 0.44), fur);
+    paw.position.set(0, -1.05, 0.1); piv.add(paw);
+    // pale claws on the front paws
+    for (const cx of [-1, 0, 1]) {
+      const claw = new THREE.Mesh(new THREE.ConeGeometry(0.03, 0.12, 4),
+        new THREE.MeshStandardMaterial({ color: 0xcfc4ad, roughness: 0.6 }));
+      claw.position.set(cx * 0.09, -1.12, 0.3); claw.rotation.x = 1.7; piv.add(claw);
+    }
     legs.push(piv);
   }
   g.userData.bear = { headPiv, legs, tilt: 0 };
@@ -3540,32 +3554,54 @@ const VOICE = {
 // ── gut pile ── walk over a kill and take the meat: the body opens up and
 // blood pools around it, so a harvested carcass READS as worked, not just
 // a sleeping animal. Shared geo/mats; the gore is removed with the carcass.
-const _goreGeo = new THREE.CircleGeometry(1, 12);
-const _goreMat = new THREE.MeshStandardMaterial({ color: 0x430b07, roughness: 0.75,
-  transparent: true, opacity: 0.92, polygonOffset: true, polygonOffsetFactor: -1 });
+const _goreGeo = new THREE.CircleGeometry(1, 14);
+const _goreMat = new THREE.MeshStandardMaterial({ color: 0x3a0805, roughness: 0.45,
+  transparent: true, opacity: 0.95, polygonOffset: true, polygonOffsetFactor: -1 });
 const _gutGeo = new THREE.IcosahedronGeometry(0.18, 0);
-const _gutMat = new THREE.MeshStandardMaterial({ color: 0x6e1410, roughness: 0.6,
-  emissive: 0x2a0604, emissiveIntensity: 0.3 });
+const _gutMat = new THREE.MeshStandardMaterial({ color: 0x6e1410, roughness: 0.55,
+  emissive: 0x2a0604, emissiveIntensity: 0.35 });
+// ── organic gore ── coiled intestines (wet pink tubes) and dark slick
+// organs, so a harvest reads as actual viscera, not a pile of red balls.
+const _intestineGeo = new THREE.TorusGeometry(0.22, 0.085, 7, 12);
+const _intestineMat = new THREE.MeshStandardMaterial({ color: 0x8f4038, roughness: 0.35,
+  emissive: 0x3a0f0c, emissiveIntensity: 0.4 });       // wet, slightly glistening
+const _organGeo = new THREE.SphereGeometry(0.2, 8, 6);
+const _organMat = new THREE.MeshStandardMaterial({ color: 0x4a0e0a, roughness: 0.3,
+  emissive: 0x240605, emissiveIntensity: 0.35 });
+window._gutCarcass = (a) => gutCarcass(a);   // debug/test hook
 function gutCarcass(a) {
   if (a._gore) return;
   const p = a.obj.position, gy = heightAt(p.x, p.z) + 0.04;
-  const sc = (a.cfg.r || 1) * 1.7;
+  // gore SCALES with the animal — a fox leaves a smear, a bear a slaughter.
+  const sc = (a.obj.scale.x || 1) * 2.2;
   const gore = [];
+  // the blood pool — bigger and darker the larger the kill
   const pool = new THREE.Mesh(_goreGeo, _goreMat);
   pool.rotation.x = -Math.PI / 2; pool.rotation.z = Math.random() * Math.PI;
   pool.position.set(p.x, gy, p.z);
-  pool.scale.set(sc * (0.8 + Math.random() * 0.4), sc * (0.8 + Math.random() * 0.4), 1);
+  pool.scale.set(sc * (0.9 + Math.random() * 0.5), sc * (0.9 + Math.random() * 0.5), 1);
   scene.add(pool); gore.push(pool);
-  for (let i = 0; i < 4; i++) {                  // a few wet gut blobs scattered
-    const b = new THREE.Mesh(_gutGeo, _gutMat);
-    const an = Math.random() * Math.PI * 2, rr = Math.random() * sc * 0.55;
-    b.position.set(p.x + Math.cos(an) * rr, gy + 0.06, p.z + Math.sin(an) * rr);
-    b.scale.set(0.5 + Math.random() * 0.7, 0.4 + Math.random() * 0.4, 0.5 + Math.random() * 0.7);
-    scene.add(b); gore.push(b);
-  }
+  const place = (geo, mat, n, lift, smin, smax, flat) => {
+    for (let i = 0; i < n; i++) {
+      const m = new THREE.Mesh(geo, mat);
+      const an = Math.random() * Math.PI * 2, rr = Math.random() * sc * 0.5;
+      m.position.set(p.x + Math.cos(an) * rr, gy + lift + Math.random() * 0.05 * sc, p.z + Math.sin(an) * rr);
+      const s = (smin + Math.random() * (smax - smin)) * sc * 0.5;
+      m.scale.set(s, flat ? s * 0.4 : s, s);
+      m.rotation.set(Math.random() * 3, Math.random() * 6.28, Math.random() * 3);
+      scene.add(m); gore.push(m);
+    }
+  };
+  // coiled intestines — count scales with size: a smear vs a slaughter
+  const coils = Math.round(2 + sc * 1.6);
+  place(_intestineGeo, _intestineMat, coils, 0.05, 0.5, 1.1, false);
+  // dark slick organs (liver/stomach) — flattened, glistening
+  place(_organGeo, _organMat, Math.round(1 + sc * 0.8), 0.05, 0.6, 1.0, true);
+  // a few stray chunks of gut
+  place(_gutGeo, _gutMat, Math.round(2 + sc), 0.05, 0.5, 0.9, false);
   a._gore = gore;
-  a.obj.scale.y *= 0.8;                          // the body slumps open
-  if (audio.impact) audio.impact('flesh', 0.1);
+  a.obj.scale.y *= 0.78;                          // the body slumps open
+  if (audio.impact) audio.impact('flesh', 0.12);
 }
 
 function killAnimal(a, suffered = false) {
@@ -4025,9 +4061,10 @@ function eatMushroom(f) {
   else toast('…oh.', 2200);
   if (audio.cue) audio.cue(Math.min(2, tripLevel - 1));
   _nearMush = null; if (_consumeBtn) _consumeBtn.classList.remove('show');
+  // once you're tripping, the world FLOODS with caps — they're everywhere
+  respawnMushroomNear(7);
   clearTimeout(eatMushroom._re);
-  // refill quickly so the next cap is always close — chain up to level 3
-  eatMushroom._re = setTimeout(() => respawnMushroomNear(3), 2500);
+  eatMushroom._re = setTimeout(() => respawnMushroomNear(7), 2000);
 }
 window._eatMushroom = () => eatMushroom(_nearMush || FORAGE.find(f => f.kind === 'mush' && !f.taken));
 
@@ -4414,7 +4451,7 @@ function hitZone(an, hx, hy, hz) {
   const fx = Math.sin(an.obj.rotation.y), fz = Math.cos(an.obj.rotation.y);
   const fwd = ((hx - ap.x) * fx + (hz - ap.z) * fz) / r;          // -1 rear … +1 front
   const up = (hy - (ap.y + r * 0.75)) / (r * 1.4);                // -1 low … +1 high
-  if (fwd > 0.45 && up > 0.3) return 'head';
+  if (fwd > 0.32 && up > 0.18) return 'head';     // more forgiving headshots
   if (up > 0.12 && fwd > -0.1) return 'vitals';
   if (fwd > 0.12) return 'leg';
   if (fwd < -0.25) return 'hind';
@@ -4440,17 +4477,27 @@ function arrowUpdate(dt) {
     if (a.v.x * a.v.x + a.v.z * a.v.z > 1e-4)
       a.m.lookAt(_arrowAim.copy(a.m.position).add(a.v));
 
-    // animal hit
+    // animal hit — SWEPT test against this frame's flight segment so fast
+    // arrows (and trip bullets) can't tunnel past, with a forgiving hit
+    // sphere so a shot that LOOKS like it connects actually registers.
     let hit = false;
     for (const an of animals) {
       if (an.dead) continue;
       const ap = an.obj.position;
-      const dy = a.m.position.y - (ap.y + an.cfg.r * 0.75);
-      if (Math.hypot(a.m.position.x - ap.x, a.m.position.z - ap.z) < an.cfg.r &&
-          Math.abs(dy) < an.cfg.r * 1.4) {
+      const cx = ap.x, cy = ap.y + an.cfg.r * 0.8, cz = ap.z;
+      const hitR = an.cfg.r * 1.7 + 0.2;            // generous — forgive near-misses
+      // closest point on the segment (prev pos → current pos) to the body center
+      const sx = a._px, sy = a._py, sz = a._pz;
+      const ddx = a.m.position.x - sx, ddy = a.m.position.y - sy, ddz = a.m.position.z - sz;
+      const seg2 = ddx * ddx + ddy * ddy + ddz * ddz || 1;
+      let tt = ((cx - sx) * ddx + (cy - sy) * ddy + (cz - sz) * ddz) / seg2;
+      tt = Math.max(0, Math.min(1, tt));
+      const hx = sx + ddx * tt, hy = sy + ddy * tt, hz = sz + ddz * tt;
+      if (Math.hypot(hx - cx, hy - cy, hz - cz) < hitR) {
+        a.m.position.set(hx, hy, hz);               // snap to the actual contact point
         if (audio.impact) audio.impact('flesh',
-          Math.min(1, Math.hypot(a.m.position.x - player.x, a.m.position.z - player.z) / 60));
-        const zone = hitZone(an, a.m.position.x, a.m.position.y, a.m.position.z);
+          Math.min(1, Math.hypot(hx - player.x, hz - player.z) / 60));
+        const zone = hitZone(an, hx, hy, hz);
         an.lastZone = zone;
         const W = WOUNDS[zone];
         const cleanKill = a.power >= W.instant;
@@ -5145,12 +5192,15 @@ function tickBody() {
   const dawn = (phase > 0.7 ? Math.max(0, 1 - Math.abs(phase - 0.88) / 0.12) : 0) * (1 - night);
   sun.color.copy(SUN_WARM).lerp(SUN_NIGHT, night);
   if (dawn > 0) sun.color.lerp(SUN_DAWN, dawn * 0.7);
-  // lift the night floor so the dark stays MOODY, not unplayable
-  hemi.intensity = (0.5 - night * 0.18) * (1 - dawn * 0.18);
-  if ('environmentIntensity' in scene) scene.environmentIntensity = 0.85 - night * 0.42;
-  // your carried lantern: faint by day, strong at night — lights your surroundings
-  playerLight.intensity = 0.6 + night * 4.2;
-  playerLight.position.set(player.x, player.y + 2.0, player.z);
+  // night stays MOODY but clearly playable — lifted well off the floor
+  hemi.intensity = (0.62 - night * 0.06) * (1 - dawn * 0.18);
+  if ('environmentIntensity' in scene) scene.environmentIntensity = 0.9 - night * 0.26;
+  // a touch more exposure after dark so shadows don't crush to black
+  renderer.toneMappingExposure = 1.14 + night * 0.34;
+  // your carried lantern: faint by day, BRIGHT at night — a wide warm pool
+  playerLight.intensity = 0.8 + night * 7.5;
+  playerLight.distance = 38;
+  playerLight.position.set(player.x, player.y + 2.2, player.z);
   scene.fog.color.copy(FOG_DAY).lerp(FOG_NIGHT, night);
   if (dawn > 0) scene.fog.color.lerp(FOG_DAWN, dawn * 0.65);
   scene.background.copy(scene.fog.color);
