@@ -4285,6 +4285,36 @@ let _cloudGroup = null;
 const _cloudBlobGeo = new THREE.IcosahedronGeometry(2.4, 1);
 const _cloudMat3 = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xcfe2ff,
   emissiveIntensity: 0.3, roughness: 1, transparent: true, opacity: 0.96, flatShading: true });
+// ── the kitchen PUZZLE ── a glowing target floats over each giant object.
+// Light them ALL with FIRE arrows and the way to heaven opens above.
+const KITCHEN_TARGETS = [];
+let _heavenOpen = false;
+const _targGeo = new THREE.IcosahedronGeometry(1.5, 1);
+const _targUnlitMat = new THREE.MeshStandardMaterial({ color: 0x2a2018, emissive: 0x140a04, emissiveIntensity: 0.6, roughness: 0.5 });
+function lightTarget(tg) {
+  if (tg.lit) return;
+  tg.lit = true;
+  tg.mesh.material = new THREE.MeshStandardMaterial({ color: 0xfff1bc, emissive: 0xffcf4a, emissiveIntensity: 3.2, roughness: 0.3 });
+  tg.mesh.scale.setScalar(1.3);
+  if (audio.cue) audio.cue(2);
+  const lit = KITCHEN_TARGETS.filter(x => x.lit).length;
+  if (lit >= KITCHEN_TARGETS.length && !_heavenOpen) openHeaven();
+  else toast('A light kindles. ' + lit + ' / ' + KITCHEN_TARGETS.length, 2400);
+}
+function openHeaven() {
+  _heavenOpen = true;
+  // a final radiant table-disc rises far above the kitchen — the way up
+  const cx = player.x, cz = player.z;
+  const y = (CLOUDSTEPS.length ? Math.max(...CLOUDSTEPS.map(c => c.y)) : player.y + 120) + 40;
+  const disc = new THREE.Mesh(new THREE.CylinderGeometry(14, 14, 1.5, 28),
+    new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xfff2c8, emissiveIntensity: 1.6, roughness: 1 }));
+  disc.position.set(cx, y, cz);
+  if (_cloudGroup) _cloudGroup.add(disc);
+  CLOUDSTEPS.push({ x: cx, z: cz, y: y + 0.9, r: 14 });
+  toast('the way opens', 4200);
+  if (audio.killStinger) audio.killStinger();
+}
+window._lightAllTargets = () => { for (const tg of KITCHEN_TARGETS) lightTarget(tg); return KITCHEN_TARGETS.length; };
 // ── THE KITCHEN ── giant oversized 90s-kitchen objects you land on once you
 // climb high enough. You're shrunk to nothing; a mug is a tower, a cookie a
 // plateau. Honey-I-Shrunk-the-Kids. Each returns {topH, r} for landing.
@@ -4355,11 +4385,17 @@ function spawnClouds() {
     const obj = buildKitchenItem(KITS[i][0], KITS[i][1]);
     obj.position.set(x, y, z); _cloudGroup.add(obj);
     CLOUDSTEPS.push({ x, z, y: y + obj.userData.topH, r: obj.userData.r });
+    // a glowing puzzle target floating just above each object — fire to light
+    const tm = new THREE.Mesh(_targGeo, _targUnlitMat);
+    const ty = y + obj.userData.topH + 3.5;
+    tm.position.set(x, ty, z); _cloudGroup.add(tm);
+    KITCHEN_TARGETS.push({ mesh: tm, x, y: ty, z, lit: false });
   }
 }
 function clearClouds() {
   if (_cloudGroup) { scene.remove(_cloudGroup); _cloudGroup = null; }
   CLOUDSTEPS.length = 0;
+  KITCHEN_TARGETS.length = 0; _heavenOpen = false;
 }
 window._spawnClouds = () => { spawnClouds(); return CLOUDSTEPS.length; };
 window._cloudsteps = () => CLOUDSTEPS.map(c => [Math.round(c.x), Math.round(c.y), Math.round(c.z)]);
@@ -4874,6 +4910,24 @@ function arrowUpdate(dt) {
       }
     }
     if (hit) continue;
+    // ── kitchen puzzle ── a FIRE arrow that touches a target lights it
+    if (a.fire && KITCHEN_TARGETS.length) {
+      let lit = false;
+      for (const tg of KITCHEN_TARGETS) {
+        if (tg.lit) continue;
+        const sx = a._px, sy = a._py, sz = a._pz;
+        const ddx = a.m.position.x - sx, ddy = a.m.position.y - sy, ddz = a.m.position.z - sz;
+        const seg2 = ddx * ddx + ddy * ddy + ddz * ddz || 1;
+        let tt = ((tg.x - sx) * ddx + (tg.y - sy) * ddy + (tg.z - sz) * ddz) / seg2;
+        tt = Math.max(0, Math.min(1, tt));
+        const hx = sx + ddx * tt, hy = sy + ddy * tt, hz = sz + ddz * tt;
+        if (Math.hypot(hx - tg.x, hy - tg.y, hz - tg.z) < 2.6) {   // generous
+          lightTarget(tg); trailPuff(tg.x, tg.y, tg.z);
+          scene.remove(a.m); arrows.splice(i, 1); lit = true; break;
+        }
+      }
+      if (lit) continue;
+    }
     const distVol = Math.min(1, Math.hypot(a.m.position.x - player.x, a.m.position.z - player.z) / 60);
     const px = a.m.position.x, py = a.m.position.y, pz = a.m.position.z;
 
