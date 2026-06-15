@@ -538,6 +538,10 @@ const waterUniforms = { uTime: { value: 0 } };
 
 // ───────────────────────── wind-blown grass ─────────────────────────
 const windUniforms = { uTime: { value: 0 } };
+// ── trip warp ── trees are RIGID in normal play (uTrip=0). On the mushroom
+// trip this ramps up and the canopy starts to BREATHE and lean, geometry and
+// all — the world going soft, not just recoloured. Driven once/frame in loop.
+const tripUniforms = { uTrip: { value: 0 } };
 // ── cloth in wind ── a traveling ripple along the surface normal so tents
 // and hung hides BILLOW like real fabric (this is the ONLY thing that should
 // move in the wind besides grass/reeds — bare wood stays rigid). Reuses
@@ -1058,11 +1062,27 @@ function mergeGeoms(list) {
   //           whole forest surges together between lulls.
   // H≈12 (tallest canopy ~y=12). amp in *local* units; instance scale (0.8–1.9)
   // multiplies it for free, so big trees sway proportionally more.
-  // tree sway REMOVED — treeMat now compiles with the stock vertex shader
-  // (zero displacement, zero per-frame cost). treeWind kept as a no-op stub
-  // so the call site stays stable; grass/flowers/reeds keep their wind.
-  const treeWind = (amp, sideAmp) => (sh) => {};
-  // (intentionally NOT assigning treeMat.onBeforeCompile — trees are still)
+  // tree sway REMOVED in normal play — but on the TRIP the canopy comes alive.
+  // The displacement is multiplied by uTrip, which is 0 off-trip (so trees stay
+  // perfectly rigid, zero idle sway) and ramps up while tripping: a slow,
+  // dreamy, underwater lean + a breathing swell, weighted to the crown so
+  // trunks stay planted. Per-instance phase = each tree warps on its own clock.
+  const treeWind = (amp, sideAmp) => (sh) => {};   // no-op stub (call site stability)
+  treeMat.onBeforeCompile = (sh) => {
+    sh.uniforms.uTime = windUniforms.uTime;
+    sh.uniforms.uTrip = tripUniforms.uTrip;
+    sh.vertexShader = 'uniform float uTime;\nuniform float uTrip;\n' +
+      sh.vertexShader.replace('#include <begin_vertex>',
+      `#include <begin_vertex>
+       if (uTrip > 0.001) {
+         float h = max(position.y, 0.0);
+         float bendY = h * 0.16;                 // crown-weighted, base planted
+         float ph = instanceMatrix[3][0]*0.13 + instanceMatrix[3][2]*0.11;
+         transformed.x += (sin(uTime*0.9 + ph) + 0.5*sin(uTime*1.7 + ph*1.7)) * bendY * uTrip;
+         transformed.z += (cos(uTime*0.8 + ph*1.2) + 0.4*sin(uTime*1.3 + ph)) * bendY * uTrip;
+         transformed.y += sin(uTime*1.1 + ph) * h * 0.06 * uTrip;   // the canopy breathes
+       }`);
+  };
   const species = [
     { geo: pineGeo,  inst: new THREE.InstancedMesh(pineGeo, treeMat, CFG.trees), n: 0, r: 1.1, ch: 12.5 },
     { geo: broadGeo, inst: new THREE.InstancedMesh(broadGeo, treeMat, CFG.trees), n: 0, r: 1.2, ch: 9.5 },
@@ -4117,6 +4137,7 @@ let _curGround = 'grass';   // footstep material under the player
 let tripT = 0;      // seconds left of a mushroom trip (trippy visuals + moon-jump)
 let tripLevel = 0;  // 0=sober, 1=jump+vibrant, 2=animals bounce+higher+bullet arrows, 3=cloud-climb
 window._tripLevel = () => tripLevel;   // debug/test hook
+window._uTrip = () => tripUniforms.uTrip.value;   // debug/test hook
 let playerVy = 0, grounded = true, jumpQ = false;
 let inCanoe = false, canoeVX = 0, canoeVZ = 0, _wasCanoe = false;
 // the canoe is a real boat: you push it with the move stick like walking,
@@ -5715,6 +5736,10 @@ function tickBody() {
   puffUpdate(dt);                  // blood puff plays through the hitstop
   windUniforms.uTime.value = t;
   waterUniforms.uTime.value = t;
+  // the trees only move on the trip — strongest on that first wide-eyed L1,
+  // eased in/out so it swells on rather than popping. (uTrip=0 → rigid.)
+  const _warpTarget = tripT > 0 ? (tripLevel >= 2 ? 1.15 : 0.9) : 0;
+  tripUniforms.uTrip.value += (_warpTarget - tripUniforms.uTrip.value) * Math.min(1, dt * 1.1);
   skyUniforms.uT.value = t;
   for (const c of clouds) { c.position.x += c.userData.v * dt * 2; if (c.position.x > 800) c.position.x = -800; }
 
