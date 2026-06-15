@@ -72,9 +72,9 @@ const MENAGERIE = {
   // ── the swarm ── little Flood-ish scuttlers that FOLLOW and LEAP at you.
   // Weak (a nip), but they come in numbers. Arrows barely faze them — FIRE is
   // the answer: a fire-arrow or a tree fire wipes them. Not OP.
-  Spider:{ n: 6, speed: 4.4, gallop: 7, hp: 3, flee: 0, r: 0.45,
+  Spider:{ n: 3, speed: 3.4, gallop: 6, hp: 3, flee: 0, r: 0.45,
            keen: 1.0, aggroBias: 0.7, scale: 0.5, spiderish: true,
-           hunts: true, aggroR: 32, dmg: 6 },
+           hunts: true, aggroR: 16, dmg: 3 },   // RARE, weak — a creepy find, not a swarm at your feet
 };
 // SPECIES aliases MENAGERIE so every a.cfg.* reference keeps working.
 const SPECIES = MENAGERIE;
@@ -2937,9 +2937,9 @@ function spiderUpdate(a, dt, dx, dz, dist) {
   let moved = false;
   if (dist < aggroR) {
     a.dir = Math.atan2(dx, dz);
-    a._leapCd = (a._leapCd ?? Math.random() * 2) - dt;
-    if (a._leapCd <= 0 && a._spY <= 0.02 && dist < 11 && dist > 1.5) {
-      a._leapCd = 1.1 + Math.random(); a._leapVy = 5.6; a._leaping = true;
+    a._leapCd = (a._leapCd ?? Math.random() * 3) - dt;
+    if (a._leapCd <= 0 && a._spY <= 0.02 && dist < 9 && dist > 1.5) {
+      a._leapCd = 2.4 + Math.random() * 1.5; a._leapVy = 5.0; a._leaping = true;
     }
     stepAnimal(a, a._leaping ? a.cfg.gallop * 1.7 : a.cfg.speed, dt);
     moved = true;
@@ -2991,7 +2991,9 @@ function spawn(name, near) {
       z = (Math.random() - 0.5) * WORLD * 0.85;
     }
     y = heightAt(x, z);
-  } while ((y < WATER_Y + 1 || Math.hypot(x, z) < 45) && tries++ < 60);
+    // spiders are NOT a welcome party — keep them far from every landing bed
+    var nearBed = cfg.spiderish && FLOWERBEDS.some(b => Math.hypot(x - b.x, z - b.z) < 70);
+  } while ((y < WATER_Y + 1 || Math.hypot(x, z) < 45 || nearBed) && tries++ < 60);
   obj.position.set(x, y, z);
   // ── per-individual SIZE ── base scale ±10%, bears 1.8× on top
   const sizeJit = 0.9 + Math.random() * 0.2;            // ±10%
