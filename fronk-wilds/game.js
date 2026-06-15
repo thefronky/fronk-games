@@ -51,8 +51,8 @@ const MENAGERIE = {
            // hard, not hopeless: stalk quiet to ~16m, stand still to ~8m.
   Stag:  { n: 4, speed: 2.7, gallop: 10.0, hp: 3, flee: 17, r: 0.95,
            keen: 1.05, aggroBias: 0.30, rear: 0.70, scale: 0.52, hpJit: true },
-  Fox:   { n: 14, speed: 3.8, gallop: 12.2, hp: 1, flee: 16, r: 0.5,
-           keen: 1.6, aggroBias: 0.05, rear: 0.2, scale: 0.45, darty: true },  // little critters — LOTS, tiny, skittish, JUKE when fleeing — quick food, keeps the world alive
+  Fox:   { n: 20, speed: 3.8, gallop: 11.0, hp: 1, flee: 11, r: 0.5,
+           keen: 1.25, aggroBias: 0.05, rear: 0.2, scale: 0.45, darty: true },  // little critters — LOTS, tiny, JUKE when fleeing but approachable enough to chase down — fun to hunt
   Cow:   { n: 1, speed: 1.9, gallop: 7.4,  hp: 3, flee: 13, r: 1.6,
            keen: 0.5, aggroBias: 0.05, rear: 0.2, gait: 'sway', scale: 1.22, hpJit: true }, // RARE now — rarer than bears
   Horse: { n: 2, speed: 3.2, gallop: 13.8, hp: 9, flee: 20, r: 1.6,
@@ -1211,7 +1211,9 @@ function mergeGeoms(list) {
     E.set(Math.random(), Math.random() * 6, Math.random()); Q.setFromEuler(E);
     const s = 0.5 + Math.random() * 1.6; S.set(s, s * (0.6 + Math.random() * 0.6), s);
     rocks.setMatrixAt(placed++, M.compose(P, Q, S));
-    if (s > 0.85) TREES.push({ x, z, r: s * 0.7 });   // a boulder is a hard object — blocks you + arrows
+    // EVERY rock is solid now — no more walking through them. Big ones (s>1)
+    // you must jump; the small ones still block but read as low stones.
+    TREES.push({ x, z, r: s * 0.62, top: s > 1 ? undefined : y + s * 0.5 });
   }
   rocks.count = placed;
   scene.add(rocks);
@@ -2129,20 +2131,24 @@ function buildBerry() {
   }
   return g;
 }
+// shared across every mushroom — no per-cluster allocations, and NO point
+// lights (those tanked the framerate at 20 of them). The cap's strong
+// emissive reads as "special" on its own.
+const _mushStalkMat = new THREE.MeshStandardMaterial({ color: 0xe8dcc0, roughness: 0.9 });
+const _mushCapMat = new THREE.MeshStandardMaterial({ color: 0x7a3cc0, roughness: 0.5,
+  emissive: 0x7a3cff, emissiveIntensity: 1.6 });          // brighter glow to make up for no light
+const _mushStalkGeo = new THREE.CylinderGeometry(0.05, 0.07, 0.6, 6);
+const _mushCapGeo = new THREE.SphereGeometry(0.22, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2);
 function buildPsyMush() {
   const g = new THREE.Group();
-  const stalkMat = new THREE.MeshStandardMaterial({ color: 0xe8dcc0, roughness: 0.9 });
-  const capMat = new THREE.MeshStandardMaterial({ color: 0x7a3cc0, roughness: 0.5,
-    emissive: 0x6a2cff, emissiveIntensity: 0.9 });        // glows so it reads as special
   for (let i = 0; i < 3; i++) {
     const h = 0.4 + Math.random() * 0.4;
-    const st = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.07, h, 6), stalkMat);
+    const st = new THREE.Mesh(_mushStalkGeo, _mushStalkMat);
     const ox = (Math.random() - 0.5) * 0.5, oz = (Math.random() - 0.5) * 0.5;
-    st.position.set(ox, h / 2, oz); g.add(st);
-    const cap = new THREE.Mesh(new THREE.SphereGeometry(0.22, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2), capMat);
+    st.position.set(ox, h / 2, oz); st.scale.y = h / 0.6; g.add(st);
+    const cap = new THREE.Mesh(_mushCapGeo, _mushCapMat);
     cap.position.set(ox, h, oz); cap.scale.y = 0.7; g.add(cap);
   }
-  const glow = new THREE.PointLight(0x8a4cff, 2.0, 6, 2); glow.position.y = 0.7; g.add(glow);
   return g;
 }
 {
@@ -2672,6 +2678,19 @@ async function loadAnimals() {
           const bx = SPAWN.x + Math.cos(ang) * rr, bz = SPAWN.z + Math.sin(ang) * rr;
           if (heightAt(bx, bz) > WATER_Y + 1) {
             b.obj.position.set(bx, heightAt(bx, bz), bz); break;
+          }
+        }
+      }
+    } else if (n === 'Fox') {
+      // the little critters — bring MOST of them in close (18-55m) so you
+      // wake to a valley alive with things to chase, not an empty map
+      for (let i = 0; i < SPECIES.Fox.n; i++) {
+        const fx = spawn('Fox');
+        if (i < SPECIES.Fox.n - 3) {                  // leave a few wild & far
+          for (let tr = 0; tr < 30; tr++) {
+            const ang = Math.random() * Math.PI * 2, rr = 18 + Math.random() * 37;
+            const x = SPAWN.x + Math.cos(ang) * rr, z = SPAWN.z + Math.sin(ang) * rr;
+            if (heightAt(x, z) > WATER_Y + 1) { fx.obj.position.set(x, heightAt(x, z), z); break; }
           }
         }
       }
@@ -3963,19 +3982,29 @@ function arrowPickup() {
 let _nearMush = null;
 // keep the trip going: a little after you eat one, another glowing cap rises
 // nearby — so the cloud-climbing never has to stop to go hunting for more.
-function respawnMushroomNear() {
+// keep at least `count` untaken caps within reach so you can chain to level
+// 3 fast — pulls in eaten ones first, then far ones, until enough are close.
+function respawnMushroomNear(count = 3) {
   if (!started || dead) return;
-  let f = FORAGE.find(x => x.kind === 'mush' && x.taken) || FORAGE.find(x => x.kind === 'mush');
-  if (!f) return;
-  for (let tries = 0; tries < 30; tries++) {
-    const ang = Math.random() * Math.PI * 2, dist = 5 + Math.random() * 5;
-    const x = player.x + Math.cos(ang) * dist, z = player.z + Math.sin(ang) * dist;
-    const y = heightAt(x, z);
-    if (y < WATER_Y + 1.0) continue;                  // not in the lake
-    f.x = x; f.z = z; f._d = 999;
-    f.mesh.position.set(x, y, z);
-    f.taken = false; f.mesh.visible = true;
-    return;
+  const NEAR = 14;
+  const muds = FORAGE.filter(f => f.kind === 'mush');
+  const distOf = f => Math.hypot(f.x - player.x, f.z - player.z);
+  let nearCount = muds.filter(f => !f.taken && distOf(f) < NEAR).length;
+  const cands = muds.filter(f => f.taken)
+    .concat(muds.filter(f => !f.taken && distOf(f) >= NEAR));
+  let ci = 0;
+  while (nearCount < count && ci < cands.length) {
+    const f = cands[ci++];
+    for (let tries = 0; tries < 20; tries++) {
+      const ang = Math.random() * Math.PI * 2, dist = 4 + Math.random() * 6;
+      const x = player.x + Math.cos(ang) * dist, z = player.z + Math.sin(ang) * dist;
+      const y = heightAt(x, z);
+      if (y < WATER_Y + 1.0) continue;
+      f.x = x; f.z = z; f._d = 999;
+      f.mesh.position.set(x, y, z);
+      f.taken = false; f.mesh.visible = true;
+      nearCount++; break;
+    }
   }
 }
 function eatMushroom(f) {
@@ -3993,7 +4022,8 @@ function eatMushroom(f) {
   if (audio.cue) audio.cue(Math.min(2, tripLevel - 1));
   _nearMush = null; if (_consumeBtn) _consumeBtn.classList.remove('show');
   clearTimeout(eatMushroom._re);
-  eatMushroom._re = setTimeout(respawnMushroomNear, 6000);   // another rises soon after
+  // refill quickly so the next cap is always close — chain up to level 3
+  eatMushroom._re = setTimeout(() => respawnMushroomNear(3), 2500);
 }
 window._eatMushroom = () => eatMushroom(_nearMush || FORAGE.find(f => f.kind === 'mush' && !f.taken));
 
@@ -5068,7 +5098,7 @@ function tickBody() {
     const con = 1 + (0.4 + 0.18 * lv) * k;
     // keep brightness modest so the heavy saturation POPS instead of blowing to white
     const bri = 1 + (0.05 + 0.02 * lv) + (0.10 * Math.sin(t * 3.1) + 0.05 * Math.sin(t * 7.3)) * k;
-    const blur = (0.5 + 0.5 * Math.sin(t * 0.9)) * k;
+    const blur = IS_TOUCH ? 0 : (0.5 + 0.5 * Math.sin(t * 0.9)) * k;   // full-screen blur is too costly on phones
     canvas.style.filter = 'hue-rotate(' + hue.toFixed(0) + 'deg) saturate(' + sat.toFixed(2)
       + ') contrast(' + con.toFixed(2) + ') brightness(' + bri.toFixed(2)
       + ') blur(' + blur.toFixed(2) + 'px)';
@@ -5550,6 +5580,7 @@ function tickBody() {
       setLids(-100, 0);                   // make sure no eyelids are covering the genesis
       explodeArrival();                   // you hit the ground and the world is BORN
       if (audio.wakeBreath) audio.wakeBreath();   // the gasp of being made
+      respawnMushroomNear(3);             // a few caps already waiting nearby
     }
   } else if (intro) {
     // waking: camera starts LOW in the grass, pitched up at the sky,
