@@ -124,6 +124,8 @@
     transition:transform .18s ease-out}
   #lidTop{top:0;transform-origin:top;transform:translateY(var(--lid,0%))}
   #lidBot{bottom:0;transform-origin:bottom;transform:translateY(calc(-1 * var(--lid,0%)))}
+  /* a slow, heavy waking blink (used the moment you land on the roses) */
+  #eyelids.waking .lid{transition:transform .8s ease-in-out}
   #eyelids::after{content:"";position:absolute;inset:0;pointer-events:none;
     opacity:var(--lidGlow,0);background:radial-gradient(ellipse at center,
       transparent 30%,rgba(5,3,2,.6) 100%)}

@@ -656,19 +656,29 @@ const trampleUniform = { value: new THREE.Vector4(0, 0, 0, 26) };
 // nudged onto solid, fairly flat ground. You pick one by WHEN you tap out of
 // the drone shot — the dive goes to whichever bed the camera is nearest.
 const FLOWERBEDS = (() => {
-  const want = [[0, 26], [72, -34], [-80, 20], [36, 98], [-48, -78]];
+  const want = [[0, 26], [72, -38], [-84, 18], [40, 96], [-52, -80]];
+  // a bed is only valid if its CENTER and a whole ring around it are solid,
+  // dry land — never a lake, pond, or a tiny island you'd drop into water on.
+  const dryLand = (x, z) => {
+    if (heightAt(x, z) < WATER_Y + 2.0) return false;
+    for (let a = 0; a < 6.28; a += 0.785)      // 8-point ring at r=7
+      if (heightAt(x + Math.cos(a) * 7, z + Math.sin(a) * 7) < WATER_Y + 1.2) return false;
+    return true;
+  };
   const out = [];
   for (const [tx, tz] of want) {
-    let bx = tx, bz = tz, best = -1e9;
-    for (let r = 0; r <= 34; r += 6) for (let a = 0; a < 6.28; a += 0.6) {
+    let bx = tx, bz = tz, best = -1e9, found = false;
+    for (let r = 0; r <= 60; r += 5) for (let a = 0; a < 6.28; a += 0.5) {
       const x = tx + Math.cos(a) * r, z = tz + Math.sin(a) * r, y = heightAt(x, z);
-      if (y < WATER_Y + 1.6 || y > 18) continue;
+      if (y > 18 || !dryLand(x, z)) continue;
       const slope = Math.abs(heightAt(x + 2.5, z) - y) + Math.abs(heightAt(x, z + 2.5) - y);
-      const score = -slope - r * 0.01;          // flattest, closest to the target
-      if (score > best) { best = score; bx = x; bz = z; }
+      const score = -slope - r * 0.012;        // flattest, closest, dry all around
+      if (score > best) { best = score; bx = x; bz = z; found = true; }
     }
-    out.push({ x: bx, z: bz });
+    out.push({ x: bx, z: bz, ok: found });
   }
+  // guarantee 5 valid beds: any that failed falls back to the spawn meadow
+  for (const b of out) if (!b.ok) { b.x = out[0].x; b.z = out[0].z; }
   return out;
 })();
 window._beds = () => FLOWERBEDS;
@@ -683,6 +693,11 @@ window._beds = () => FLOWERBEDS;
 const FLOWER_PALETTE = [
   0xff4d5a, 0xff7a3c, 0xffd23f, 0xfff4e0,   // reds / orange / gold / cream
   0xff5fa2, 0xb05cff, 0x6f7bff, 0xff9bd0,   // pink / violet / periwinkle / blush
+];
+// the landing beds are BEDS OF ROSES — crimson-heavy, a few blush/white
+const ROSE_PALETTE = [
+  0xc1121f, 0x9d0208, 0xe01e37, 0xd00000, 0xb21e35,   // deep reds / crimson
+  0xff5d73, 0xff8fa3, 0xfff0f3,                        // blush / pale rose / white
 ];
 {
   const mkFlower = () => {
@@ -893,8 +908,8 @@ const FLOWER_PALETTE = [
       E.set(0, Math.random() * Math.PI * 2, 0); Q.setFromEuler(E);
       S.set(s, s, s);
       bedM.setMatrixAt(placed, M.compose(P, Q, S));
-      bedM.setColorAt(placed, new THREE.Color(
-        FLOWER_PALETTE[(Math.random() * FLOWER_PALETTE.length) | 0]));
+      // a bed of ROSES — deep reds and crimsons, a few blush/white among them
+      bedM.setColorAt(placed, new THREE.Color(ROSE_PALETTE[(Math.random() * ROSE_PALETTE.length) | 0]));
       placed++;
     }
     bedM.count = placed;
@@ -3109,7 +3124,7 @@ function animalUpdate(a, dt) {
       // the carcass has its attention — you are not interesting yet
     } else if (dist < 2.8) {
       a.state = 'attack'; a.aggro = true;
-      if (a.attackCd <= 0) {
+      if (a.attackCd <= 0 && meleeReach()) {       // can't bite you up a tree
         setAnim(a, 'Attack', true); a.attackCd = 1.5;
         hurtPlayer(a.cfg.dmg || 22);
         setTimeout(() => { if (!a.dead) a.cur = null; }, 700);
@@ -3177,7 +3192,7 @@ function animalUpdate(a, dt) {
       a.dir = Math.atan2(dx, dz);
       if (!a.rearStruck && a.rearT < a.rearDur - 0.35) {
         a.rearStruck = true;
-        if (dist < 3.0) { hurtPlayer(8 + a.aggression * 8); camShakeT = SHAKE_DUR; }
+        if (dist < 3.0 && meleeReach()) { hurtPlayer(8 + a.aggression * 8); camShakeT = SHAKE_DUR; }
       }
       if (a.rearT <= 0) {                      // done posturing — flee for real
         a.state = 'flee'; a.t = 3 + Math.random() * 2.5;
@@ -3368,7 +3383,7 @@ function bearUpdate(a, dt, dx, dz, dist) {
       a.aggro = false; a.state = 'idle'; a.t = 1; a.cur = null; return;
     }
     if (dist < 2.9) {                                    // contact — it claws
-      if (a.attackCd <= 0) {
+      if (a.attackCd <= 0 && meleeReach()) {            // not if you're up a tree
         setAnim(a, a.acts.Attack ? 'Attack' : 'Attack_Kick', true);
         a.attackCd = 1.6;
         hurtPlayer(a.cfg.dmg || 38); camShakeT = SHAKE_DUR * 2.5;
@@ -3907,6 +3922,22 @@ function beginIntro() {               // arm the wake-up for a fresh life
   if (audio.wakeBreath) audio.wakeBreath();
   else if (audio.breath) audio.breath();
 }
+// ── you BLINK awake on the bed of roses ── no crater, no blast. Eyes flutter
+// open over a beat, the breath of coming-to, and all your functionality (HUD,
+// bow, controls) fades up around you. Replaces the old explosion genesis.
+function blinkAwake() {
+  if (_eyelids) _eyelids.classList.add('waking');
+  setLids(0, 0.5);                                 // shut, a soft warm glow
+  if (audio.wakeBreath) audio.wakeBreath();
+  setTimeout(() => setLids(-45, 0.3), 480);        // first flutter
+  setTimeout(() => setLids(-12, 0.35), 820);       // a heavy second blink
+  setTimeout(() => setLids(-100, 0), 1450);        // and you're awake
+  setTimeout(() => { if (_eyelids) _eyelids.classList.remove('waking'); }, 2700);
+  // functionality fades in
+  const hud = document.getElementById('hud');
+  if (hud) { hud.style.transition = 'opacity 1.8s ease'; hud.style.opacity = '0';
+    setTimeout(() => { hud.style.opacity = '1'; }, 650); }
+}
 
 // ════ the arrival ════════════════════════════════════════════════════
 // You are cast down from somewhere higher. You fall, you strike the earth,
@@ -4019,7 +4050,8 @@ function setLids(openPct, glow) {     // openPct: 0 = shut, -100 = wide open
 // his BASE is the clearing he wakes in — the sanctuary, returned to often
 const CAMP_X = SPAWN.x, CAMP_Z = SPAWN.z, CAMP_SAFE = 15;
 placeWildfires(SPAWN.x, SPAWN.z, CAMP_X, CAMP_Z);   // scatter the wild fires now that the anchors exist
-buildBase(SPAWN.x, SPAWN.z);                         // campfire, stone ring, the meat cove
+// (no base, no campfire on spawn anymore — you just land on a bed of roses.
+//  COVE/BASE_FIRE/BASE_RING stay null; every reference to them is guarded.)
 let bloodedUntil = -99, scentM = 0, fireNear = false;
 let saidBlooded = false, saidFullPack = false, sawNight = false;
 
@@ -4243,6 +4275,9 @@ function bearHitFX() {
   }
 }
 window._bearHitFX = () => bearHitFX();   // debug/test hook
+// a ground animal can only claw you when you're actually on the ground —
+// not when you've jumped/climbed up a tree or a cloud well above the terrain.
+function meleeReach() { return (player.y - heightAt(player.x, player.z)) < 2.6; }
 function hurtPlayer(dmg) {
   if (dead) return;
   player.hp -= dmg; player.lastHit = clock.elapsedTime;
@@ -4690,7 +4725,9 @@ function arrowUpdate(dt) {
     const sx = a._px, sz = a._pz, dxs = px - sx, dzs = pz - sz;
     const segLen2 = dxs * dxs + dzs * dzs || 1;
     for (const tr of TREES) {
-      const trunkR = Math.min(tr.r, 0.6) + 0.18;
+      // a FIRE arrow lights the whole tree — its leaves catch, not just the
+      // trunk — so the hit radius opens up to the canopy spread and full height.
+      const trunkR = a.fire ? (tr.r + 2.4) : (Math.min(tr.r, 0.6) + 0.18);
       // quick reject: trunk far from the segment's bounding box
       if (tr.x < Math.min(sx, px) - trunkR || tr.x > Math.max(sx, px) + trunkR ||
           tr.z < Math.min(sz, pz) - trunkR || tr.z > Math.max(sz, pz) + trunkR) continue;
@@ -4700,7 +4737,8 @@ function arrowUpdate(dt) {
       if (Math.hypot(tr.x - cxp, tr.z - czp) >= trunkR) continue;
       const cyp = a._py + (py - a._py) * t;             // arrow height at closest approach
       const gy = heightAt(tr.x, tr.z);
-      if (cyp > gy + 0.3 && cyp < gy + 10) {            // trunk + lower canopy zone
+      const zoneTop = a.fire ? ((tr.top !== undefined ? tr.top - gy : 10) + 3) : 10;
+      if (cyp > gy + 0.3 && cyp < gy + zoneTop) {       // trunk + canopy (full for fire)
         a.m.position.set(cxp, cyp, czp);                // snap to the trunk face
         a.stuck = true; a.t = a.fire ? 2.0 : ARROW_STUCK_LIFE;   // a burning shaft is consumed by its own fire
         if (a.m.userData.streak) { a.m.remove(a.m.userData.streak); a.m.userData.streak = null; }
@@ -5734,22 +5772,15 @@ function tickBody() {
                   gyL + (ty - gyL) * lookE,
                   tz + hz * lookE * 16);
     camera.rotation.order = 'YXZ';
-    if (lp >= 1) {                        // STRIKE
+    if (lp >= 1) {                        // you settle onto the bed of roses
       launching = false;
       started = true; bow.visible = true; updateBowString(0);
-      document.getElementById('hud').style.opacity = 1;
-      // land at the chosen bed — slide the home here and punch the crater,
-      // eyes already open (the white flash IS the coming-to).
-      relocateHome(LAND.x, LAND.z);
       player.x = LAND.x; player.z = LAND.z;
       player.y = heightAt(LAND.x, LAND.z);
-      // keep facing the way you came in — inherit the camera's incoming yaw
-      player.yaw = camera.rotation.y; player.pitch = 0.16;
+      player.yaw = camera.rotation.y; player.pitch = 0.06;
       grounded = true; player.airY = player.y;
-      setLids(-100, 0);                   // make sure no eyelids are covering the genesis
-      explodeArrival();                   // you hit the ground and the world is BORN
-      if (audio.wakeBreath) audio.wakeBreath();   // the gasp of being made
-      respawnMushroomNear(3);             // a few caps already waiting nearby
+      blinkAwake();                       // no crater, no blast — you BLINK awake,
+      respawnMushroomNear(3);             // and everything fades in around you
     }
   } else if (intro) {
     // waking: camera starts LOW in the grass, pitched up at the sky,
