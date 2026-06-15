@@ -187,6 +187,10 @@ scene.add(sun, sun.target);
 // hemisphere fill is lower now that IBL carries the sky ambient
 const hemi = new THREE.HemisphereLight(0xe6b277, 0x2c3220, 0.5);
 scene.add(hemi);
+// a warm light you carry — a lantern glow that follows you and BLOOMS at
+// night so the dark is navigable, not pitch black. Cheap: one point light.
+const playerLight = new THREE.PointLight(0xffd9a0, 0, 30, 1.5);
+scene.add(playerLight);
 
 // sky dome — sunset gradient + sun glow
 const skyUniforms = {
@@ -5141,8 +5145,12 @@ function tickBody() {
   const dawn = (phase > 0.7 ? Math.max(0, 1 - Math.abs(phase - 0.88) / 0.12) : 0) * (1 - night);
   sun.color.copy(SUN_WARM).lerp(SUN_NIGHT, night);
   if (dawn > 0) sun.color.lerp(SUN_DAWN, dawn * 0.7);
-  hemi.intensity = (0.5 - night * 0.32) * (1 - dawn * 0.18);
-  if ('environmentIntensity' in scene) scene.environmentIntensity = 0.85 - night * 0.62;
+  // lift the night floor so the dark stays MOODY, not unplayable
+  hemi.intensity = (0.5 - night * 0.18) * (1 - dawn * 0.18);
+  if ('environmentIntensity' in scene) scene.environmentIntensity = 0.85 - night * 0.42;
+  // your carried lantern: faint by day, strong at night — lights your surroundings
+  playerLight.intensity = 0.6 + night * 4.2;
+  playerLight.position.set(player.x, player.y + 2.0, player.z);
   scene.fog.color.copy(FOG_DAY).lerp(FOG_NIGHT, night);
   if (dawn > 0) scene.fog.color.lerp(FOG_DAWN, dawn * 0.65);
   scene.background.copy(scene.fog.color);
@@ -5543,27 +5551,37 @@ function tickBody() {
   // title/dive: open the fog so the aerial vista isn't washed to haze
   if (!started) { scene.fog.far = 900; }
   if (!started && !launching) {
-    // TITLE: a fast, sweeping aerial orbit of the whole valley — cinematic,
-    // the world rushing past beneath you before you're dropped in.
-    const a = t * 0.07;
-    camera.position.set(Math.cos(a) * 150, 150 + Math.sin(t * 0.13) * 12, Math.sin(a) * 150);
-    camera.lookAt(0, 6, 0);
+    // TITLE: a slow, cinematic DOLLY along a banked oval track high above the
+    // valley — a wide sweeping arc, gently rising and falling like a camera
+    // crane, always looking in at the center. Not a flat spin.
+    const a = t * 0.05;                              // slow
+    const rx = 185, rz = 125;                        // an oval, not a circle
+    const h = 118 + Math.sin(a * 0.9) * 34;          // banking rise/fall
+    camera.position.set(Math.cos(a) * rx, h, Math.sin(a) * rz);
+    camera.lookAt(0, 12, 0);
     camera.rotation.order = 'YXZ';
   } else if (launching) {
-    // the PLUMMET: cast down from on high, you accelerate straight at the
-    // earth — ease-IN so it SLAMS — looking down the whole way. At the
-    // ground, the impact explodes and the home is blown into being.
+    // the DIVE: ONE continuous motion from wherever the orbit left you —
+    // a swooping arc down and IN to the center, accelerating (cubic ease-in)
+    // so it slams. No teleport: _diveFrom is the live orbit position, so the
+    // shot never cuts from the title to the fall — it's all one take.
     launchT += dt;
     const lp = Math.min(1, launchT / LAUNCH_DUR);
-    const e = lp * lp * lp;               // cubic ease-IN — a real accelerating fall
+    const e = lp * lp * lp;               // cubic ease-IN — accelerating swoop
     const tx = SPAWN.x, tz = SPAWN.z, ty = heightAt(tx, tz) + EYE;
-    camera.position.set(tx, _diveFrom.y + (ty - _diveFrom.y) * e, tz);
-    // look straight down at the impact point as you drop, then level out to
-    // face forward (+z) for the last stretch — that forward facing carries
-    // into the landed view so you keep facing the way you came in.
-    const lookE = Math.max(0, (lp - 0.7) / 0.3);
+    camera.position.set(
+      _diveFrom.x + (tx - _diveFrom.x) * e,
+      _diveFrom.y + (ty - _diveFrom.y) * e,
+      _diveFrom.z + (tz - _diveFrom.z) * e);
+    // horizontal flight direction (orbit point → center) — you'll land facing
+    // this way. The look eases from the impact point to forward along it.
+    const fdx = tx - _diveFrom.x, fdz = tz - _diveFrom.z, fl = Math.hypot(fdx, fdz) || 1;
+    const hx = fdx / fl, hz = fdz / fl;
+    const lookE = Math.max(0, (lp - 0.65) / 0.35);
     const gyL = heightAt(tx, tz);
-    camera.lookAt(tx, gyL + (ty - gyL) * lookE, tz + 0.001 + lookE * 14);
+    camera.lookAt(tx + hx * lookE * 16,
+                  gyL + (ty - gyL) * lookE,
+                  tz + hz * lookE * 16);
     camera.rotation.order = 'YXZ';
     if (lp >= 1) {                        // STRIKE
       launching = false;
@@ -5769,6 +5787,9 @@ let titleArmed = false, titleArmT = 0;
 function startTitleMusic() {
   if (titleArmed || launching || started) return;
   titleArmed = true; titleArmT = clock.elapsedTime;
+  // the cloud parts — the dark title clears to reveal the valley beneath
+  const ttl = document.getElementById('title'); if (ttl) ttl.classList.add('revealed');
+  // the stinger that swells into the emotional theme, on that first touch
   try { audio.start(); if (audio.titleTheme) audio.titleTheme(); } catch (e) {}
 }
 function onTitleTap() {
@@ -5802,8 +5823,9 @@ function respawnArrival() {
 function beginLaunch() {
   if (launching || started) return;
   launching = true; launchT = 0;
-  // the plummet: you are flung down from directly overhead, not dollied in
-  _diveFrom.set(SPAWN.x, heightAt(SPAWN.x, SPAWN.z) + 130, SPAWN.z);
+  // ONE continuous shot: the dive begins from exactly where the orbit camera
+  // is right now — your second tap's timing picks the approach. No cut.
+  _diveFrom.copy(camera.position);
   // hide the home — it doesn't exist yet. The impact will blow it into being.
   if (window._base && window._base.group) window._base.group.visible = false;
   try { audio.start(); } catch (e) {}

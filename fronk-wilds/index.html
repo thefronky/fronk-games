@@ -57,8 +57,11 @@
   /* ── title screen — the world itself is the backdrop, gone wrong ── */
   #title{position:fixed;inset:0;z-index:10;cursor:pointer;display:flex;flex-direction:column;
     align-items:center;justify-content:center;color:#d9cfc0;text-align:center;
-    padding:24px;transition:opacity 1.2s;
-    background:radial-gradient(ellipse at center,transparent 24%,rgba(4,2,2,.78) 100%)}
+    padding:24px;transition:opacity 1.2s, background 1.8s ease-out;
+    /* dark to start — the map is hidden behind cloud. just CONSUME. */
+    background:radial-gradient(ellipse at center,rgba(8,5,5,.95) 0%,rgba(2,1,1,.99) 100%)}
+  /* first tap: the cloud parts, the valley appears beneath */
+  #title.revealed{background:radial-gradient(ellipse at center,transparent 28%,rgba(4,2,2,.5) 100%)}
   #title h1{font-family:'Cinzel','Times New Roman',serif;font-weight:700;
     white-space:nowrap;margin:0;
     font-size:clamp(46px,12.5vw,128px);letter-spacing:.1em;text-indent:.1em;
