@@ -3885,6 +3885,23 @@ function arrowPickup() {
 // mushroom is a CHOICE: stand near it and a CONSUME button appears — you
 // tap it to eat (and the world goes strange). Never eaten by accident.
 let _nearMush = null;
+// keep the trip going: a little after you eat one, another glowing cap rises
+// nearby — so the cloud-climbing never has to stop to go hunting for more.
+function respawnMushroomNear() {
+  if (!started || dead) return;
+  let f = FORAGE.find(x => x.kind === 'mush' && x.taken) || FORAGE.find(x => x.kind === 'mush');
+  if (!f) return;
+  for (let tries = 0; tries < 30; tries++) {
+    const ang = Math.random() * Math.PI * 2, dist = 5 + Math.random() * 5;
+    const x = player.x + Math.cos(ang) * dist, z = player.z + Math.sin(ang) * dist;
+    const y = heightAt(x, z);
+    if (y < WATER_Y + 1.0) continue;                  // not in the lake
+    f.x = x; f.z = z; f._d = 999;
+    f.mesh.position.set(x, y, z);
+    f.taken = false; f.mesh.visible = true;
+    return;
+  }
+}
 function eatMushroom(f) {
   if (!f || f.taken) return;
   f.taken = true; f.mesh.visible = false;
@@ -3892,6 +3909,8 @@ function eatMushroom(f) {
   if (audio.tripMusic) audio.tripMusic(true);         // the magic carpet starts
   toast('…oh.', 2200);
   _nearMush = null; if (_consumeBtn) _consumeBtn.classList.remove('show');
+  clearTimeout(eatMushroom._re);
+  eatMushroom._re = setTimeout(respawnMushroomNear, 6000);   // another rises soon after
 }
 window._eatMushroom = () => eatMushroom(_nearMush || FORAGE.find(f => f.kind === 'mush' && !f.taken));
 function forageUpdate(t) {
