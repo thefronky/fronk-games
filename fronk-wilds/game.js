@@ -2818,6 +2818,63 @@ function updateBirds(t, dt, night) {
   }
 }
 
+// ── carrion birds ── a fresh kill draws scavengers: a few dark birds wheel
+// in a slow ring high over a carcass, so a downed animal reads from across the
+// valley (and the woods feel like they NOTICE death). Day only; they fade in a
+// few beats after the kill and disperse when the carcass is taken or rots away.
+// Bounded pool of flocks for the phone; each flock follows its carcass.
+const _carrionWingGeo = new THREE.PlaneGeometry(1.7, 0.42);
+const CARRION = []; const CARRION_MAX = IS_TOUCH ? 3 : 5;
+function spawnCarrion(a) {
+  if (a.isCryptid || a.eaten) return;
+  if (CARRION.length >= CARRION_MAX) {                 // recycle the oldest flock
+    const old = CARRION.shift(); if (old) scene.remove(old.grp);
+  }
+  const mat = new THREE.MeshBasicMaterial({ color: 0x1b1f27, side: THREE.DoubleSide,
+    transparent: true, opacity: 0 });
+  const grp = new THREE.Group();
+  const birds = [];
+  const n = 3 + (Math.random() * 2 | 0);              // 3-4 scavengers
+  for (let i = 0; i < n; i++) {
+    const b = new THREE.Group();
+    for (const s of [-1, 1]) {
+      const w = new THREE.Mesh(_carrionWingGeo, mat);
+      w.rotation.x = -Math.PI / 2; w.position.x = s * 0.95; w.rotation.y = s * 0.5; b.add(w);
+    }
+    b.userData = { ph: i * (Math.PI * 2 / n), rad: 6 + Math.random() * 3, vph: Math.random() * 6 };
+    grp.add(b); birds.push(b);
+  }
+  scene.add(grp);
+  CARRION.push({ grp, birds, mat, target: a, fade: 0, delay: 3.5 + Math.random() * 2, spin: Math.random() * 6 });
+}
+function carrionUpdate(t, dt, night) {
+  for (let i = CARRION.length - 1; i >= 0; i--) {
+    const f = CARRION[i], a = f.target;
+    const valid = a && a.dead && !a.eaten && a.t > 1.5 && animals.indexOf(a) !== -1;
+    if (f.delay > 0) f.delay -= dt;
+    // fade in only once the delay passes and it's daylight; otherwise fade out
+    const show = valid && f.delay <= 0 && night < 0.5;
+    f.fade += (show ? dt / 2.6 : -dt / 1.8);
+    f.fade = Math.max(0, Math.min(1, f.fade));
+    if (!valid && f.fade <= 0) { scene.remove(f.grp); CARRION.splice(i, 1); continue; }
+    f.mat.opacity = 0.82 * f.fade;
+    f.grp.visible = f.fade > 0.01;
+    if (!f.grp.visible) continue;
+    const c = a.obj.position;
+    const gy = heightAt(c.x, c.z) + 17 + (1 - f.fade) * 10;   // descends as it commits
+    f.grp.position.set(c.x, gy, c.z);
+    for (const b of f.birds) {
+      const ang = f.spin + t * 0.5 + b.userData.ph;
+      const r = b.userData.rad;
+      b.position.set(Math.cos(ang) * r, Math.sin(t * 0.4 + b.userData.vph) * 1.3, Math.sin(ang) * r);
+      b.rotation.y = -ang;                              // face along the circle
+      const fl = Math.sin(t * 6 + b.userData.vph) * 0.6;
+      b.children[0].rotation.y = 0.5 + fl; b.children[1].rotation.y = -0.5 - fl;
+    }
+  }
+}
+window._carrion = () => CARRION.filter(f => f.grp.visible).length;   // debug/test hook
+
 // ── things in the dark ── after nightfall, shapes you can't quite make out
 // lope past you and are gone. You don't know what they are or why. Unsettling.
 const _darters = [];
@@ -3948,6 +4005,7 @@ function gutCarcass(a) {
   if (audio.impact) audio.impact('flesh', 0.12);
 }
 
+window._kill = (a) => killAnimal(a);   // debug/test hook
 function killAnimal(a, suffered = false) {
   a.dead = true; a.t = 75;   // carcasses linger — long enough for scavengers
   a.suffered = suffered || !!a.bleeding || a.state === 'wounded';
@@ -3955,6 +4013,7 @@ function killAnimal(a, suffered = false) {
   if (a.cfg.bearish) { a.obj.rotation.z = 1.35; a.obj.rotation.x = 0;   // the bear goes down on its side
     a.obj.position.y = heightAt(a.obj.position.x, a.obj.position.z) + 0.5; }
   score[a.name] = (score[a.name] || 0) + 1;
+  spawnCarrion(a);                               // scavengers gather over the kill
   if (audio.killStinger) audio.killStinger();   // the theme punctuates every kill
   if (a.isCryptid) {
     say('killCryptid', 7000);
@@ -5841,7 +5900,7 @@ function tickBody() {
   moon.material.opacity = night * Math.max(0, Math.min(1, (_moonDir.y - 0.06) * 6)) * 0.9;
   updateFireflies(t, night);
   updateButterflies(dt, t);
-  if (started) { updatePollen(t, dt, night); updateBirds(t, dt, night); updateDarters(dt, night); }
+  if (started) { updatePollen(t, dt, night); updateBirds(t, dt, night); updateDarters(dt, night); carrionUpdate(t, dt, night); }
   corruptionUpdate(dt, t);
   updateMist(t, night);
   // flower trample: live player bends instantly; the wake (zw) trails and
