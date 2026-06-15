@@ -4660,7 +4660,7 @@ function igniteTree(tr) {
   }
   if (audio.impact) audio.impact('wood', 0.4);
   TREEFIRES.push({ tr, grp, light, t: 0, dur: 5.5 + Math.random() * 2.5,
-                   spreadAt: 0.4 + Math.random() * 0.4, spread: 0, gy, h });   // catches FAST, burns long
+                   spreadAt: 0.7 + Math.random() * 0.6, spreadCd: 0, gy, h });   // catches FAST, then creeps to neighbours
   return true;
 }
 // scorched-earth wake: each felled tree leaves a sandy/ash scar on the ground.
@@ -4704,6 +4704,7 @@ function fellTree(tr) {                           // char the instance down to a
 let _mat4 = null, _q0 = null;
 window._ignite = (tr) => igniteTree(tr);     // debug/test hook
 window._treefires = () => TREEFIRES.length;  // debug/test hook
+window._trees = TREES;                        // debug/test hook
 function treeFireUpdate(dt) {
   if (!TREEFIRES.length) return;
   const t = clock.elapsedTime;
@@ -4720,17 +4721,22 @@ function treeFireUpdate(dt) {
       m.scale.y = m.scale.x * (1.4 * fl);
     }
     if (f.light) f.light.intensity = 8 + Math.sin(t * 18 + f.gy) * 2.5;
-    // jump to neighbours — once, after a beat — so a grove catches and runs
-    if (!f.spread && f.t > f.spreadAt) {
-      f.spread = 1;
-      let lit = 0;
-      const want = 4 + (Math.random() < 0.5 ? 1 : 0);   // 4-5 neighbours — an inferno that won't quit
+    // a creeping FRONT, not a sudden burst: every ~1s an actively-burning
+    // tree reaches to the single NEAREST unburnt neighbour in canopy-touching
+    // range, so the flame flows tree-to-tree and a whole grove catches over
+    // time instead of 4-5 popping at once. Closest-first = a directional edge
+    // that radiates outward.
+    f.spreadCd -= dt;
+    if (f.t > f.spreadAt && f.t < f.dur - 0.5 && f.spreadCd <= 0) {
+      let best = null, bestD = 1e9;
       for (const o of TREES) {
-        if (lit >= want) break;
         if (o === f.tr || o._burning || o._gone || o.top === undefined) continue;
-        if (Math.hypot(o.x - f.tr.x, o.z - f.tr.z) > 24) continue;   // reaches FAR — leaps gaps
-        if (igniteTree(o)) lit++;
+        const d = Math.hypot(o.x - f.tr.x, o.z - f.tr.z);
+        if (d > 15) continue;                       // only neighbours whose canopy nearly touches catch
+        if (d < bestD) { bestD = d; best = o; }
       }
+      if (best) igniteTree(best);
+      f.spreadCd = 0.8 + Math.random() * 0.7;       // ~0.8-1.5s between catches — the front advances at a walk
     }
     // burn out → fell the tree, kill the flame
     if (f.t > f.dur) {
