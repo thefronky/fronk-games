@@ -5406,9 +5406,12 @@ function tickBody() {
     const e = lp * lp * lp;               // cubic ease-IN — a real accelerating fall
     const tx = SPAWN.x, tz = SPAWN.z, ty = heightAt(tx, tz) + EYE;
     camera.position.set(tx, _diveFrom.y + (ty - _diveFrom.y) * e, tz);
-    // look mostly straight down as you drop, leveling toward the horizon at the end
+    // look straight down at the impact point as you drop, then level out to
+    // face forward (+z) for the last stretch — that forward facing carries
+    // into the landed view so you keep facing the way you came in.
     const lookE = Math.max(0, (lp - 0.7) / 0.3);
-    camera.lookAt(tx, ty + (6 - ty) * lookE, tz + 0.001 + lookE * 14);
+    const gyL = heightAt(tx, tz);
+    camera.lookAt(tx, gyL + (ty - gyL) * lookE, tz + 0.001 + lookE * 14);
     camera.rotation.order = 'YXZ';
     if (lp >= 1) {                        // STRIKE
       launching = false;
@@ -5418,7 +5421,9 @@ function tickBody() {
       // already open (the white flash IS the coming-to). No eyelid wake here.
       player.x = SPAWN.x; player.z = SPAWN.z;
       player.y = heightAt(SPAWN.x, SPAWN.z);
-      player.yaw = SPAWN.yaw; player.pitch = 0.16;
+      // keep facing the way you came in — inherit the camera's incoming yaw
+      // (it leveled to forward over the last stretch) so the view doesn't snap
+      player.yaw = camera.rotation.y; player.pitch = 0.16;
       grounded = true; player.airY = player.y;
       setLids(-100, 0);                   // make sure no eyelids are covering the genesis
       explodeArrival();                   // you hit the ground and the world is BORN
