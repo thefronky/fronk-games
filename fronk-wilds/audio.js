@@ -572,6 +572,105 @@ export class AudioEngine {
     o.start(t); o.stop(t + 0.09);
   }
 
+  // ════ THE BEAR'S VOICE ════════════════════════════════════════════
+  // Hyper-real, LOUD, haunting. A guttural scream: detuned saw "vocal
+  // cords" driven up into a wail then collapsing to a growl, stacked
+  // throat formants, a chest-rattle growl LFO roughening the whole thing,
+  // and a rasp of breath over the top. Spatialized — you feel it behind
+  // you. The contrast against the calm woods is the point.
+  bearScream(x, z, vol = 1.2) {
+    if (!this.started || this.muted) return;
+    const C = this.ctx, t = C.currentTime;
+    const spatial = (x !== undefined && z !== undefined);
+    const pan = spatial ? this._panner(x, z) : null;
+    const out = C.createGain(); out.gain.value = vol;
+    if (pan) { pan.refDistance = 14; pan.maxDistance = 160; pan.rolloffFactor = 0.7;
+      out.connect(pan); pan.connect(this.master); pan.connect(this.verb); }
+    else { out.connect(this.master); out.connect(this.verb); }
+    const dur = 1.5 + Math.random() * 0.6;
+    // the chest rattle — a low LFO that roughens amplitude
+    const growl = C.createOscillator(); growl.type = 'sine';
+    growl.frequency.value = 22 + Math.random() * 12;
+    const growlG = C.createGain(); growlG.gain.value = 0.5;
+    growl.connect(growlG); growl.start(t); growl.stop(t + dur + 0.1);
+    // three detuned "vocal cords" — a rough vocal buzz that screams up
+    for (const det of [1, 1.006, 0.5]) {
+      const o = C.createOscillator(); o.type = det === 0.5 ? 'sine' : 'sawtooth';
+      const f0 = 125 * det;
+      o.frequency.setValueAtTime(f0 * 0.85, t);
+      o.frequency.linearRampToValueAtTime(f0 * 1.8, t + dur * 0.32);   // SCREAM up
+      o.frequency.exponentialRampToValueAtTime(f0 * 0.65, t + dur);    // collapse to growl
+      const bp = C.createBiquadFilter(); bp.type = 'bandpass';
+      bp.frequency.value = 620 + det * 200; bp.Q.value = 3.5;          // throat formant
+      const g = C.createGain();
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(0.5, t + 0.07);
+      g.gain.setValueAtTime(0.5, t + dur * 0.5);
+      g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+      growlG.connect(g.gain);                                          // growl modulates the level
+      o.connect(bp).connect(g).connect(out);
+      o.start(t); o.stop(t + dur + 0.05);
+    }
+    // upper formants stacked → the "voice"/snarl resonances
+    for (const ff of [1100, 2500]) {
+      const o = C.createOscillator(); o.type = 'sawtooth'; o.frequency.value = 125;
+      o.frequency.linearRampToValueAtTime(210, t + dur * 0.32);
+      const bp = C.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = ff; bp.Q.value = 8;
+      const g = C.createGain();
+      g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.16, t + 0.1);
+      g.gain.exponentialRampToValueAtTime(0.001, t + dur * 0.9);
+      o.connect(bp).connect(g).connect(out); o.start(t); o.stop(t + dur);
+    }
+    // the rasp — breathy noise riding over the scream
+    const n = C.createBufferSource(); n.buffer = this._shotNoise; n.loop = true;
+    const nb = C.createBiquadFilter(); nb.type = 'bandpass'; nb.frequency.value = 1700; nb.Q.value = 0.7;
+    const ng = C.createGain();
+    ng.gain.setValueAtTime(0, t); ng.gain.linearRampToValueAtTime(0.26, t + 0.12);
+    ng.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    n.connect(nb).connect(ng).connect(out); n.start(t); n.stop(t + dur + 0.05);
+  }
+
+  // a charging bear: rapid, hard HUFFS building — different texture from
+  // the scream so you can tell it's coming AT you. Spatialized.
+  bearCharge(x, z, vol = 1) {
+    if (!this.started || this.muted) return;
+    const C = this.ctx, t0 = C.currentTime;
+    const pan = (x !== undefined) ? this._panner(x, z) : null;
+    const out = C.createGain(); out.gain.value = vol;
+    if (pan) { pan.refDistance = 12; pan.maxDistance = 140; pan.rolloffFactor = 0.8;
+      out.connect(pan); pan.connect(this.master); } else out.connect(this.master);
+    for (let i = 0; i < 4; i++) {                          // four hard huffs
+      const t = t0 + i * 0.16;
+      const o = C.createOscillator(); o.type = 'sawtooth';
+      o.frequency.setValueAtTime(150, t); o.frequency.exponentialRampToValueAtTime(70, t + 0.13);
+      const bp = C.createBiquadFilter(); bp.type = 'lowpass'; bp.frequency.value = 900;
+      const g = C.createGain();
+      g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.5, t + 0.015);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+      o.connect(bp).connect(g).connect(out); o.start(t); o.stop(t + 0.17);
+      const n = C.createBufferSource(); n.buffer = this._shotNoise;
+      const nb = C.createBiquadFilter(); nb.type = 'bandpass'; nb.frequency.value = 800; nb.Q.value = 1;
+      const ng = C.createGain(); ng.gain.setValueAtTime(0.32, t); ng.gain.exponentialRampToValueAtTime(0.001, t + 0.13);
+      n.connect(nb).connect(ng).connect(out); n.start(t, 0, 0.14);
+    }
+  }
+
+  // brush/foliage shoved aside as the bear closes — a swell of high noise,
+  // spatialized, so you hear it moving through cover near you.
+  bearRustle(x, z, vol = 0.6) {
+    if (!this.started || this.muted) return;
+    const C = this.ctx, t = C.currentTime;
+    const pan = this._panner(x, z); pan.connect(this.spatialBus);
+    const n = C.createBufferSource(); n.buffer = this._shotNoise; n.loop = true;
+    const hp = C.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 2600;
+    const g = C.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(vol, t + 0.18);
+    g.gain.linearRampToValueAtTime(0.0008, t + 0.5);
+    n.connect(hp).connect(g).connect(pan);
+    n.start(t, Math.random() * 0.5); n.stop(t + 0.55);
+  }
+
   // the breath-in of waking — a soft rising inhale of filtered noise
   breath() {
     if (!this.started || this.muted) return;

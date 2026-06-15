@@ -43,6 +43,16 @@
   #hpfill{height:100%;width:100%;background:#c9543a;transition:width .3s}
   #hurt{position:fixed;inset:0;background:radial-gradient(ellipse at center,transparent 40%,rgba(160,20,10,.55));
     opacity:0;transition:opacity .25s;pointer-events:none}
+  /* bear maul — a deeper red vignette + blood running down the lens */
+  #maul{position:fixed;inset:0;z-index:8;opacity:0;pointer-events:none;transition:opacity .12s ease-out;
+    background:radial-gradient(ellipse 70% 70% at center,transparent 22%,rgba(120,6,4,.62) 78%,rgba(70,2,2,.9) 100%)}
+  #blood{position:fixed;inset:0;z-index:9;pointer-events:none;overflow:hidden}
+  #blood .drip{position:absolute;top:-16vh;width:var(--w,10px);height:var(--h,22vh);border-radius:0 0 50% 50%/0 0 14px 14px;
+    background:linear-gradient(180deg,rgba(120,6,4,0),rgba(140,8,6,.78) 30%,rgba(95,3,3,.9));
+    filter:blur(.5px);opacity:0;transform:translateY(0)}
+  #blood .drip.run{animation:bdrip var(--t,2.6s) ease-in forwards}
+  @keyframes bdrip{0%{opacity:0;transform:translateY(0)}8%{opacity:1}
+    100%{opacity:0;transform:translateY(135vh)}}
 
   /* ── title screen — the world itself is the backdrop, gone wrong ── */
   #title{position:fixed;inset:0;z-index:10;cursor:pointer;display:flex;flex-direction:column;
@@ -175,6 +185,8 @@
     font-size:20px;pointer-events:auto;cursor:pointer;opacity:.8">🔊</div>
 </div>
 <div id="hurt"></div>
+<div id="maul"></div>
+<div id="blood"></div>
 <div id="veil"></div>
 <div id="flash"></div>
 <div id="eyelids"><div class="lid" id="lidTop"></div><div class="lid" id="lidBot"></div></div>

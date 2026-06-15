@@ -3207,6 +3207,8 @@ function bearUpdate(a, dt, dx, dz, dist) {
     if (a._huffCd <= 0) {
       a._huffCd = 1.3 + Math.random() * 1.1;
       if (audio.breathAt) audio.breathAt(a.obj.position.x, a.obj.position.z, 0.6);
+      // brush rustle as it shifts its weight nearby — you hear it close
+      if (audio.bearRustle) audio.bearRustle(a.obj.position.x, a.obj.position.z, 0.55);
     }
     setAnim(a, a.acts.Idle_2 ? 'Idle_2' : 'Idle');
     if (!a._warned) { a._warned = true; toast('A bear. Give it room.', 3800); }
@@ -3248,7 +3250,9 @@ function bearUpdate(a, dt, dx, dz, dist) {
   }
 
   if (a.state === 'charge' || a.aggro) {
+    const justStarted = a.state !== 'charge';
     a.state = 'charge';
+    if (justStarted && audio.bearCharge) audio.bearCharge(a.obj.position.x, a.obj.position.z, 1);
     if (dist > loseR) {                                  // it loses interest
       a.aggro = false; a.state = 'idle'; a.t = 1; a.cur = null; return;
     }
@@ -3256,13 +3260,22 @@ function bearUpdate(a, dt, dx, dz, dist) {
       if (a.attackCd <= 0) {
         setAnim(a, a.acts.Attack ? 'Attack' : 'Attack_Kick', true);
         a.attackCd = 1.6;
-        hurtPlayer(a.cfg.dmg || 38); camShakeT = SHAKE_DUR;
+        hurtPlayer(a.cfg.dmg || 38); camShakeT = SHAKE_DUR * 2.5;
+        // the hit: a LOUD scream right on top of you + blood on the lens
+        if (audio.bearScream) audio.bearScream(a.obj.position.x, a.obj.position.z, 1.6);
+        bearHitFX();
         setTimeout(() => { if (!a.dead) a.cur = null; }, 700);
       }
     } else {
       a.dir = Math.atan2(dx, dz);
       setAnim(a, 'Gallop');                              // bounding gait carries it
       stepAnimal(a, a.cfg.gallop, dt);
+      // it keeps roaring as it closes — a different, rhythmic charge huff
+      a._chargeCd = (a._chargeCd ?? 0) - dt;
+      if (a._chargeCd <= 0) {
+        a._chargeCd = 0.9 + Math.random() * 0.5;
+        if (audio.bearCharge) audio.bearCharge(a.obj.position.x, a.obj.position.z, 0.85);
+      }
     }
     return;
   }
@@ -3273,8 +3286,10 @@ function enterBearRear(a, dx, dz) {
   a.state = 'rear'; a.rearT = 0.9;
   a.dir = Math.atan2(dx, dz);
   setAnim(a, a.acts.Idle_2 ? 'Idle_2' : 'HitReact_Left', true);
-  camShakeT = SHAKE_DUR;
-  if (audio.breathAt) audio.breathAt(a.obj.position.x, a.obj.position.z, 0.7);
+  camShakeT = SHAKE_DUR * 2;
+  // it rears and SCREAMS — loud, haunting, spatial
+  if (audio.bearScream) audio.bearScream(a.obj.position.x, a.obj.position.z, 1.25);
+  else if (audio.breathAt) audio.breathAt(a.obj.position.x, a.obj.position.z, 0.7);
   toast('It stands up. All of it.', 3600);
 }
 
@@ -4006,6 +4021,32 @@ function quiverPickup() {
   }
 }
 
+// ── bear maul on the lens ── a hard red vignette flash + blood that runs
+// down the screen. Reuses a small pool of drip elements.
+let _bloodDrips = null;
+function bearHitFX() {
+  const maul = document.getElementById('maul');
+  if (maul) { maul.style.opacity = '1'; clearTimeout(bearHitFX._m);
+    bearHitFX._m = setTimeout(() => { maul.style.opacity = '0'; }, 900); }
+  const blood = document.getElementById('blood');
+  if (!blood) return;
+  if (!_bloodDrips) {
+    _bloodDrips = [];
+    for (let i = 0; i < 7; i++) { const d = document.createElement('div'); d.className = 'drip'; blood.appendChild(d); _bloodDrips.push(d); }
+  }
+  // fling 3-5 fresh runs down from random spots near the top
+  const n = 3 + Math.floor(Math.random() * 3);
+  for (let i = 0; i < n; i++) {
+    const d = _bloodDrips[(Math.random() * _bloodDrips.length) | 0];
+    d.classList.remove('run'); void d.offsetWidth;            // restart the animation
+    d.style.left = (5 + Math.random() * 90) + 'vw';
+    d.style.setProperty('--w', (7 + Math.random() * 12) + 'px');
+    d.style.setProperty('--h', (16 + Math.random() * 20) + 'vh');
+    d.style.setProperty('--t', (2.0 + Math.random() * 1.8) + 's');
+    d.classList.add('run');
+  }
+}
+window._bearHitFX = () => bearHitFX();   // debug/test hook
 function hurtPlayer(dmg) {
   if (dead) return;
   player.hp -= dmg; player.lastHit = clock.elapsedTime;
@@ -4623,6 +4664,12 @@ addEventListener('keydown', skipIntro);
 addEventListener('mousedown', skipIntro);
 addEventListener('touchstart', skipIntro, { passive: true });
 
+// accelerated look: a finger delta is scaled by base, then boosted by how
+// FAST the flick is (|d|*gain). Slow = precise (≈base), fast = multiplied —
+// so small aim adjustments stay fine but big swings whip the view around.
+function accelLook(d, base, gain) {
+  return d * base * (1 + Math.abs(d) * gain);
+}
 if (!IS_TOUCH) {
   canvas.addEventListener('mousedown', e => {
     if (!(started && !intro && !arrowCam && document.pointerLockElement)) return;
@@ -4670,14 +4717,20 @@ if (!IS_TOUCH) {
         moveVec.x = vx; moveVec.y = vy;
         knob.style.left = (50 + vx * 38) + '%'; knob.style.top = (50 + vy * 38) + '%';
       } else if (t.identifier === lookId) {
-        player.yaw -= (t.clientX - lastLook.x) * 0.0042;
-        player.pitch = Math.max(-1.45, Math.min(1.45, player.pitch - (t.clientY - lastLook.y) * 0.0042));
+        // ACCELERATED look: slow drags stay precise for aiming, fast flicks
+        // turn WAY faster — the bigger the motion, the more it multiplies.
+        const dx = t.clientX - lastLook.x, dy = t.clientY - lastLook.y;
+        player.yaw -= accelLook(dx, 0.0040, 0.075);          // horizontal: snappy on big swipes
+        player.pitch = Math.max(-1.5, Math.min(1.5,
+          player.pitch - accelLook(dy, 0.0030, 0.055)));     // vertical: gentler base, still accelerates
         lastLook = { x: t.clientX, y: t.clientY };
       } else if (t.identifier === shootId) {
         // drag while holding the draw button = aim. Slightly slower
         // than free-look: you're at full draw, breathing.
-        player.yaw -= (t.clientX - lastShoot.x) * 0.0034;
-        player.pitch = Math.max(-1.45, Math.min(1.45, player.pitch - (t.clientY - lastShoot.y) * 0.0034));
+        const dx = t.clientX - lastShoot.x, dy = t.clientY - lastShoot.y;
+        player.yaw -= accelLook(dx, 0.0032, 0.05);
+        player.pitch = Math.max(-1.5, Math.min(1.5,
+          player.pitch - accelLook(dy, 0.0026, 0.04)));
         lastShoot = { x: t.clientX, y: t.clientY };
       }
     }
