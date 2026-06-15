@@ -2897,27 +2897,27 @@ async function loadAnimals() {
         left -= size;
       }
     } else if (n === 'Bear') {
-      // place bears at a findable distance from where you wake (70-150m) so
-      // you actually CROSS one — not lost across a 860m map
+      // findable, but FAR from every bed — never where you wake
       for (let i = 0; i < SPECIES.Bear.n; i++) {
         const b = spawn('Bear');
-        for (let tr = 0; tr < 30; tr++) {
-          const ang = Math.random() * Math.PI * 2, rr = 70 + Math.random() * 80;
+        for (let tr = 0; tr < 40; tr++) {
+          const ang = Math.random() * Math.PI * 2, rr = 100 + Math.random() * 90;
           const bx = SPAWN.x + Math.cos(ang) * rr, bz = SPAWN.z + Math.sin(ang) * rr;
-          if (heightAt(bx, bz) > WATER_Y + 1) {
+          if (heightAt(bx, bz) > WATER_Y + 1 && FLOWERBEDS.every(bd => Math.hypot(bx - bd.x, bz - bd.z) > 95)) {
             b.obj.position.set(bx, heightAt(bx, bz), bz); break;
           }
         }
       }
     } else if (n === 'Fox') {
-      // the little critters — bring MOST of them in close (18-55m) so you
-      // wake to a valley alive with things to chase, not an empty map
+      // the little critters cluster near EVERY bed (round-robin), so wherever
+      // you land you wake to small things scuffling and spooking nearby
       for (let i = 0; i < SPECIES.Fox.n; i++) {
         const fx = spawn('Fox');
         if (i < SPECIES.Fox.n - 3) {                  // leave a few wild & far
+          const bed = FLOWERBEDS[i % FLOWERBEDS.length];
           for (let tr = 0; tr < 30; tr++) {
-            const ang = Math.random() * Math.PI * 2, rr = 18 + Math.random() * 37;
-            const x = SPAWN.x + Math.cos(ang) * rr, z = SPAWN.z + Math.sin(ang) * rr;
+            const ang = Math.random() * Math.PI * 2, rr = 14 + Math.random() * 40;
+            const x = bed.x + Math.cos(ang) * rr, z = bed.z + Math.sin(ang) * rr;
             if (heightAt(x, z) > WATER_Y + 1) { fx.obj.position.set(x, heightAt(x, z), z); break; }
           }
         }
@@ -3108,7 +3108,10 @@ function spawn(name, near) {
     }
     y = heightAt(x, z);
     // spiders are NOT a welcome party — keep them far from every landing bed
-    var nearBed = cfg.spiderish && FLOWERBEDS.some(b => Math.hypot(x - b.x, z - b.z) < 70);
+    // danger GRADIENT: predators (wolf/bear/spider) never spawn near a bed, so
+    // where you wake is calm — small critters first, the teeth are farther out.
+    var pred = cfg.hunts || cfg.bearish || cfg.spiderish || cfg.territorial;
+    var nearBed = pred && FLOWERBEDS.some(b => Math.hypot(x - b.x, z - b.z) < 95);
   } while ((y < WATER_Y + 1 || Math.hypot(x, z) < 45 || nearBed) && tries++ < 60);
   obj.position.set(x, y, z);
   // ── per-individual SIZE ── base scale ±10%, bears 1.8× on top
@@ -3437,7 +3440,17 @@ function animalUpdate(a, dt) {
           a._juke = (Math.random() - 0.5) * 1.7; }
         a.dir = Math.atan2(-dx, -dz) + a._juke;
       }
-      stepAnimal(a, a.cfg.gallop, dt);
+      // ── the persistence hunt ── flat-out at first, but stay on its tail and
+      // it TIRES: stamina drains and it slows; panic bursts come and go; let it
+      // gain distance and it catches its breath. Run it down the old way.
+      a.stam = a.stam ?? 1;
+      const onTail = dist < a.cfg.flee * 1.7;
+      a.stam = Math.max(0, Math.min(1, a.stam + (onTail ? -0.11 : 0.16) * dt));
+      a._burstCd = (a._burstCd ?? 2) - dt; a._burstT = (a._burstT ?? 0) - dt;
+      if (a._burstCd <= 0 && onTail && a.stam > 0.3) { a._burstT = 0.6; a._burstCd = 2.5 + Math.random() * 2.5; }
+      const fatigue = 0.45 + 0.55 * a.stam;            // 1.0 fresh → 0.45 spent
+      const burst = a._burstT > 0 ? 1.35 : 1;          // a flare of panic energy
+      stepAnimal(a, a.cfg.gallop * fatigue * burst, dt);
       if (a.bleeding) {
         dropBlood(a);
         a.bleeding -= dt;
@@ -6251,7 +6264,7 @@ function tickBody() {
         _revealStep = 1;
         if (IS_TOUCH) bc.add('show-move');
         if (audio.cue) audio.cue(0);
-        cinematic('getting hungry', 4600);   // the one and only opening line — no punctuation
+        // (no opening line — it clashed with the other text and read ugly)
       }
     } else if (_revealStep === 1 && dB > 7) { _revealStep = 2; if (IS_TOUCH) bc.add('show-jump'); if (audio.cue) audio.cue(1); }
     else if (_revealStep === 2 && dB > 11.5) { _revealStep = 3; if (IS_TOUCH) bc.add('show-bow'); if (audio.cue) audio.cue(2); }
