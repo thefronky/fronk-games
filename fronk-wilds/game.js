@@ -45,17 +45,17 @@ const CFG = IS_TOUCH
 //   scale/tint = render overrides (bear: 1.8 scale, dark-brown 0x3a2616)
 const MENAGERIE = {
   // ── prey ──
-  Deer:  { n: 16, speed: 3.0, gallop: 10.5, hp: 2, flee: 19, r: 0.7,
+  Deer:  { n: 16, speed: 2.7, gallop: 8.6, hp: 2, flee: 19, r: 0.7,
            keen: 1.2, aggroBias: 0.10, rear: 0.45, scale: 0.42, hpJit: true },
            // the staple: EVERYWHERE — wary, but a patient stalk earns the shot.
            // hard, not hopeless: stalk quiet to ~16m, stand still to ~8m.
-  Stag:  { n: 4, speed: 2.7, gallop: 10.0, hp: 3, flee: 17, r: 0.95,
+  Stag:  { n: 4, speed: 2.5, gallop: 8.3, hp: 3, flee: 17, r: 0.95,
            keen: 1.05, aggroBias: 0.30, rear: 0.70, scale: 0.52, hpJit: true },
-  Fox:   { n: 20, speed: 3.8, gallop: 11.0, hp: 1, flee: 11, r: 0.5,
+  Fox:   { n: 20, speed: 3.2, gallop: 8.8, hp: 1, flee: 11, r: 0.5,
            keen: 1.25, aggroBias: 0.05, rear: 0.2, scale: 0.45, darty: true },  // little critters — LOTS, tiny, JUKE when fleeing but approachable enough to chase down — fun to hunt
-  Cow:   { n: 1, speed: 1.9, gallop: 7.4,  hp: 3, flee: 13, r: 1.6,
+  Cow:   { n: 1, speed: 1.8, gallop: 6.2,  hp: 3, flee: 13, r: 1.6,
            keen: 0.5, aggroBias: 0.05, rear: 0.2, gait: 'sway', scale: 1.22, hpJit: true }, // RARE now — rarer than bears
-  Horse: { n: 2, speed: 3.2, gallop: 13.8, hp: 9, flee: 20, r: 1.6,
+  Horse: { n: 2, speed: 3.0, gallop: 11.5, hp: 9, flee: 20, r: 1.6,
            keen: 1.2, aggroBias: 0.25, rear: 0.65, gait: 'smooth',
            hpJit: true, tanky: true, scale: 1.3 },        // 8-10 hits, impressive bolt
   // ── predator / territorial ──
@@ -3616,9 +3616,9 @@ function animalUpdate(a, dt) {
       // second over the away-vector, so they're a real pain to hit on the run
       if (a.cfg.darty) {
         a._jukeT = (a._jukeT ?? 0) - dt;
-        if (a._jukeT <= 0) { a._jukeT = 0.18 + Math.random() * 0.22;
-          a._juke = (Math.random() - 0.5) * 1.7; }
-        a.dir = Math.atan2(-dx, -dz) + a._juke;
+        if (a._jukeT <= 0) { a._jukeT = 0.4 + Math.random() * 0.35;   // less frequent
+          a._juke = (Math.random() - 0.5) * 1.0; }                    // gentler cut (was jittery/twitchy)
+        a.dir = lerpAngle(a.dir, Math.atan2(-dx, -dz) + a._juke, Math.min(1, dt * 6));  // ease the turn, not snap
       }
       // ── the persistence hunt ── flat-out at first, but stay on its tail and
       // it TIRES: stamina drains and it slows; panic bursts come and go; let it
@@ -5363,6 +5363,22 @@ function loose() {
   kickT = KICK_DUR;        // kill-feel: the string snaps your aim up a hair
   if (IS_TOUCH && navigator.vibrate) navigator.vibrate(Math.round(18 + power * 34));
   drawT = 0;
+  // ── the report spooks prey in TWO stages ── the FIRST shot they hear makes
+  // them lift their heads and look (alert); a SECOND shot while still alert
+  // sends them running. (Close prey already inside the flee ring bolt anyway.)
+  for (const a of animals) {
+    if (a.dead || a.cfg.hunts || a.cfg.bearish || a.cfg.territorial) continue;   // prey only
+    if (a.state === 'flee' || a.state === 'wounded' || a.state === 'rear') continue;  // already gone
+    const adx = player.x - a.obj.position.x, adz = player.z - a.obj.position.z;
+    if (adx * adx + adz * adz > 65 * 65) continue;          // within earshot of the shot
+    if (a.state === 'alert') {                              // second shot → run
+      a.state = 'flee'; a.t = 3 + Math.random() * 2.5;
+      a.dir = Math.atan2(-adx, -adz) + (Math.random() - 0.5) * 0.7;
+      spookHerd(a);
+    } else {                                                // first shot → look your way
+      a.state = 'alert'; a.t = 2.6 + Math.random() * 2.0;
+    }
+  }
 }
 
 window._loose = p => { drawT = p; loose(); };   // debug hooks
