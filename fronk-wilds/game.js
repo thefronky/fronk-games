@@ -252,13 +252,23 @@ const sky = new THREE.Mesh(
       void main(){
         vec3 dir = normalize(vDir);
         float h = clamp(dir.y, -0.05, 1.0);
-        vec3 horizon = mix(vec3(0.95, 0.48, 0.23), vec3(0.22, 0.11, 0.085), night);
-        vec3 zenith  = mix(vec3(0.11, 0.20, 0.40), vec3(0.030, 0.040, 0.095), night);
-        vec3 col = mix(horizon, zenith, pow(h, 0.62));
+        // ── richer DAY atmosphere: a 3-stop vertical gradient (warm horizon →
+        // pale mid → deeper blue zenith), a warm horizon haze that builds toward
+        // the sun (forward scatter), and a sun core+halo+broad glow. night base
+        // just goes a touch darker so the stars/Milky Way pop. ──
+        vec3 horizon = mix(vec3(0.98, 0.60, 0.33), vec3(0.22, 0.11, 0.085), night);
+        vec3 midSky  = mix(vec3(0.55, 0.56, 0.62), vec3(0.05, 0.06, 0.13), night);
+        vec3 zenith  = mix(vec3(0.20, 0.34, 0.58), vec3(0.028, 0.038, 0.090), night);
+        float hh = clamp(h, 0.0, 1.0);
+        vec3 col = hh < 0.35 ? mix(horizon, midSky, pow(hh / 0.35, 0.8))
+                             : mix(midSky, zenith, pow((hh - 0.35) / 0.65, 0.9));
         float s = max(dot(dir, sunDir), 0.0);
         float dayGlow = 1.0 - night;
-        col += vec3(1.0, 0.58, 0.26) * pow(s, 220.0) * 1.7 * dayGlow;
-        col += vec3(1.0, 0.42, 0.20) * pow(s, 6.0) * 0.36 * dayGlow;
+        float haze = pow(1.0 - hh, 3.0) * (0.4 + 0.6 * pow(s, 2.0));   // warm horizon haze toward the sun
+        col += vec3(1.0, 0.66, 0.38) * haze * 0.5 * dayGlow;
+        col += vec3(1.0, 0.60, 0.28) * pow(s, 230.0) * 1.8 * dayGlow;  // sun core
+        col += vec3(1.0, 0.55, 0.30) * pow(s, 40.0)  * 0.30 * dayGlow; // halo ring
+        col += vec3(1.0, 0.45, 0.22) * pow(s, 6.0)   * 0.40 * dayGlow; // broad scatter
         float nUp = night * smoothstep(-0.02, 0.16, dir.y);   // night, above the horizon
         if (nUp > 0.01) {
           // Milky Way — a band about a galactic pole, FBM structure, cold→warm core, a dust rift
