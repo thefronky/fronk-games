@@ -6400,10 +6400,11 @@ function tickBody() {
     // it, so it doesn't shove you — you can stand and hop tree to tree.
     for (const tr of TREES) {
       if (tr.top !== undefined && player.y >= tr.top - 1.3) continue;   // on the canopy
-      // collide with the actual TRUNK, not the wide canopy/cover radius. tr.r is
-      // the cover/LOS radius (~2x the trunk), so the old tr.r+0.5 stopped you a
-      // metre+ out in open air. Trunk ≈ tr.r*0.45; +0.4 for the body.
-      const rad = tr.r * 0.45 + 0.4;
+      // canopy trees (have .inst) store the wide cover/LOS radius (~2x the
+      // trunk) → collide at the actual TRUNK (tr.r*0.45 + body). Rocks, snags and
+      // blighted trees store their REAL collision radius already → use it as-is,
+      // or you walk straight through the stone/wood (the b86 over-shrink bug).
+      const rad = tr.inst ? (tr.r * 0.45 + 0.4) : (tr.r + 0.35);
       const d = Math.hypot(nx - tr.x, nz - tr.z);
       if (d < rad) {
         const push = (rad - d);
