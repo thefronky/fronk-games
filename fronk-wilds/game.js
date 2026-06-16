@@ -2875,6 +2875,76 @@ function carrionUpdate(t, dt, night) {
 }
 window._carrion = () => CARRION.filter(f => f.grp.visible).length;   // debug/test hook
 
+// ── distant wildlife ── dark elk/stag shapes standing on the far ridgelines,
+// unreachable, so the valley reads as vast and ALIVE — the world doesn't stop
+// at the treeline. Cheap dark billboards on high far ground; they idle, amble a
+// few steps now and then, and fade out after dark. Backlit silhouettes at the
+// golden hour. A fixed small set (no pool churn).
+const _silTex = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const x = c.getContext('2d'); x.fillStyle = '#000';
+  // body
+  x.beginPath(); x.ellipse(30, 36, 16, 7, 0, 0, 7); x.fill();
+  // neck + head, raised
+  x.beginPath(); x.moveTo(42, 34); x.lineTo(48, 18); x.lineTo(54, 16); x.lineTo(55, 21);
+  x.lineTo(50, 23); x.lineTo(47, 36); x.closePath(); x.fill();
+  // four legs
+  x.fillRect(20, 41, 3, 16); x.fillRect(27, 42, 3, 15);
+  x.fillRect(36, 42, 3, 15); x.fillRect(42, 41, 3, 16);
+  // antlers — a couple of forked tines off the head
+  x.strokeStyle = '#000'; x.lineWidth = 2; x.beginPath();
+  x.moveTo(52, 16); x.lineTo(50, 8); x.moveTo(50, 11); x.lineTo(46, 9);
+  x.moveTo(54, 16); x.lineTo(57, 8); x.moveTo(56, 11); x.lineTo(60, 10); x.stroke();
+  const t = new THREE.CanvasTexture(c); return t;
+})();
+const _silGeo = new THREE.PlaneGeometry(4.2, 4.2);
+const _silhouettes = [];
+function _findRidgePoint() {
+  // sample far-out points, keep the highest few tries — silhouettes want a rim
+  let bx = 0, bz = 0, bh = -1;
+  for (let i = 0; i < 14; i++) {
+    const ang = Math.random() * Math.PI * 2, rad = 200 + Math.random() * 170;
+    const x = Math.cos(ang) * rad, z = Math.sin(ang) * rad;
+    if (Math.abs(x) > WORLD * 0.46 || Math.abs(z) > WORLD * 0.46) continue;
+    const h = heightAt(x, z);
+    if (h > bh) { bh = h; bx = x; bz = z; }
+  }
+  return { x: bx, z: bz, y: bh };
+}
+function buildSilhouettes() {
+  for (let i = 0; i < 7; i++) {
+    const mat = new THREE.MeshBasicMaterial({ map: _silTex, color: 0x141519,
+      transparent: true, opacity: 0.9, depthWrite: false });
+    const m = new THREE.Mesh(_silGeo, mat);
+    const p = _findRidgePoint();
+    m.position.set(p.x, p.y + 2.0, p.z);
+    m.userData = { home: p, ambleT: 4 + Math.random() * 12, dir: Math.random() * 6.28 };
+    scene.add(m); _silhouettes.push(m);
+  }
+}
+function silhouettesUpdate(t, dt, night) {
+  if (!_silhouettes.length) return;
+  const vis = Math.max(0, 1 - night * 1.4);          // fade out as night falls
+  for (const m of _silhouettes) {
+    m.material.opacity = 0.9 * vis;
+    m.visible = vis > 0.02;
+    if (!m.visible) continue;
+    // billboard yaw-only so it stays upright on the ridge
+    m.rotation.y = Math.atan2(camera.position.x - m.position.x, camera.position.z - m.position.z);
+    // a slow amble along the ridge every so often, kept on high ground
+    const u = m.userData; u.ambleT -= dt;
+    if (u.ambleT > 0 && u.ambleT < 2.5) {           // walking window
+      const nx = m.position.x + Math.sin(u.dir) * 0.7 * dt,
+            nz = m.position.z + Math.cos(u.dir) * 0.7 * dt;
+      const nh = heightAt(nx, nz);
+      if (nh > u.home.y - 6) { m.position.set(nx, nh + 2.0, nz); }
+    } else if (u.ambleT <= 0) { u.ambleT = 8 + Math.random() * 16; u.dir = Math.random() * 6.28; }
+    m.position.y += Math.sin(t * 0.6 + u.dir) * 0.0015;   // barely-there idle
+  }
+}
+window._silhouettes = () => _silhouettes.filter(m => m.visible).length;   // debug/test hook
+buildSilhouettes();   // stand them on the far ridges from the very first frame
+
 // ── things in the dark ── after nightfall, shapes you can't quite make out
 // lope past you and are gone. You don't know what they are or why. Unsettling.
 const _darters = [];
@@ -5916,6 +5986,7 @@ function tickBody() {
   updateFireflies(t, night);
   updateButterflies(dt, t);
   if (started) { updatePollen(t, dt, night); updateBirds(t, dt, night); updateDarters(dt, night); carrionUpdate(t, dt, night); }
+  silhouettesUpdate(t, dt, night);   // distant ridge wildlife — also alive during the title orbit
   corruptionUpdate(dt, t);
   updateMist(t, night);
   // flower trample: live player bends instantly; the wake (zw) trails and
