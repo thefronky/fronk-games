@@ -23,9 +23,9 @@ const WORLD = 860;            // square world size
 const WATER_Y = 2.1;          // lake level
 const EYE = 2.3;   // stand TALL — grass tops ~1.3m, so 1.7 read as wading chin-deep; this lifts you clearly above it
 const CFG = IS_TOUCH
-  ? { grass: 22000, trees: 2200, bushes: 380, rocks: 150, px: 2, shadow: 1536, segs: 230,
+  ? { grass: 30000, trees: 2200, bushes: 380, rocks: 150, px: 2, shadow: 1536, segs: 230,
       flowers: 2200, tufts: 1400, mushrooms: 260, bedFlowers: 1300 }
-  : { grass: 50000, trees: 4500, bushes: 620, rocks: 260, px: 2.5, shadow: 3072, segs: 360,
+  : { grass: 74000, trees: 4500, bushes: 620, rocks: 260, px: 2.5, shadow: 3072, segs: 360,
       flowers: 4000, tufts: 2600, mushrooms: 420, bedFlowers: 1900 };
 
 // ── THE MENAGERIE ─────────────────────────────────────────────────
@@ -608,15 +608,29 @@ const trampleUniform = { value: new THREE.Vector4(0, 0, 0, 26) };
                                                     // blades off pure black
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.uTime = windUniforms.uTime;
-    sh.vertexShader = 'uniform float uTime;\n' + sh.vertexShader.replace(
+    // ── grass shading + wind adapted from beyond-fable (MIT, © xikhar) ──
+    // root planted, tip free; a meadow-scale travelling wave + a per-blade
+    // flutter on its own clock (never a single periodic shake); blades CROUCH
+    // into a gust. Fragment deepens the planted-root shadow (fake AO) and lifts
+    // warm, sun-caught translucent tips — the golden-hour lushness.
+    sh.vertexShader = 'uniform float uTime;\nvarying float vGH;\n' + sh.vertexShader.replace(
       '#include <begin_vertex>',
       `#include <begin_vertex>
+       vGH = clamp(position.y / 1.1, 0.0, 1.0);
        float bendY = position.y * position.y * 0.62;
        float ph = instanceMatrix[3][0]*0.21 + instanceMatrix[3][2]*0.17;
-       // a traveling wind WAVE rolls across the meadow — visible bands of bend
        float wave = 0.72 + 0.5*sin(uTime*0.9 - instanceMatrix[3][0]*0.05 - instanceMatrix[3][2]*0.043);
-       transformed.x += (sin(uTime*1.9 + ph) + 0.4*sin(uTime*3.7 + ph*1.7)) * bendY * 0.55 * wave;
-       transformed.z += cos(uTime*1.4 + ph) * bendY * 0.38 * wave;`);
+       float swayX = (sin(uTime*1.9 + ph) + 0.4*sin(uTime*3.7 + ph*1.7)) * 0.55;
+       float swayZ = cos(uTime*1.4 + ph) * 0.38;
+       swayX += sin(uTime*5.3 + ph*2.7) * 0.10;            // fine flutter, own clock
+       transformed.x += swayX * bendY * wave;
+       transformed.z += swayZ * bendY * wave;
+       transformed.y -= abs(swayX) * bendY * 0.5 * wave;   // crouch into the gust`);
+    sh.fragmentShader = 'varying float vGH;\n' + sh.fragmentShader.replace(
+      '#include <dithering_fragment>',
+      `#include <dithering_fragment>
+       gl_FragColor.rgb *= mix(0.74, 1.0, vGH);               // deepen the planted-root shadow (fake AO)
+       gl_FragColor.rgb += vec3(0.13, 0.15, 0.05) * vGH * vGH;  // warm, sun-caught translucent tips`);
   };
   // REAL grass = density where you're standing. The field is a dense
   // ±R box that follows the player: blades that fall behind wrap
