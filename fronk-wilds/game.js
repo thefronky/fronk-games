@@ -5046,6 +5046,12 @@ function scorch(cx, cz, r) {
       const k = 1 - d / r;                            // soft falloff to the edge
       // ash at the heart, sand toward the rim — a real burned-out patch
       _scorchTmp.copy(_scorchSand).lerp(_scorchAsh, Math.max(0, k - 0.4) / 0.6 * 0.7);
+      // articulate the sand: a per-vertex grain (cheap hash) + a long dune ripple
+      // so the desert reads as drifted sand, not one flat tan sheet
+      const grain = (Math.sin(ix * 12.9898 + iz * 78.233) * 43758.5453) % 1;
+      const ripple = Math.sin(vx * 0.18 + vz * 0.07) * 0.5 + Math.sin(vx * 0.05 - vz * 0.21) * 0.5;
+      const tone = 1 + (Math.abs(grain) - 0.5) * 0.16 + ripple * 0.05;   // ±~10% lightness
+      _scorchTmp.multiplyScalar(tone);
       const j = (iz * stride + ix) * 3;
       const blend = Math.min(0.92, k * 1.3);
       arr[j]     += (_scorchTmp.r - arr[j])     * blend;
@@ -5117,16 +5123,16 @@ function cactusDawnCheck(night) {        // a new dawn after a burn → life ret
 window._cacti = () => _cacti.length;          // debug/test hook
 window._cactiPos = () => _cacti.map(c => [Math.round(c.position.x), Math.round(c.position.z)]);   // debug/test hook
 window._growCacti = () => growCacti();        // debug/test hook
-function fellTree(tr) {                           // char the instance down to a black stump, then it's gone
+function fellTree(tr) {                           // burned away to nothing — the ground left is flat desert
   scorch(tr.x, tr.z, 6 + (tr.sc || 1) * 3);       // a wide scar — burned forest becomes open desert
   if (!tr.inst) { tr._gone = true; tr.r = 0; tr.top = -999; return; }
   _mat4 = _mat4 || new THREE.Matrix4();
   _q0 = _q0 || new THREE.Quaternion();
-  const P = new THREE.Vector3(tr.x, tr.my, tr.z);
-  const S = new THREE.Vector3(tr.sc * 0.55, tr.sc * 0.16, tr.sc * 0.55);  // squat charred snag
-  tr.inst.setMatrixAt(tr.ii, _mat4.compose(P, _q0, S));
+  // collapse the instance to ZERO — no charred stump remains. A burned tree just
+  // GOES, leaving flat sand (Fronk: the desert should be a clean flat plane).
+  const S = new THREE.Vector3(0, 0, 0);
+  tr.inst.setMatrixAt(tr.ii, _mat4.compose(new THREE.Vector3(tr.x, -999, tr.z), _q0, S));
   tr.inst.instanceMatrix.needsUpdate = true;
-  if (tr.inst.setColorAt) { tr.inst.setColorAt(tr.ii, _charCol); tr.inst.instanceColor.needsUpdate = true; }
   tr._gone = true; tr.r = 0; tr.top = -999;       // no longer blocks / no longer climbable
 }
 let _mat4 = null, _q0 = null;
