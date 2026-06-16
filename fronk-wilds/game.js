@@ -443,6 +443,7 @@ let _groundColAttr = null, _groundSeg = 0;   // terrain color attr + vertex spac
 // burned ground registry — quantized cells the fire has turned to desert, so
 // the grass field knows to stop growing blades there (burned = bare sand).
 const _burned = new Set();
+const _burnedPts = [];            // flat [x,z,...] of burned cell centers (for cactus spawning)
 const _BURN_CELL = 5;
 function _burnKey(x, z) { return Math.floor(x / _BURN_CELL) * 100003 + Math.floor(z / _BURN_CELL); }
 function _isBurned(x, z) { return _burned.size > 0 && _burned.has(_burnKey(x, z)); }
@@ -4906,10 +4907,64 @@ function scorch(cx, cz, r) {
   // the blades already standing on this spot clear off within a moment
   for (let z = cz - r; z <= cz + r; z += _BURN_CELL)
     for (let x = cx - r; x <= cx + r; x += _BURN_CELL)
-      if (Math.hypot(x - cx, z - cz) <= r) _burned.add(_burnKey(x, z));
+      if (Math.hypot(x - cx, z - cz) <= r) {
+        const key = _burnKey(x, z);
+        if (!_burned.has(key)) { _burned.add(key); if (_burnedPts.length < 4000) _burnedPts.push(x, z); }
+      }
   _grassResweep = 8;
 }
 window._scars = () => _scorchCount;   // debug/test hook (count of scorch recolors)
+
+// ── cactus ── the day AFTER a fire, life comes back to the desert: saguaro-ish
+// cacti sprout from the burned sand at dawn. Procedural (CC0), bounded, spawned
+// only on burned cells that don't have one yet. A small hope after the burn.
+const _cactusMat = new THREE.MeshStandardMaterial({ color: 0x4f7d3e, roughness: 0.85, flatShading: true });
+const _cacti = [];
+const CACTUS_MAX = IS_TOUCH ? 28 : 48;
+const _cactusCells = new Set();
+function buildCactus() {
+  const g = new THREE.Group();
+  const h = 1.7 + Math.random() * 1.8;
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.27, h, 7), _cactusMat);
+  trunk.position.y = h / 2; g.add(trunk);
+  const cap = new THREE.Mesh(new THREE.SphereGeometry(0.2, 7, 5), _cactusMat); cap.position.y = h; g.add(cap);
+  const arms = (Math.random() * 3) | 0;          // 0-2 arms
+  for (let i = 0; i < arms; i++) {
+    const side = i % 2 ? 1 : -1, ay = h * (0.4 + Math.random() * 0.28);
+    const elbow = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.14, 0.55, 6), _cactusMat);
+    elbow.rotation.z = -side * 1.15; elbow.position.set(side * 0.28, ay, 0); g.add(elbow);
+    const up = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.12, 0.55, 6), _cactusMat);
+    up.position.set(side * 0.46, ay + 0.32, 0); g.add(up);
+    const tip = new THREE.Mesh(new THREE.SphereGeometry(0.11, 6, 5), _cactusMat);
+    tip.position.set(side * 0.46, ay + 0.58, 0); g.add(tip);
+  }
+  g.traverse(o => { if (o.isMesh) o.castShadow = true; });
+  g.rotation.y = Math.random() * 6.28;
+  return g;
+}
+function growCacti() {
+  if (!_burnedPts.length || _cacti.length >= CACTUS_MAX) return;
+  let added = 0;
+  for (let tries = 0; tries < 60 && _cacti.length < CACTUS_MAX && added < 10; tries++) {
+    const i = ((Math.random() * (_burnedPts.length / 2)) | 0) * 2;
+    const x = _burnedPts[i] + (Math.random() - 0.5) * 4, z = _burnedPts[i + 1] + (Math.random() - 0.5) * 4;
+    const ck = _burnKey(x, z);
+    if (_cactusCells.has(ck)) continue;
+    const y = heightAt(x, z);
+    if (y < WATER_Y + 1 || y > 22) continue;
+    _cactusCells.add(ck);
+    const c = buildCactus(); c.position.set(x, y, z); scene.add(c); _cacti.push(c);
+    added++;
+  }
+}
+let _lastNight = 0;
+function cactusDawnCheck(night) {        // a new dawn after a burn → life returns
+  if (_lastNight > 0.55 && night < 0.2) growCacti();
+  _lastNight = night;
+}
+window._cacti = () => _cacti.length;          // debug/test hook
+window._cactiPos = () => _cacti.map(c => [Math.round(c.position.x), Math.round(c.position.z)]);   // debug/test hook
+window._growCacti = () => growCacti();        // debug/test hook
 function fellTree(tr) {                           // char the instance down to a black stump, then it's gone
   scorch(tr.x, tr.z, 6 + (tr.sc || 1) * 3);       // a wide scar — burned forest becomes open desert
   if (!tr.inst) { tr._gone = true; tr.r = 0; tr.top = -999; return; }
@@ -5183,6 +5238,7 @@ function weatherUpdate(t, dt, night) {
   if (_rainLevel > 0.4) _rainWasUp = true;
   if (_rainWasUp && _rainLevel < 0.18) { _rainWasUp = false; if (night < 0.35 && tripT <= 0) _rainbowT = 26; }
   rainbowUpdate(dt, night);
+  cactusDawnCheck(night);   // cacti sprout from burned sand at the next dawn
 }
 // ── rainbow ── a ROYGBIV arc that rises opposite the sun for ~25s after a
 // daytime shower passes. One ring mesh, vertex-coloured by radius; faces the
