@@ -174,6 +174,17 @@ export class AudioEngine {
     const rlp = C.createBiquadFilter(); rlp.type = 'lowpass'; rlp.frequency.value = 4200;
     rs.connect(rhp).connect(rlp).connect(this.rainGain).connect(this.master);
 
+    // ── fire bed ── a low roaring rumble for burning trees; gain rides s.fire
+    // (how much is ablaze / how near). Heavily lowpassed so it reads as a fire
+    // ROARING in the distance, not a campfire in your ear. Crackle pops are
+    // scheduled separately in update().
+    this.fireGain = C.createGain(); this.fireGain.gain.value = 0;
+    const fs = this._noiseLoop();
+    const flp = C.createBiquadFilter(); flp.type = 'lowpass'; flp.frequency.value = 380; flp.Q.value = 0.6;
+    const flp2 = C.createBiquadFilter(); flp2.type = 'lowpass'; flp2.frequency.value = 900;
+    fs.connect(flp2).connect(flp).connect(this.fireGain).connect(this.master);
+    this._fireCrackleT = 0;
+
     // ── danger drone (predators) — detuned three-voice cluster, plus a
     // breath of bandpassed noise so it sounds like something breathing
     this.dangerGain = C.createGain(); this.dangerGain.gain.value = 0;
@@ -1089,30 +1100,77 @@ export class AudioEngine {
     // dB-below-max: speed=1 → 0 dB (full), speed=0.4 stalk → ~ -16 dB.
     const lvl = Math.pow(10, (-(1 - sp) * 26) / 20);
     const sprintMix = Math.max(0, (sp - 0.6) / 0.4);   // 0 below jog, 1 at full sprint
-    const burst = (v, dur, fHz, type = 'lowpass', q = 0.7) => {
+    const jit = () => 0.85 + Math.random() * 0.3;      // per-step variation so it's not machine-gun
+    // ── heel thump: a short pitch-dropping body impact — the WEIGHT landing.
+    // This low thud is what made the old single-noise step read as a tap, not
+    // a boot. (No thump on sand — that's a soft shuffle.)
+    const thump = (v, f0, f1, dur) => {
+      const o = C.createOscillator(); o.type = 'sine';
+      o.frequency.setValueAtTime(f0, t);
+      o.frequency.exponentialRampToValueAtTime(f1, t + dur);
+      const g = C.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.linearRampToValueAtTime(v * lvl, t + 0.006);
+      g.gain.exponentialRampToValueAtTime(0.0008, t + dur);
+      o.connect(g).connect(out); o.start(t); o.stop(t + dur + 0.03);
+    };
+    // ── ground texture grain: the crush/scuff/shuffle, with its own onset (when)
+    // and attack so heel-strike and toe-off are two distinct micro-hits.
+    const grain = (v, dur, fHz, type = 'bandpass', q = 0.8, when = 0, atk = 0.004) => {
       const src = C.createBufferSource(); src.buffer = this._shotNoise;
       const f = C.createBiquadFilter(); f.type = type;
       f.frequency.value = fHz; f.Q.value = q;
       const g = C.createGain();
-      g.gain.setValueAtTime(v * lvl, t);
-      g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+      g.gain.setValueAtTime(0.0001, t + when);
+      g.gain.linearRampToValueAtTime(v * lvl, t + when + atk);
+      g.gain.exponentialRampToValueAtTime(0.0008, t + when + dur);
       src.connect(f).connect(g).connect(out);
-      src.start(t, Math.random() * 0.6, dur + 0.02);
+      src.start(t + when, Math.random() * 0.5, dur + 0.02);
     };
-    if (this._ground === 'rock') {        // sharper knock + tiny high click
-      burst(0.3, 0.05, 850 + Math.random() * 120, 'bandpass', 1.5);
-      burst(0.08, 0.02, 3400, 'bandpass', 2);
-    } else if (this._ground === 'sand') { // soft shuffle — longer, quieter
-      burst(0.22, 0.11, 460 + Math.random() * 90);
-    } else {                              // grass: the soft body thud
-      burst(0.34, 0.07, 250 + Math.random() * 130);
-      // a run is richer: a hard heel down low + a scuff of grit up top,
-      // mixed in only as the gait crosses into a sprint.
-      if (sprintMix > 0.01) {
-        burst(0.30 * sprintMix, 0.05, 120 + Math.random() * 40);          // hard heel
-        burst(0.10 * sprintMix, 0.06, 1600 + Math.random() * 700, 'highpass', 0.8); // grit/scuff
+    if (this._ground === 'rock') {              // boot on stone: a hard knock + click + toe scrape
+      thump(0.14, 150, 85, 0.045);
+      grain(0.20, 0.04, 1700 + Math.random() * 500, 'bandpass', 1.4);
+      grain(0.10, 0.03, 4200, 'highpass', 0.7, 0.018);
+      grain(0.05 * jit(), 0.025, 2600, 'bandpass', 2, 0.05);            // toe-off
+    } else if (this._ground === 'sand') {       // soft shuffle: a crush down, then a push-off, no thud
+      grain(0.18, 0.13, 520 + Math.random() * 120, 'lowpass', 0.6);
+      grain(0.10 * jit(), 0.10, 1100 + Math.random() * 200, 'bandpass', 0.5, 0.04, 0.02);
+    } else {                                    // grass/dirt: heel thud + grass crush + grassy rustle + toe
+      thump(0.22 * jit(), 118 + Math.random() * 26, 62, 0.07);
+      grain(0.15, 0.06, 900 + Math.random() * 300, 'bandpass', 0.7, 0.004, 0.006);   // dirt crush
+      grain(0.09, 0.05, 3000 + Math.random() * 900, 'highpass', 0.6, 0.02, 0.005);   // grassy rustle/grit
+      grain(0.06 * jit(), 0.04, 1400 + Math.random() * 400, 'bandpass', 1.2, 0.07);  // toe-off rustle
+      if (sprintMix > 0.01) {                   // a run lands heavier + scuffs harder
+        thump(0.16 * sprintMix, 95, 55, 0.06);
+        grain(0.10 * sprintMix, 0.05, 2200 + Math.random() * 700, 'highpass', 0.7, 0, 0.004);
       }
     }
+  }
+  // a fire CATCHING — a soft low whoomph (replaces the old bell-like 'wood' bing)
+  fireCatch() {
+    if (!this.started) return;
+    const C = this.ctx, t = C.currentTime;
+    const src = C.createBufferSource(); src.buffer = this._shotNoise;
+    const f = C.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 520; f.Q.value = 0.7;
+    const g = C.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(0.10, t + 0.04);     // a swelling whoomph, not a tick
+    g.gain.exponentialRampToValueAtTime(0.0008, t + 0.34);
+    src.connect(f).connect(g).connect(this.foleyBus);
+    src.start(t, Math.random() * 0.5, 0.4);
+  }
+  // one fire crackle pop — a short filtered noise tick; density/brightness set by the bed
+  _fireCrackle(v) {
+    const C = this.ctx, t = C.currentTime;
+    const src = C.createBufferSource(); src.buffer = this._shotNoise;
+    const f = C.createBiquadFilter(); f.type = 'bandpass';
+    f.frequency.value = 800 + Math.random() * 2400; f.Q.value = 3 + Math.random() * 3;
+    const g = C.createGain();
+    const amp = (0.015 + Math.random() * 0.04) * Math.min(1, 0.4 + v);
+    g.gain.setValueAtTime(amp, t);
+    g.gain.exponentialRampToValueAtTime(0.0006, t + 0.03 + Math.random() * 0.06);
+    src.connect(f).connect(g).connect(this.master);
+    src.start(t, Math.random() * 0.5, 0.14);
   }
   _cricket() {
     const C = this.ctx, t = C.currentTime;
@@ -1320,6 +1378,19 @@ export class AudioEngine {
 
     // rain hiss tracks the passing shower (s.rain 0..1)
     this.rainGain.gain.setTargetAtTime(Math.max(0, Math.min(1, s.rain || 0)) * 0.13, t, 0.7);
+
+    // fire: a distant roar that grows with how much is ablaze / how near (s.fire
+    // 0..1). Kept gentle so it never gets obnoxious. Crackle pops on top, denser
+    // as it builds.
+    const fire = Math.max(0, Math.min(1, s.fire || 0));
+    this.fireGain.gain.setTargetAtTime(fire * 0.11, t, 0.6);
+    if (fire > 0.02) {
+      this._fireCrackleT -= dt;
+      if (this._fireCrackleT <= 0) {
+        this._fireCrackleT = 0.05 + Math.random() * (0.3 - fire * 0.2);   // faster when bigger
+        this._fireCrackle(fire);
+      }
+    }
 
     // danger by wolf proximity (starts at 34m, max at 6m)
     const dz = Math.max(0, Math.min(1, 1 - (s.wolfDist - 6) / 28));

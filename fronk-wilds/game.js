@@ -4835,9 +4835,13 @@ function hurtPlayer(dmg) {
 // can sweep a whole grove to ash. Bounded by MAX_TREEFIRE for the phone.
 const TREEFIRES = [];
 const MAX_TREEFIRE = IS_TOUCH ? 40 : 90;   // a true wildfire — one tree can take the whole forest
-const _fmA = new THREE.MeshBasicMaterial({ color: 0xff6a18, transparent: true, opacity: 0.95 });
-const _fmB = new THREE.MeshBasicMaterial({ color: 0xffab3a, transparent: true, opacity: 0.95 });
-const _fmC = new THREE.MeshBasicMaterial({ color: 0xffe7a0, transparent: true, opacity: 0.95 });
+// additive so overlapping flames BLOOM into a warm glow (reads as a roaring
+// fire / heat haze, not flat orange cutouts) — the bloom post pass feeds on the
+// bright cream cores. Opacity kept moderate so a whole burning forest glows
+// without blowing out to obnoxious white.
+const _fmA = new THREE.MeshBasicMaterial({ color: 0xff6a18, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false });
+const _fmB = new THREE.MeshBasicMaterial({ color: 0xffab3a, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false });
+const _fmC = new THREE.MeshBasicMaterial({ color: 0xffe7a0, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false });
 const _charCol = new THREE.Color(0x161009);
 function igniteTree(tr) {
   if (!tr || tr._burning || tr._gone || tr.top === undefined || !tr.inst) return false;
@@ -4865,7 +4869,7 @@ function igniteTree(tr) {
     light = new THREE.PointLight(0xff7a2a, 9, 22, 1.8);
     light.position.set(tr.x, gy + h * 0.5, tr.z); scene.add(light);
   }
-  if (audio.impact) audio.impact('wood', 0.4);
+  if (audio.fireCatch) audio.fireCatch();   // a soft whoomph as it catches (not the old bell 'bing')
   TREEFIRES.push({ tr, grp, light, t: 0, dur: 5.5 + Math.random() * 2.5,
                    spreadAt: 0.7 + Math.random() * 0.6, spreadCd: 0, gy, h });   // catches FAST, then creeps to neighbours
   return true;
@@ -4993,11 +4997,13 @@ function treeFireUpdate(dt) {
     f.grp.scale.y = 0.2 + 0.8 * grow;
     for (const m of f.grp.children) {
       const ph = m.userData.ph || 0;
-      m.rotation.z = Math.sin(t * 9 + ph) * 0.18;
-      const fl = 1 + Math.sin(t * 16 + ph * 2.3) * 0.16 + Math.sin(t * 27 + ph) * 0.08;
-      m.scale.y = m.scale.x * (1.4 * fl);
+      m.rotation.z = Math.sin(t * 9 + ph) * 0.24;
+      // taller, livelier licking flames so a burn reads as a ROARING fire (esp.
+      // from a distance) rather than a static orange cluster
+      const fl = 1 + Math.sin(t * 17 + ph * 2.3) * 0.26 + Math.sin(t * 29 + ph) * 0.14;
+      m.scale.y = m.scale.x * (2.0 * fl);
     }
-    if (f.light) f.light.intensity = 8 + Math.sin(t * 18 + f.gy) * 2.5;
+    if (f.light) f.light.intensity = 9 + Math.sin(t * 18 + f.gy) * 3.5;   // warmer, livelier glow
     // a creeping FRONT, not a sudden burst: every ~1s an actively-burning
     // tree reaches to the single NEAREST unburnt neighbour in canopy-touching
     // range, so the flame flows tree-to-tree and a whole grove catches over
@@ -6571,11 +6577,21 @@ function tickBody() {
     let exTarget = sprinting ? 1 : (_moveLvl > 0.45 ? 0.5 : 0);
     if (drawing && drawT > 0.95) exTarget = Math.max(exTarget, 0.35 + Math.min(0.5, holdT * 0.12));
     breathLoad += (exTarget - breathLoad) * Math.min(1, dt * (exTarget > breathLoad ? 0.7 : 0.3));
+    // fire roar level: grows with how many trees are ablaze, scaled by how near
+    // the nearest one is. Floors at a low murmur when far (a distant roar), and
+    // it caps so a whole forest fire never gets obnoxious.
+    let fireLvl = 0;
+    if (TREEFIRES.length) {
+      let nd = 1e9;
+      for (const f of TREEFIRES) { const d = Math.hypot(player.x - f.tr.x, player.z - f.tr.z); if (d < nd) nd = d; }
+      const prox = Math.max(0.25, Math.min(1, 1 - (nd - 25) / 170));   // near=1, far floors at 0.25
+      fireLvl = Math.min(1, TREEFIRES.length / 8) * prox;
+    }
     audio.update(dt, {
       moving: !!(mx || mz), sprint: sprinting, _moveLvl,
       wolfDist, lakeDist: Math.hypot(player.x - 70, player.z + 90),
       night: window._night || 0, hp: player.hp, breath: breathLoad,
-      px: player.x, pz: player.z, yaw: player.yaw, rain: _rainLevel,
+      px: player.x, pz: player.z, yaw: player.yaw, rain: _rainLevel, fire: fireLvl,
     });
   }
 
