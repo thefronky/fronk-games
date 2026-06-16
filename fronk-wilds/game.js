@@ -650,7 +650,10 @@ const trampleUniform = { value: new THREE.Vector4(0, 0, 0, 26) };
     const pc = window._player || { x: 0, z: 26 };
     const dEdge = Math.max(Math.abs(g.x - pc.x), Math.abs(g.z - pc.z));
     const fade = Math.max(0, Math.min(1, (R - dEdge) / 9));
-    if (y < WATER_Y + 0.5 || y > 18 || fade <= 0 || _isBurned(g.x, g.z)) { S.set(0, 0, 0); }
+    // grass grows on ALL the green ground — the green band runs up to ~24
+    // (terrain only lerps to rock 19→26), so the old y>18 cut left higher green
+    // slopes bare. Cover the whole green band; rock/snow (>24) and water stay clear.
+    if (y < WATER_Y + 0.5 || y > 24 || fade <= 0 || _isBurned(g.x, g.z)) { S.set(0, 0, 0); }
     else S.set(g.s * fade, g.s * g.sy * fade, g.s * fade);
     P.set(g.x, y - 0.05, g.z);
     E.set(g.tx, g.rot, g.tz); Q.setFromEuler(E);
