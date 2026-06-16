@@ -1798,20 +1798,27 @@ const clouds = [];
   const geo = new THREE.IcosahedronGeometry(1, 0);
   const mat = new THREE.MeshLambertMaterial({ color: 0xf0dcc2, transparent: true, opacity: 0.88 });
   window._cloudMat = mat;
-  for (let i = 0; i < 10; i++) {
-    const grp = new THREE.Group();
-    const puffs = 6 + (Math.random() * 4 | 0);
-    for (let p = 0; p < puffs; p++) {
-      const m = new THREE.Mesh(geo, mat);
-      // flat-bottomed cumulus: puffs sit ON a base line, squashed
+  // clouds scattered across the WHOLE map, at mixed heights — some hang high,
+  // others come DOWN low and drift over the valley/hilltops. Each cloud's puffs
+  // are merged into ONE mesh so the higher count stays cheap on the phone.
+  const N = IS_TOUCH ? 20 : 30;
+  for (let i = 0; i < N; i++) {
+    const puffs = [];
+    const n = 6 + (Math.random() * 5 | 0);
+    for (let p = 0; p < n; p++) {
       const s = 6 + Math.random() * 11;
-      m.position.set((Math.random() - 0.5) * 40, s * 0.28 + Math.random() * 3,
-                     (Math.random() - 0.5) * 16);
-      m.scale.set(s, s * 0.55, s * 0.8);
-      grp.add(m);
+      const g = geo.clone();
+      g.scale(s, s * 0.55, s * 0.8);                 // flat-bottomed cumulus
+      g.translate((Math.random() - 0.5) * 46, s * 0.28 + Math.random() * 3, (Math.random() - 0.5) * 18);
+      puffs.push(g);
     }
-    grp.position.set((Math.random() - 0.5) * 1400, 110 + Math.random() * 70, (Math.random() - 0.5) * 1400);
-    grp.userData.v = 0.8 + Math.random() * 1.2;
+    const grp = new THREE.Group();
+    grp.add(new THREE.Mesh(mergeGeoms(puffs), mat));
+    const low = Math.random() < 0.45;                // ~45% are LOW, hanging over the land
+    grp.position.set((Math.random() - 0.5) * 1500,
+                     low ? 40 + Math.random() * 34 : 110 + Math.random() * 70,
+                     (Math.random() - 0.5) * 1500);
+    grp.userData.v = 0.6 + Math.random() * 1.3;
     scene.add(grp);
     clouds.push(grp);
   }
@@ -6248,7 +6255,7 @@ function tickBody() {
   const _warpTarget = tripT > 0 ? (tripLevel >= 2 ? 1.15 : 0.9) * _tripTreeEnv : 0;
   tripUniforms.uTrip.value += (_warpTarget - tripUniforms.uTrip.value) * Math.min(1, dt * 1.1);
   skyUniforms.uT.value = t;
-  for (const c of clouds) { c.position.x += c.userData.v * dt * 2; if (c.position.x > 800) c.position.x = -800; }
+  for (const c of clouds) { c.position.x += c.userData.v * dt * 2; if (c.position.x > 1500) c.position.x = -1500; }
 
   // ── day/night cycle — night owns ~40% of the loop ──
   // time-warp: days drift long and slow, the dark falls (and passes) faster
