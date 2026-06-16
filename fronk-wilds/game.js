@@ -537,20 +537,60 @@ let _grassResweep = 0;   // frames of full-field grass reblade after a burn (cle
 const waterUniforms = { uTime: { value: 0 } };
 {
   const m = new THREE.MeshStandardMaterial({
-    color: 0x2e5a62, transparent: true, opacity: 0.8,
-    roughness: 0.28, metalness: 0.12,
+    color: 0x2e5a62, transparent: true, opacity: 0.85,
+    roughness: 0.35, metalness: 0.0,
   });
+  m.envMapIntensity = 0.3;   // the warm IBL was washing the lake pale-tan — let the water colour read
+  // ── water shading adapted from beyond-fable (MIT © xikhar), reimplemented:
+  // depth-based shallow→deep colour + a foamy shoreline, a Fresnel sky
+  // reflection (live sun/night shared from skyUniforms) and a tight sun sparkle.
   m.onBeforeCompile = (sh) => {
     sh.uniforms.uTime = waterUniforms.uTime;
-    sh.vertexShader = 'uniform float uTime;\n' + sh.vertexShader.replace(
-      '#include <begin_vertex>',
+    sh.uniforms.uSunDir = skyUniforms.sunDir;     // shared live uniforms — free
+    sh.uniforms.uNight = skyUniforms.night;
+    sh.vertexShader = 'uniform float uTime;\nattribute float depth;\nvarying float vDepth;\nvarying vec3 vWP;\n'
+      + sh.vertexShader.replace('#include <begin_vertex>',
       `#include <begin_vertex>
-       transformed.z += sin(position.x*0.22 + uTime*1.7)*0.14
-                      + cos(position.y*0.31 + uTime*1.3)*0.11;`);
+       transformed.z += sin(position.x*0.22 + uTime*1.7)*0.14 + cos(position.y*0.31 + uTime*1.3)*0.11;
+       vDepth = depth;
+       vWP = (modelMatrix * vec4(position, 1.0)).xyz;`);
+    sh.fragmentShader = `uniform float uTime; uniform vec3 uSunDir; uniform float uNight;
+      varying float vDepth; varying vec3 vWP;
+      float wh31(vec3 p){ return fract(sin(dot(p, vec3(127.1,311.7,74.7)))*43758.5453); }
+      float wvn(vec3 p){ vec3 i=floor(p),f=fract(p); f=f*f*(3.0-2.0*f);
+        return mix(mix(mix(wh31(i),wh31(i+vec3(1,0,0)),f.x),mix(wh31(i+vec3(0,1,0)),wh31(i+vec3(1,1,0)),f.x),f.y),
+                   mix(mix(wh31(i+vec3(0,0,1)),wh31(i+vec3(1,0,1)),f.x),mix(wh31(i+vec3(0,1,1)),wh31(i+vec3(1,1,1)),f.x),f.y),f.z); }
+      float wfbm(vec3 p){ float a=0.6,s=0.0; for(int k=0;k<2;k++){ s+=a*wvn(p); p*=2.1; a*=0.5; } return s; }
+      ` + sh.fragmentShader
+      .replace('#include <color_fragment>',
+      `#include <color_fragment>
+       float dn = clamp(vDepth/7.0, 0.0, 1.0);
+       diffuseColor.rgb = mix(vec3(0.20,0.40,0.42), vec3(0.04,0.14,0.20), dn);   // mid-shallow→deep (both watery)
+       // a THIN foamy shoreline only — gated OFF where depth<=0 so it never washes the whole sheet
+       float foam = smoothstep(0.7, 0.06, vDepth) * step(0.05, vDepth)
+                    * (0.5 + 0.5*sin(vDepth*9.0 - uTime*2.2))
+                    * smoothstep(0.5, 0.95, wfbm(vWP*0.7 + vec3(uTime*0.3)));
+       diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.90,0.95,0.98), clamp(foam,0.0,1.0)*0.8);`)
+      .replace('#include <dithering_fragment>',
+      `#include <dithering_fragment>
+       vec3 V = normalize(cameraPosition - vWP);
+       float fres = mix(0.06, 0.7, pow(1.0 - max(V.y, 0.0), 5.0));            // Schlick sky reflection (gentle)
+       vec3 skyCol = mix(vec3(0.55,0.66,0.80), vec3(0.04,0.06,0.12), uNight);
+       gl_FragColor.rgb = mix(gl_FragColor.rgb, skyCol, fres*0.4);
+       vec3 Hh = normalize(V + uSunDir);                                       // tight sun sparkle
+       gl_FragColor.rgb += vec3(1.0,0.85,0.6) * pow(max(Hh.y,0.0), 120.0) * (1.0 - uNight) * 0.8;`);
   };
-  // lake-local plane (a world-sized sheet pokes out past the terrain
-  // rim and reads as a black band on the horizon)
-  const w = new THREE.Mesh(new THREE.PlaneGeometry(620, 620, 56, 56), m);
+  // lake-local plane (a world-sized sheet pokes out past the terrain rim and
+  // reads as a band on the horizon). Per-vertex DEPTH = how far the lakebed sits
+  // below the surface here — drives the shallow→deep colour and shoreline foam.
+  const wgeo = new THREE.PlaneGeometry(620, 620, 56, 56);
+  {
+    const wp = wgeo.attributes.position, dep = new Float32Array(wp.count);
+    for (let i = 0; i < wp.count; i++)             // local (lx,ly) → world (70+lx, -90-ly)
+      dep[i] = WATER_Y - heightAt(70 + wp.getX(i), -90 - wp.getY(i));
+    wgeo.setAttribute('depth', new THREE.BufferAttribute(dep, 1));
+  }
+  const w = new THREE.Mesh(wgeo, m);
   w.rotation.x = -Math.PI / 2;
   w.position.set(70, WATER_Y, -90);
   scene.add(w);
