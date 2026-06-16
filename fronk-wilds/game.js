@@ -4202,6 +4202,8 @@ let _moveLvl = 0;   // 0..1 gait level — drives footstep audio + camera head-b
 let breathLoad = 0; // 0..1 exertion — rises running / holding a draw, recovers at rest
 let _landDip = 0;   // camera knee-bend on landing, decays back up
 let _dustStepT = 0;   // sprint-dust footfall cooldown
+let _cloudCover = 0;   // 0..1 passing-cloud dimming (debug-readable)
+window._cloudCover = () => _cloudCover;   // debug/test hook
 let _curGround = 'grass';   // footstep material under the player
 let tripT = 0;      // seconds left of a mushroom trip (trippy visuals + moon-jump)
 let tripLevel = 0;  // 0=sober, 1=jump+vibrant, 2=animals bounce+higher+bullet arrows, 3=cloud-climb
@@ -5880,6 +5882,19 @@ function tickBody() {
   hemi.intensity = (0.52 - night * 0.08) * (1 - dawn * 0.18);
   if ('environmentIntensity' in scene) scene.environmentIntensity = 0.88 - night * 0.32;
   renderer.toneMappingExposure = 1.14 + night * 0.28;
+  // ── passing cloud shadows ── a slow drift of unseen cloud over the sun, so
+  // the golden-hour light BREATHES: the valley dims as a cloud crosses, then
+  // warms back. Two slow sines, squared so it's clear most of the time with the
+  // occasional swell. Day only, and off during the trip (which owns the grade).
+  {
+    const cc = Math.max(0, Math.sin(t * 0.06) * 0.6 + Math.sin(t * 0.025 + 1.3) * 0.4);
+    const cover = cc * cc * (1 - night) * (tripT > 0 ? 0 : 1) * 0.55;
+    _cloudCover = cover;
+    sun.intensity *= 1 - cover * 0.72;
+    hemi.intensity *= 1 - cover * 0.28;
+    if ('environmentIntensity' in scene) scene.environmentIntensity *= 1 - cover * 0.3;
+    renderer.toneMappingExposure += cover * 0.05;   // lift a touch so shadows don't crush to mud
+  }
   // your carried lantern — a STRONG warm pool (~20-70ft) with a live flicker;
   // beyond it, the dark. Faint by day, the hero light after dark.
   const flick = 1 + Math.sin(t * 13) * 0.05 + Math.sin(t * 27) * 0.03;
