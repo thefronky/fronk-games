@@ -3485,6 +3485,17 @@ function animalUpdate(a, dt) {
   const dx = player.x - p.x, dz = player.z - p.z;
   const dist = Math.hypot(dx, dz);
 
+  // ── on fire ── a fire arrow set it alight; it burns down (~0.45 hp/s) with a
+  // visible flame until it dies or the burn runs out. (Spiders just vanish to fire.)
+  if (a.burnT > 0 && !a.cfg.spiderish) {
+    a.burnT -= dt;
+    a.hp -= dt * 0.45;
+    updateAnimalFlame(a);
+    if ((a._burnFx = (a._burnFx || 0) - dt) <= 0) { a._burnFx = 0.15; if (audio._fireCrackle) audio._fireCrackle(0.5); }
+    if (a.hp <= 0) { clearAnimalFlame(a); killAnimal(a, true); return; }
+    if (a.burnT <= 0) clearAnimalFlame(a);
+  }
+
   // kill-feel: a charging bull thundering past inside ~3m rattles the
   // camera. dist>=2.8 = it brushed by; attackCd>0 = inside but jaws shut.
   if (a.cfg.territorial && a.aggro && a.state !== 'warn') {
@@ -4111,6 +4122,7 @@ function gutCarcass(a) {
 window._kill = (a) => killAnimal(a);   // debug/test hook
 function killAnimal(a, suffered = false) {
   a.dead = true; a.t = 75;   // carcasses linger — long enough for scavengers
+  if (a._flame) { a.obj.remove(a._flame); a._flame = null; }   // the fire goes out with it
   a.suffered = suffered || !!a.bleeding || a.state === 'wounded';
   setAnim(a, 'Death', true);
   if (a.cfg.bearish) { a.obj.rotation.z = 1.35; a.obj.rotation.x = 0;   // the bear goes down on its side
@@ -4872,6 +4884,27 @@ const _fmA = new THREE.MeshBasicMaterial({ color: 0xff6a18, transparent: true, o
 const _fmB = new THREE.MeshBasicMaterial({ color: 0xffab3a, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false });
 const _fmC = new THREE.MeshBasicMaterial({ color: 0xffe7a0, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false });
 const _charCol = new THREE.Color(0x161009);
+// a small flame riding a burning animal (child of its obj, so it follows). Sized
+// to the body via cfg.r; reuses the tree flame geo/additive mats.
+function updateAnimalFlame(a) {
+  if (!a._flame) {
+    const g = new THREE.Group();
+    const r = (a.cfg.r || 0.6);
+    for (let i = 0; i < 4; i++) {
+      const f = new THREE.Mesh(i < 2 ? flameGeoB : flameGeoC, i ? _fmB : _fmA);
+      f.position.set((Math.random() - 0.5) * r * 1.4, r * 0.6 + i * r * 0.5, (Math.random() - 0.5) * r * 1.4);
+      f.userData.ph = i * 1.3; g.add(f);
+    }
+    a._flame = g; a.obj.add(g);
+  }
+  const t = clock.elapsedTime;
+  for (const f of a._flame.children) {
+    const ph = f.userData.ph || 0;
+    f.scale.y = 1.1 + 0.6 * Math.sin(t * 17 + ph);
+    f.rotation.z = Math.sin(t * 9 + ph) * 0.22;
+  }
+}
+function clearAnimalFlame(a) { if (a._flame) { a.obj.remove(a._flame); a._flame = null; } }
 function igniteTree(tr) {
   if (!tr || tr._burning || tr._gone || tr.top === undefined || !tr.inst) return false;
   if (TREEFIRES.length >= MAX_TREEFIRE) return false;
@@ -5485,6 +5518,9 @@ function arrowUpdate(dt) {
         // kill-feel: flesh always answers — a puff of blood at the wound
         bloodPuff(a.m.position.x, a.m.position.y, a.m.position.z);
         juiceT = Math.max(juiceT, 0.04);          // flesh hit: brief hitstop
+        // a FIRE arrow sets the animal ALIGHT — it burns down over ~13s (refreshed
+        // each hit). A bear takes ~3 fire hits + the burn (~20s) to drop. Sensible.
+        if (a.fire && !an.cfg.spiderish) an.burnT = Math.max(an.burnT || 0, 13);
         if (an.hp <= 0) {
           juiceT = 0.09; fovPunchT = PUNCH_DUR;   // lethal: the world holds its breath
           killAnimal(an);
