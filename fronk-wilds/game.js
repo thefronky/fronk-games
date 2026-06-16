@@ -5179,10 +5179,51 @@ function weatherUpdate(t, dt, night) {
     scene.background.copy(scene.fog.color);
     scene.fog.far -= k * 90;   // closes the world in a touch
   }
+  // rainbow: as a shower CLEARS in daylight, a bow arcs up opposite the sun
+  if (_rainLevel > 0.4) _rainWasUp = true;
+  if (_rainWasUp && _rainLevel < 0.18) { _rainWasUp = false; if (night < 0.35 && tripT <= 0) _rainbowT = 26; }
+  rainbowUpdate(dt, night);
+}
+// ── rainbow ── a ROYGBIV arc that rises opposite the sun for ~25s after a
+// daytime shower passes. One ring mesh, vertex-coloured by radius; faces the
+// player, fog-immune so it reads clean in the far sky. Pure delight.
+let _rainbow = null, _rainbowLevel = 0, _rainbowT = 0, _rainWasUp = false;
+function buildRainbow() {
+  const geo = new THREE.RingGeometry(0.74, 1.0, 96, 1, 0, Math.PI);
+  const pos = geo.attributes.position, n = pos.count;
+  const col = new Float32Array(n * 3), c = new THREE.Color();
+  for (let i = 0; i < n; i++) {
+    const rad = Math.hypot(pos.getX(i), pos.getY(i));
+    const u = Math.max(0, Math.min(1, (rad - 0.74) / 0.26));   // 0 inner(violet) → 1 outer(red)
+    c.setHSL(0.78 * u, 0.95, 0.56);                            // violet(0.78)→red(0) sweep via hue
+    col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  const mat = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true,
+    opacity: 0, side: THREE.DoubleSide, depthWrite: false, fog: false });
+  _rainbow = new THREE.Mesh(geo, mat); _rainbow.frustumCulled = false; _rainbow.visible = false;
+  _rainbow.scale.setScalar(190); scene.add(_rainbow);
+}
+function rainbowUpdate(dt, night) {
+  if (!_rainbow) return;
+  if (_rainbowT > 0) _rainbowT -= dt;
+  const target = (_rainbowT > 0 && night < 0.4 && tripT <= 0) ? 1 : 0;
+  _rainbowLevel += (target - _rainbowLevel) * Math.min(1, dt * 0.4);
+  _rainbow.visible = _rainbowLevel > 0.01;
+  if (!_rainbow.visible) return;
+  _rainbow.material.opacity = 0.62 * _rainbowLevel;
+  // place opposite the sun, base near the horizon, arcing up over the far valley
+  const hx = -_sunDir.x, hz = -_sunDir.z, hl = Math.hypot(hx, hz) || 1;
+  const cx = player.x + (hx / hl) * 340, cz = player.z + (hz / hl) * 340;
+  _rainbow.position.set(cx, 3, cz);
+  _rainbow.rotation.y = Math.atan2(player.x - cx, player.z - cz);   // face the player
 }
 window._rain = () => _rainLevel;                       // debug/test hook
+window._rainbow = () => _rainbowLevel;                 // debug/test hook
+window._sunDir = () => [_sunDir.x, _sunDir.y, _sunDir.z];   // debug/test hook
 window._forceRain = () => { _rainDur = 40; _rainTarget = 0.8; _rainCd = 0; };   // debug/test hook
-buildRain();
+window._forceRainbow = () => { _rainbowT = 26; };      // debug/test hook
+buildRain(); buildRainbow();
 
 function loose() {
   // a real press always looses a shot — even a quick tap (raiseT confirms the
