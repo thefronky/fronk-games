@@ -21,7 +21,7 @@ window._audio = audio;
 const IS_TOUCH = matchMedia('(pointer: coarse)').matches;
 const WORLD = 860;            // square world size
 const WATER_Y = 2.1;          // lake level
-const EYE = 1.7;
+const EYE = 2.3;   // stand TALL — grass tops ~1.3m, so 1.7 read as wading chin-deep; this lifts you clearly above it
 const CFG = IS_TOUCH
   ? { grass: 22000, trees: 2200, bushes: 380, rocks: 150, px: 2, shadow: 1536, segs: 230,
       flowers: 2200, tufts: 1400, mushrooms: 260, bedFlowers: 1300 }
@@ -439,6 +439,15 @@ function regionAt(x, z) {
 window._region = regionAt;
 window._REGION = REGION;
 
+let _groundColAttr = null, _groundSeg = 0;   // terrain color attr + vertex spacing (for scorch recolor)
+// burned ground registry — quantized cells the fire has turned to desert, so
+// the grass field knows to stop growing blades there (burned = bare sand).
+const _burned = new Set();
+const _BURN_CELL = 5;
+function _burnKey(x, z) { return Math.floor(x / _BURN_CELL) * 100003 + Math.floor(z / _BURN_CELL); }
+function _isBurned(x, z) { return _burned.size > 0 && _burned.has(_burnKey(x, z)); }
+let _grassResweep = 0;   // frames of full-field grass reblade after a burn (clears grass off fresh desert)
+
 {
   const segs = CFG.segs;
   const g = new THREE.PlaneGeometry(WORLD, WORLD, segs, segs);
@@ -487,6 +496,9 @@ window._REGION = REGION;
     vertexColors: true, roughness: 1, metalness: 0 }));
   terrain.receiveShadow = true;
   scene.add(terrain);
+  // expose the ground so fire can RECOLOR it to scorched sand in place — a real
+  // desert that follows the terrain, not floating see-through scar discs.
+  _groundColAttr = g.attributes.color; _groundSeg = WORLD / segs;
 }
 
 // water — animated lake
@@ -623,7 +635,7 @@ const trampleUniform = { value: new THREE.Vector4(0, 0, 0, 26) };
     const pc = window._player || { x: 0, z: 26 };
     const dEdge = Math.max(Math.abs(g.x - pc.x), Math.abs(g.z - pc.z));
     const fade = Math.max(0, Math.min(1, (R - dEdge) / 9));
-    if (y < WATER_Y + 0.5 || y > 18 || fade <= 0) { S.set(0, 0, 0); }
+    if (y < WATER_Y + 0.5 || y > 18 || fade <= 0 || _isBurned(g.x, g.z)) { S.set(0, 0, 0); }
     else S.set(g.s * fade, g.s * g.sy * fade, g.s * fade);
     P.set(g.x, y - 0.05, g.z);
     E.set(g.tx, g.rot, g.tz); Q.setFromEuler(E);
@@ -647,6 +659,7 @@ const trampleUniform = { value: new THREE.Vector4(0, 0, 0, 26) };
   let gCursor = 0;
   window._updateGrassField = () => {        // amortized: 1/6 per frame
     const slice = Math.ceil(CFG.grass / 6);
+    const sweep = _grassResweep > 0;          // after a burn: reblade everything to clear grass off fresh desert
     let touched = false;
     for (let k = 0; k < slice; k++) {
       const i = (gCursor + k) % CFG.grass;
@@ -656,9 +669,10 @@ const trampleUniform = { value: new THREE.Vector4(0, 0, 0, 26) };
       while (player.x - g.x > R)  { g.x += 2 * R; moved = true; }
       while (g.z - player.z > R)  { g.z -= 2 * R; moved = true; }
       while (player.z - g.z > R)  { g.z += 2 * R; moved = true; }
-      if (moved) { setBlade(i); touched = true; }
+      if (moved || sweep) { setBlade(i); touched = true; }
     }
     gCursor = (gCursor + slice) % CFG.grass;
+    if (_grassResweep > 0) _grassResweep--;
     if (touched) inst.instanceMatrix.needsUpdate = true;
   };
 }
@@ -4854,32 +4868,48 @@ function igniteTree(tr) {
                    spreadAt: 0.7 + Math.random() * 0.6, spreadCd: 0, gy, h });   // catches FAST, then creeps to neighbours
   return true;
 }
-// scorched-earth wake: each felled tree leaves a sandy/ash scar on the ground.
-// Enough of them and the burned swath reads as a DESERT the fire left behind.
-const _scarGeo = new THREE.CircleGeometry(1, 14);
-// a SOFT-edged scar texture so the burned ground blends into irregular sandy
-// patches instead of hard flat discs with visible plane edges.
-const _scarTex = (() => {
-  const c = document.createElement('canvas'); c.width = c.height = 64;
-  const x = c.getContext('2d'); const g = x.createRadialGradient(32, 32, 4, 32, 32, 32);
-  g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.6, 'rgba(255,255,255,0.7)'); g.addColorStop(1, 'rgba(255,255,255,0)');
-  x.fillStyle = g; x.fillRect(0, 0, 64, 64);
-  return new THREE.CanvasTexture(c);
-})();
-const _scarMat = new THREE.MeshStandardMaterial({ color: 0xb89b6a, roughness: 1,
-  map: _scarTex, alphaMap: _scarTex, transparent: true, depthWrite: false,
-  polygonOffset: true, polygonOffsetFactor: -2 });   // sun-bleached sand/ash, soft edges
-let _scarGroup = null;
-function scorch(x, z, r) {
-  if (!_scarGroup) { _scarGroup = new THREE.Group(); scene.add(_scarGroup); }
-  if (_scarGroup.children.length > 1200) return;  // bound the count (a whole forest can burn)
-  const s = new THREE.Mesh(_scarGeo, _scarMat);
-  s.rotation.x = -Math.PI / 2; s.rotation.z = Math.random() * Math.PI;
-  s.position.set(x, heightAt(x, z) + 0.05, z);
-  s.scale.setScalar(r * (0.8 + Math.random() * 0.6));
-  _scarGroup.add(s);
+// scorched earth: fire RECOLORS the terrain itself to sand/ash in place, so a
+// burned swath becomes a real desert that hugs the ground and reads correctly
+// on slopes — no floating see-through scar discs. Permanent, baked into the
+// terrain's vertex colors. Enough felled trees and the forest turns to dunes.
+const _scorchSand = new THREE.Color(0xc2ad82);   // pale sun-bleached sand
+const _scorchAsh = new THREE.Color(0x6f6453);    // darker ash, near the heart of a burn
+const _scorchTmp = new THREE.Color();
+let _scorchCount = 0;
+function scorch(cx, cz, r) {
+  if (!_groundColAttr) return;
+  const seg = _groundSeg, segsN = CFG.segs, stride = segsN + 1, half = WORLD / 2;
+  const arr = _groundColAttr.array;
+  const ixc = (cx + half) / seg, izc = (cz + half) / seg, rad = r / seg;
+  const ix0 = Math.max(0, Math.floor(ixc - rad)), ix1 = Math.min(segsN, Math.ceil(ixc + rad));
+  const iz0 = Math.max(0, Math.floor(izc - rad)), iz1 = Math.min(segsN, Math.ceil(izc + rad));
+  let touched = false;
+  for (let iz = iz0; iz <= iz1; iz++) {
+    const vz = -half + iz * seg;
+    for (let ix = ix0; ix <= ix1; ix++) {
+      const vx = -half + ix * seg;
+      const d = Math.hypot(vx - cx, vz - cz);
+      if (d > r) continue;
+      const k = 1 - d / r;                            // soft falloff to the edge
+      // ash at the heart, sand toward the rim — a real burned-out patch
+      _scorchTmp.copy(_scorchSand).lerp(_scorchAsh, Math.max(0, k - 0.4) / 0.6 * 0.7);
+      const j = (iz * stride + ix) * 3;
+      const blend = Math.min(0.92, k * 1.3);
+      arr[j]     += (_scorchTmp.r - arr[j])     * blend;
+      arr[j + 1] += (_scorchTmp.g - arr[j + 1]) * blend;
+      arr[j + 2] += (_scorchTmp.b - arr[j + 2]) * blend;
+      touched = true;
+    }
+  }
+  if (touched) { _groundColAttr.needsUpdate = true; _scorchCount++; }
+  // register burned cells so grass stops growing here, and kick a resweep so
+  // the blades already standing on this spot clear off within a moment
+  for (let z = cz - r; z <= cz + r; z += _BURN_CELL)
+    for (let x = cx - r; x <= cx + r; x += _BURN_CELL)
+      if (Math.hypot(x - cx, z - cz) <= r) _burned.add(_burnKey(x, z));
+  _grassResweep = 8;
 }
-window._scars = () => (_scarGroup ? _scarGroup.children.length : 0);   // debug/test hook
+window._scars = () => _scorchCount;   // debug/test hook (count of scorch recolors)
 function fellTree(tr) {                           // char the instance down to a black stump, then it's gone
   scorch(tr.x, tr.z, 6 + (tr.sc || 1) * 3);       // a wide scar — burned forest becomes open desert
   if (!tr.inst) { tr._gone = true; tr.r = 0; tr.top = -999; return; }
