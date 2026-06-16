@@ -1752,7 +1752,7 @@ function corruptionUpdate(dt, t) {
     document.getElementById('hurt').style.opacity = String(0.3 + 0.3 * Math.sin(t * 9));
     if (_stingThudT <= 0) { _stingThudT = 0.5; if (audio.thud) audio.thud(); }
     if (_stingSayT <= 0) { _stingSayT = 6; say('corrupt'); }
-    if (player.hp <= 0 && !dead) { dead = true; say('death', 4200);
+    if (player.hp <= 0 && !dead) { dead = true; beginDeath();
       setTimeout(() => { player.hp = 100; player.x = SPAWN.x; player.z = SPAWN.z;
         player.y = heightAt(SPAWN.x, SPAWN.z); dead = false; renderHP(); respawnArrival(); }, 3500); }
   } else if (_stingThudT < 0.4) {
@@ -4798,7 +4798,7 @@ function hurtPlayer(dmg) {
     resetDrawState();
     dropMeatCache();               // your body fed something. Some keeps.
     sawNight = false;              // no dawn credit for the dead
-    toast(LINES.death, 4000);
+    beginDeath();
     setTimeout(() => {
       player.hp = 100; player.x = SPAWN.x; player.z = SPAWN.z;
       player.yaw = SPAWN.yaw; player.pitch = SPAWN.pitch;
@@ -6317,7 +6317,7 @@ function tickBody() {
       }
       if (player.hp <= 0 && !dead) { dead = true;
         resetDrawState();
-        say('death', 4200);
+        beginDeath();
         setTimeout(() => { player.hp = 100; player.meat = 0;
           player.lastAte = clock.elapsedTime; player.x = SPAWN.x; player.z = SPAWN.z;
           player.yaw = SPAWN.yaw; player.pitch = SPAWN.pitch;
@@ -6685,6 +6685,15 @@ function onTitleTap() {
 }
 // death → you're cast down from the sky AGAIN. Same plummet + genesis blast
 // as the first arrival, but the game's already running (started stays true).
+// ── the death beat ── you don't just blink and reset: the world slows and
+// darkens, the CONSUMED card holds in the black, then the respawn plummet fades
+// you back in (you come to falling from the sky). One centered line, no clutter.
+function beginDeath() {
+  const v = document.getElementById('veil');
+  if (v) { v.style.transition = 'opacity 1.5s ease-in'; v.style.opacity = '0.86'; }
+  cinematic(LINES.death, 3200);                 // the weighty centered card
+  if (audio.killStinger) audio.killStinger();   // the woods close the ledger on you
+}
 function respawnArrival() {
   if (window._base && window._base.group) window._base.group.visible = false;
   // cast back down onto the bed you call home
@@ -6693,6 +6702,9 @@ function respawnArrival() {
   tripT = 0; tripLevel = 0; clearClouds();
   if (audio.tripMusic) audio.tripMusic(false);
   const mb = document.getElementById('maul'); if (mb) mb.style.opacity = '0';
+  // come to as you fall — the black lifts over the dive
+  const v = document.getElementById('veil');
+  if (v) { v.style.transition = 'opacity 1.7s ease-out'; v.style.opacity = '0'; }
 }
 function beginLaunch() {
   if (launching || started) return;
