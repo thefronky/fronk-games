@@ -4313,6 +4313,7 @@ const _diveFrom = new THREE.Vector3();   // frozen aerial origin of the dive
 let arrowCam = null;        // { rec, mode:'follow'|'return', rt }
 window._acState = () => arrowCam ? arrowCam.mode : 'none';
 window._camPos = () => camera.position.toArray().map(n=>Math.round(n));
+window._camDir = () => { const v = new THREE.Vector3(); camera.getWorldDirection(v); return [+v.x.toFixed(3), +v.y.toFixed(3), +v.z.toFixed(3)]; };   // debug/test hook
 const _acTmp = new THREE.Vector3(), _acLook = new THREE.Vector3();
 const _aerial = new THREE.Vector3();   // scratch
 let intro = false, introT = 0, introSkip = false;
@@ -6617,9 +6618,12 @@ function tickBody() {
     const hx = fdx / fl, hz = fdz / fl;
     const lookE = Math.max(0, (lp - 0.65) / 0.35);
     const gyL = heightAt(tx, tz);
-    camera.lookAt(tx + hx * lookE * 16,
-                  gyL + (ty - gyL) * lookE,
-                  tz + hz * lookE * 16);
+    // final gaze: the landing point, tilting forward along the flight line at the end
+    const fX = tx + hx * lookE * 16, fY = gyL + (ty - gyL) * lookE, fZ = tz + hz * lookE * 16;
+    // CRUCIAL: blend that gaze OUT of the orbit's look point (0,12,0) so the
+    // click never snaps the view — orientation is continuous from orbit into dive.
+    const le = lp * lp * (3 - 2 * lp);          // smoothstep 0→1
+    camera.lookAt(fX * le, 12 + (fY - 12) * le, fZ * le);
     camera.rotation.order = 'YXZ';
     if (lp >= 1) {                        // you settle onto the bed of roses
       launching = false;
