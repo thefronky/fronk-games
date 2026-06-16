@@ -4293,7 +4293,13 @@ window._cloudCover = () => _cloudCover;   // debug/test hook
 let _curGround = 'grass';   // footstep material under the player
 let tripT = 0;      // seconds left of a mushroom trip (trippy visuals + moon-jump)
 let tripLevel = 0;  // 0=sober, 1=jump+vibrant, 2=animals bounce+higher+bullet arrows, 3=cloud-climb
+// the COME-UP: a fresh (sober→trip) hit eases in over ~10s. The trees start to
+// move + the view sways FIRST (you're not sure it's real), THEN the colour and
+// music slowly flood in. _tripOnset = seconds since that sober→trip moment;
+// _tripKsway / _tripTreeEnv are the per-frame envelopes other blocks read.
+let _tripOnset = 99, _tripKsway = 0, _tripTreeEnv = 0;
 window._tripLevel = () => tripLevel;   // debug/test hook
+window._tripOnset = () => _tripOnset;  // debug/test hook
 window._uTrip = () => tripUniforms.uTrip.value;   // debug/test hook
 let playerVy = 0, grounded = true, jumpQ = false;
 let inCanoe = false, canoeVX = 0, canoeVZ = 0, _wasCanoe = false;
@@ -4542,9 +4548,9 @@ let _nearMush = null;
 // nearby — so the cloud-climbing never has to stop to go hunting for more.
 // keep at least `count` untaken caps within reach so you can chain to level
 // 3 fast — pulls in eaten ones first, then far ones, until enough are close.
-function respawnMushroomNear(count = 3) {
+function respawnMushroomNear(count = 3, dMin = 4, dMax = 10) {
   if (!started || dead) return;
-  const NEAR = 14;
+  const NEAR = Math.max(14, dMax + 2);
   const muds = FORAGE.filter(f => f.kind === 'mush');
   const distOf = f => Math.hypot(f.x - player.x, f.z - player.z);
   let nearCount = muds.filter(f => !f.taken && distOf(f) < NEAR).length;
@@ -4554,7 +4560,7 @@ function respawnMushroomNear(count = 3) {
   while (nearCount < count && ci < cands.length) {
     const f = cands[ci++];
     for (let tries = 0; tries < 20; tries++) {
-      const ang = Math.random() * Math.PI * 2, dist = 4 + Math.random() * 6;
+      const ang = Math.random() * Math.PI * 2, dist = dMin + Math.random() * (dMax - dMin);
       const x = player.x + Math.cos(ang) * dist, z = player.z + Math.sin(ang) * dist;
       const y = heightAt(x, z);
       if (y < WATER_Y + 1.0) continue;
@@ -4571,9 +4577,15 @@ function eatMushroom(f) {
   // each one eaten while still tripping deepens the trip a LEVEL (max 3):
   // 1 = you jump + the world goes vibrant; 2 = animals bounce too + everyone
   // jumps higher + arrows become fiery bullets; 3 = the cloud-climbing game.
-  tripLevel = tripT > 0 ? Math.min(3, tripLevel + 1) : 1;
+  const wasSober = !(tripT > 0);
+  tripLevel = wasSober ? 1 : Math.min(3, tripLevel + 1);
   tripT = 60; player.lastAte = clock.elapsedTime;     // a full minute
-  if (audio.tripMusic) audio.tripMusic(true);         // the magic carpet starts
+  if (wasSober) {
+    _tripOnset = 0;                                    // begin the slow ~10s come-up
+    // the music doesn't slam in — it floods in AFTER the trees start to move
+    clearTimeout(eatMushroom._mus);
+    eatMushroom._mus = setTimeout(() => { if (tripT > 0 && audio.tripMusic) audio.tripMusic(true); }, 2200);
+  } else if (audio.tripMusic) audio.tripMusic(true);  // already up — deepen immediately
   // level 1: the world goes drunk + you hop a little higher. level 2: the
   // clouds appear and you can climb them. NO announcements — let it be found.
   if (tripLevel >= 2 && !_cloudGroup) spawnClouds();
@@ -6081,7 +6093,18 @@ function tickBody() {
   // swell, the picture breathes. Eases out over the last couple seconds.
   if (tripT > 0) {
     tripT -= dt;
-    const k = Math.max(0, Math.min(1, tripT / 2));
+    _tripOnset += dt;
+    const tail = Math.max(0, Math.min(1, tripT / 2));     // the fade-OUT at the very end
+    // come-up envelopes: trees + the swaying view arrive FIRST (~3.5s), the
+    // colour grade + liquid warp flood in AFTER and finish around ~10s.
+    const teRaw = Math.min(1, _tripOnset / 3.5);
+    const ceRaw = Math.max(0, Math.min(1, (_tripOnset - 1.5) / 8.5));
+    const treeEnv = teRaw * teRaw * (3 - 2 * teRaw);       // smoothstep
+    const colEnv = ceRaw * ceRaw * (3 - 2 * ceRaw);
+    const ks = Math.min(tail, treeEnv);          // SWAY/lean intensity (early)
+    const kc = Math.min(tail, colEnv);           // COLOUR/warp intensity (later)
+    _tripTreeEnv = treeEnv; _tripKsway = ks;     // hand to the uTrip + camera blocks
+    const k = kc;                                // colour grade rides the slow come-up
     const lv = Math.max(1, tripLevel);          // depth scales the whole look
     // how high you've climbed — the cloud/kitchen ascent washes the world from
     // trippy → OVEREXPOSED → HEAVENLY as you rise.
@@ -6103,19 +6126,23 @@ function tickBody() {
     canvas.style.filter = warp + 'hue-rotate(' + hue.toFixed(0) + 'deg) saturate(' + sat.toFixed(2)
       + ') contrast(' + con.toFixed(2) + ') brightness(' + bri.toFixed(2)
       + ') blur(' + blur.toFixed(2) + 'px)';
-    // a slow oceanic swell + drift + a melting SKEW — surreal, not a fast spin
-    const sc = 1 + (0.02 + 0.01 * lv) * Math.sin(t * 0.8) * k;
-    const rot = (0.3 + 0.14 * lv) * Math.sin(t * 0.3) * k;
-    const skx = (1.4 + lv * 0.9) * Math.sin(t * 0.6) * k;       // the picture leans + warps
-    const sky = (1.4 + lv * 0.9) * Math.cos(t * 0.42) * k;
+    // a slow oceanic swell + drift + a melting SKEW — surreal, not a fast spin.
+    // rides ks (the EARLY envelope) so the view starts swaying with the trees,
+    // before the colour comes in — that "am I losing it?" beat.
+    const sc = 1 + (0.02 + 0.01 * lv) * Math.sin(t * 0.8) * ks;
+    const rot = (0.3 + 0.14 * lv) * Math.sin(t * 0.3) * ks;
+    const skx = (1.4 + lv * 0.9) * Math.sin(t * 0.6) * ks;       // the picture leans + warps
+    const sky = (1.4 + lv * 0.9) * Math.cos(t * 0.42) * ks;
     canvas.style.transformOrigin = 'center';
     canvas.style.transform = 'scale(' + sc.toFixed(3) + ') rotate(' + rot.toFixed(2)
       + 'deg) skewX(' + skx.toFixed(2) + 'deg) skewY(' + sky.toFixed(2) + 'deg)';
     if (_heaven) _heaven.style.opacity = (heaven * 0.42).toFixed(3);   // a heavenly haze, not a whiteout
     if (tripT <= 0) { tripLevel = 0; clearClouds(); }   // sober up
+    _tripKsway = ks; _tripTreeEnv = treeEnv;
   } else if (canvas.style.filter) {
     canvas.style.filter = ''; canvas.style.transform = '';
     tripLevel = 0; clearClouds();
+    _tripKsway = 0; _tripTreeEnv = 0;
     if (_heaven) _heaven.style.opacity = '0';
     if (audio.tripMusic) audio.tripMusic(false);
   }
@@ -6130,7 +6157,8 @@ function tickBody() {
   waterUniforms.uTime.value = t;
   // the trees only move on the trip — strongest on that first wide-eyed L1,
   // eased in/out so it swells on rather than popping. (uTrip=0 → rigid.)
-  const _warpTarget = tripT > 0 ? (tripLevel >= 2 ? 1.15 : 0.9) : 0;
+  // trees come alive FIRST on the come-up (rides _tripTreeEnv, the early envelope)
+  const _warpTarget = tripT > 0 ? (tripLevel >= 2 ? 1.15 : 0.9) * _tripTreeEnv : 0;
   tripUniforms.uTrip.value += (_warpTarget - tripUniforms.uTrip.value) * Math.min(1, dt * 1.1);
   skyUniforms.uT.value = t;
   for (const c of clouds) { c.position.x += c.userData.v * dt * 2; if (c.position.x > 800) c.position.x = -800; }
@@ -6655,7 +6683,7 @@ function tickBody() {
       _wakeYaw = player.yaw; _wakePitch = player.pitch; _wakeT = t;   // reveal reference
       if (audio.fadeTitle) audio.fadeTitle(4);   // theme peaked at impact — let it fall away as you wake
       blinkAwake();                       // no crater, no blast — you BLINK awake,
-      respawnMushroomNear(3);             // and everything fades in around you
+      respawnMushroomNear(1, 6, 7);       // ONE mushroom, ~20ft off — find it, then it all begins
     }
   } else if (intro) {
     // waking: camera starts LOW in the grass, pitched up at the sky,
@@ -6727,9 +6755,10 @@ function tickBody() {
     // woozy, deeper the higher the level. The world sways; the trees lean.
     if (tripT > 0) {
       const lv = Math.max(1, tripLevel);
-      camera.rotation.z = Math.sin(t * 0.8) * 0.05 * lv + Math.sin(t * 1.7) * 0.02 * lv;
-      camera.rotation.x += Math.sin(t * 0.55) * 0.03 * lv;
-      camera.rotation.y += Math.cos(t * 0.47) * 0.03 * lv;
+      const sw = _tripKsway;     // sway grows in early with the trees (the come-up)
+      camera.rotation.z = (Math.sin(t * 0.8) * 0.05 * lv + Math.sin(t * 1.7) * 0.02 * lv) * sw;
+      camera.rotation.x += Math.sin(t * 0.55) * 0.03 * lv * sw;
+      camera.rotation.y += Math.cos(t * 0.47) * 0.03 * lv * sw;
     } else if (camera.rotation.z) camera.rotation.z = 0;
   }
   sun.target.position.set(player.x, player.y, player.z);
@@ -6873,20 +6902,18 @@ loadAnimals().then(() => {
 // single tap flies you down. (Autoplay blocks sound until a gesture, so the
 // orbit reveals silent and the cinematic theme hits on the tap, swelling as you
 // plummet and fading as you wake.)
-let _titleReady = false, _themeOn = false;
-function startTheme() {                    // the cinematic theme, swelling over the orbit
+// ── title: music on open · click 1 reveals the drone · click 2 dives in ──
+let _titleStage = 0, _themeOn = false, _revealT = 0;
+function startTheme() {                    // the cinematic theme
   if (_themeOn) return;
   _themeOn = true;
   try { audio.start(); if (audio.titleTheme) audio.titleTheme(); } catch (e) {}
 }
 {
-  const ttl = document.getElementById('title');
-  // open the app → hold the black CONSUME card a half-beat, then the music
-  // starts AND the backdrop fades out over ~4s to reveal you already orbiting.
-  setTimeout(() => { if (ttl) ttl.classList.add('revealed'); startTheme(); }, 500);
-  setTimeout(() => { _titleReady = true; }, 4600);   // fly-down stays locked through the slow fade
-  // autoplay is gated until a gesture on most phones — so the FIRST touch
-  // anywhere kicks the music in if it hasn't started (no dive, just sound).
+  // try to play the theme the instant the app opens (works where the browser
+  // allows autoplay); if it's gated, the first touch below starts it.
+  try { audio.start(); } catch (e) {}
+  setTimeout(() => { if (!_themeOn && audio.ctx && audio.ctx.state === 'running') startTheme(); }, 300);
   const wake = () => { startTheme();
     window.removeEventListener('pointerdown', wake, true);
     window.removeEventListener('touchstart', wake, true);
@@ -6895,13 +6922,19 @@ function startTheme() {                    // the cinematic theme, swelling over
   window.addEventListener('touchstart', wake, true);
   window.addEventListener('keydown', wake, true);
 }
-window._titleReady = () => _titleReady;   // debug/test hook
+window._titleStage = () => _titleStage;   // debug/test hook
 function onTitleTap() {
-  if (!_titleReady || launching || started) return;   // nothing until the slow fade is done → then fly down
-  startTheme();                                        // ensure the theme is going (no-op if already)
-  // On touch we want fullscreen, but the resize must NOT land mid-dive (that
-  // reframes the shot — the old seam). So request it now, let it settle over a
-  // few more frames of the orbit, THEN start the fall. The delay is imperceptible.
+  if (launching || started) return;
+  if (_titleStage === 0) {                 // CLICK 1 → part the black, reveal the drone shot
+    _titleStage = 1; _revealT = performance.now();
+    startTheme();
+    const ttl = document.getElementById('title'); if (ttl) ttl.classList.add('revealed');
+    return;
+  }
+  if (performance.now() - _revealT < 350) return;   // CLICK 2 → fly down (let the reveal breathe a beat)
+  startTheme();
+  // On touch, request fullscreen now and let the resize settle over a few orbit
+  // frames BEFORE the fall — so it never reframes mid-dive (the old seam).
   if (IS_TOUCH && document.documentElement.requestFullscreen) {
     document.documentElement.requestFullscreen().catch(() => {});
     setTimeout(beginLaunch, 400);
