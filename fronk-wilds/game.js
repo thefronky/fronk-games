@@ -6355,9 +6355,13 @@ function tickBody() {
     // it, so it doesn't shove you — you can stand and hop tree to tree.
     for (const tr of TREES) {
       if (tr.top !== undefined && player.y >= tr.top - 1.3) continue;   // on the canopy
+      // collide with the actual TRUNK, not the wide canopy/cover radius. tr.r is
+      // the cover/LOS radius (~2x the trunk), so the old tr.r+0.5 stopped you a
+      // metre+ out in open air. Trunk ≈ tr.r*0.45; +0.4 for the body.
+      const rad = tr.r * 0.45 + 0.4;
       const d = Math.hypot(nx - tr.x, nz - tr.z);
-      if (d < tr.r + 0.5) {
-        const push = (tr.r + 0.5 - d);
+      if (d < rad) {
+        const push = (rad - d);
         nx += (nx - tr.x) / (d || 1) * push; nz += (nz - tr.z) / (d || 1) * push;
       }
     }
