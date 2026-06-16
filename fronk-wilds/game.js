@@ -4414,7 +4414,7 @@ let tripLevel = 0;  // 0=sober, 1=jump+vibrant, 2=animals bounce+higher+bullet a
 // move + the view sways FIRST (you're not sure it's real), THEN the colour and
 // music slowly flood in. _tripOnset = seconds since that sober→trip moment;
 // _tripKsway / _tripTreeEnv are the per-frame envelopes other blocks read.
-let _tripOnset = 99, _tripKsway = 0, _tripTreeEnv = 0;
+let _tripOnset = 99, _tripKsway = 0, _tripTreeEnv = 0, _tripLvlVis = 0;
 window._tripLevel = () => tripLevel;   // debug/test hook
 window._tripOnset = () => _tripOnset;  // debug/test hook
 window._uTrip = () => tripUniforms.uTrip.value;   // debug/test hook
@@ -4688,11 +4688,12 @@ function respawnMushroomNear(count = 3, dMin = 4, dMax = 10) {
 function eatMushroom(f) {
   if (!f || f.taken) return;
   f.taken = true; f.mesh.visible = false;
-  // each one eaten while still tripping deepens the trip a LEVEL (max 3):
-  // 1 = you jump + the world goes vibrant; 2 = animals bounce too + everyone
-  // jumps higher + arrows become fiery bullets; 3 = the cloud-climbing game.
+  // each one eaten while still tripping deepens the trip a LEVEL — now up to 10.
+  // 1 = subtle drunk shimmer; 2 = clouds appear + cloud-climb; 3+ = it keeps
+  // intensifying, more dilute and unhinged each time, toward pure string-visual
+  // madness at 10 — where the world stops offering you any more.
   const wasSober = !(tripT > 0);
-  tripLevel = wasSober ? 1 : Math.min(3, tripLevel + 1);
+  tripLevel = wasSober ? 1 : Math.min(10, tripLevel + 1);
   tripT = 60; player.lastAte = clock.elapsedTime;     // a full minute
   if (wasSober) {
     _tripOnset = 0;                                    // begin the slow ~10s come-up
@@ -4706,10 +4707,15 @@ function eatMushroom(f) {
   if (tripLevel === 1) toast('…oh.', 2000);           // one ambiguous breath, nothing more
   if (audio.cue) audio.cue(Math.min(2, tripLevel - 1));
   _nearMush = null; if (_consumeBtn) _consumeBtn.classList.remove('show');
-  // once you're tripping, the world FLOODS with caps — they're everywhere
-  respawnMushroomNear(7);
+  // tripping, the world FLOODS with caps — UNTIL level 10, where it stops
+  // offering: no more spawn, and the ones near you vanish. You're on your own.
   clearTimeout(eatMushroom._re);
-  eatMushroom._re = setTimeout(() => respawnMushroomNear(7), 2000);
+  if (tripLevel >= 10) {
+    for (const fm of FORAGE) if (fm.kind === 'mush' && !fm.taken) { fm.taken = true; fm.mesh.visible = false; }
+  } else {
+    respawnMushroomNear(7);
+    eatMushroom._re = setTimeout(() => respawnMushroomNear(7), 2000);
+  }
 }
 window._eatMushroom = () => eatMushroom(_nearMush || FORAGE.find(f => f.kind === 'mush' && !f.taken));
 
@@ -6282,7 +6288,10 @@ function tickBody() {
     const kc = Math.min(tail, colEnv);           // COLOUR/warp intensity (later)
     _tripTreeEnv = treeEnv; _tripKsway = ks;     // hand to the uTrip + camera blocks
     const k = kc;                                // colour grade rides the slow come-up
-    const lv = Math.max(1, tripLevel);          // depth scales the whole look
+    // depth eases toward tripLevel so EACH extra mushroom fades its new
+    // intensity in (no pop). lv now climbs to 10 → subtle at 1, unhinged at 10.
+    _tripLvlVis += (tripLevel - _tripLvlVis) * Math.min(1, dt * 0.7);
+    const lv = Math.max(1, _tripLvlVis);        // depth scales the whole look
     // how high you've climbed — the cloud/kitchen ascent washes the world from
     // trippy → OVEREXPOSED → HEAVENLY as you rise.
     const alt = Math.max(0, player.y - heightAt(player.x, player.z));
@@ -6320,7 +6329,7 @@ function tickBody() {
   } else if (canvas.style.filter) {
     canvas.style.filter = ''; canvas.style.transform = '';
     tripLevel = 0; clearClouds();
-    _tripKsway = 0; _tripTreeEnv = 0;
+    _tripKsway = 0; _tripTreeEnv = 0; _tripLvlVis = 0;
     if (_heaven) _heaven.style.opacity = '0';
     if (audio.tripMusic) audio.tripMusic(false);
   }
@@ -6336,7 +6345,7 @@ function tickBody() {
   // the trees only move on the trip — strongest on that first wide-eyed L1,
   // eased in/out so it swells on rather than popping. (uTrip=0 → rigid.)
   // trees come alive FIRST on the come-up (rides _tripTreeEnv, the early envelope)
-  const _warpTarget = tripT > 0 ? (tripLevel >= 2 ? 1.15 : 0.9) * _tripTreeEnv : 0;
+  const _warpTarget = tripT > 0 ? (0.9 + 0.09 * Math.max(0, _tripLvlVis - 1)) * _tripTreeEnv : 0;
   tripUniforms.uTrip.value += (_warpTarget - tripUniforms.uTrip.value) * Math.min(1, dt * 1.1);
   skyUniforms.uT.value = t;
   for (const c of clouds) { c.position.x += c.userData.v * dt * 2; if (c.position.x > 1500) c.position.x = -1500; }
@@ -6632,12 +6641,13 @@ function tickBody() {
     // PLATFORMING — modest aimed hops, ~1-2 clouds up, you must land on them.
     // L3 = ethereal, bigger leaps. (apex L1~5.8m · L2~10m · L3~22m)
     const TRIP_VY = [9, 11, 14], TRIP_G = [7, 6, 4.5];
+    const _ji = Math.min(2, tripLevel - 1);   // levels 4-10 reuse the L3 (max float) jump
     if (jumpQ && grounded) {
-      playerVy = tripLevel > 0 ? TRIP_VY[tripLevel - 1] : 7.7; grounded = false;
+      playerVy = tripLevel > 0 ? TRIP_VY[_ji] : 7.7; grounded = false;
     }
     jumpQ = false;
     if (!grounded) {
-      const g = tripLevel > 0 ? TRIP_G[tripLevel - 1] : 13;
+      const g = tripLevel > 0 ? TRIP_G[_ji] : 13;
       playerVy -= g * dt; player.airY = (player.airY ?? groundY) + playerVy * dt;
       if (player.airY <= groundY) {
         const impact = -playerVy;                 // how hard you came down
@@ -6934,7 +6944,10 @@ function tickBody() {
     // ── the trip is DRUNK ── the whole view lurches and rolls, gentle and
     // woozy, deeper the higher the level. The world sways; the trees lean.
     if (tripT > 0) {
-      const lv = Math.max(1, tripLevel);
+      // camera woozy-ness scales with depth but is CAPPED (~3.5x) so even a
+      // level-10 trip never becomes an unplayable barrel roll — the screen warp
+      // / colour carry the high-level madness instead.
+      const lv = Math.max(1, Math.min(3.5, _tripLvlVis));
       const sw = _tripKsway;     // sway grows in early with the trees (the come-up)
       camera.rotation.z = (Math.sin(t * 0.8) * 0.05 * lv + Math.sin(t * 1.7) * 0.02 * lv) * sw;
       camera.rotation.x += Math.sin(t * 0.55) * 0.03 * lv * sw;
