@@ -231,29 +231,60 @@ const sky = new THREE.Mesh(
       gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
     fragmentShader: `varying vec3 vDir; uniform vec3 sunDir;
       uniform float night; uniform float uT;
+      // ── night sky: hashed multi-layer stars + a direction-space FBM Milky Way
+      //    (technique adapted from beyond-fable, MIT (c) xikhar). Aurora is ours.
+      float h31(vec3 p){ return fract(sin(dot(p, vec3(127.1,311.7,74.7))) * 43758.5453); }
+      float vn(vec3 p){
+        vec3 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
+        return mix(mix(mix(h31(i),h31(i+vec3(1,0,0)),f.x), mix(h31(i+vec3(0,1,0)),h31(i+vec3(1,1,0)),f.x),f.y),
+                   mix(mix(h31(i+vec3(0,0,1)),h31(i+vec3(1,0,1)),f.x), mix(h31(i+vec3(0,1,1)),h31(i+vec3(1,1,1)),f.x),f.y),f.z);
+      }
+      float fbm(vec3 p){ float a=0.55,s=0.0; for(int i=0;i<3;i++){ s+=a*vn(p); p*=2.07; a*=0.5; } return s; }
+      vec3 starLayer(vec3 dir, float cells, float thresh, float bright){
+        vec3 cell=floor(dir*cells);
+        float hs=h31(cell);
+        if(hs<thresh) return vec3(0.0);
+        float m=(hs-thresh)/(1.0-thresh);
+        float tw=0.6+0.4*sin(uT*(1.2+fract(hs*91.0)*3.0)+hs*40.0);
+        vec3 c=mix(vec3(0.78,0.85,1.0), vec3(1.0,0.92,0.80), fract(hs*53.0));
+        return c*tw*bright*pow(m,2.2);
+      }
       void main(){
         vec3 dir = normalize(vDir);
         float h = clamp(dir.y, -0.05, 1.0);
-        vec3 horizon = mix(vec3(0.95, 0.48, 0.23), vec3(0.24, 0.12, 0.085), night);
-        vec3 zenith  = mix(vec3(0.11, 0.20, 0.40), vec3(0.045, 0.055, 0.115), night);
+        vec3 horizon = mix(vec3(0.95, 0.48, 0.23), vec3(0.22, 0.11, 0.085), night);
+        vec3 zenith  = mix(vec3(0.11, 0.20, 0.40), vec3(0.030, 0.040, 0.095), night);
         vec3 col = mix(horizon, zenith, pow(h, 0.62));
         float s = max(dot(dir, sunDir), 0.0);
         float dayGlow = 1.0 - night;
         col += vec3(1.0, 0.58, 0.26) * pow(s, 220.0) * 1.7 * dayGlow;
         col += vec3(1.0, 0.42, 0.20) * pow(s, 6.0) * 0.36 * dayGlow;
-        // procedural stars, twinkling. Full at night, but a FEW faint ones
-        // also linger high in the blue even at golden hour / on waking.
-        float starVis = max(night, smoothstep(0.4, 0.85, dir.y) * 0.5);
-        if (starVis > 0.02 && dir.y > -0.02) {
-          vec3 cell = floor(dir * 160.0);
-          float hsh = fract(sin(dot(cell, vec3(127.1, 311.7, 74.7))) * 43758.5453);
-          if (hsh > 0.9962) {
-            float tw = 0.55 + 0.45 * sin(uT * (1.5 + fract(hsh * 91.0) * 3.0) + hsh * 40.0);
-            col += vec3(0.9, 0.93, 1.0) * tw * starVis * pow(fract(hsh * 137.0), 0.6);
-          }
-          // soft milky band for depth
-          float band = pow(max(0.0, 1.0 - abs(dot(dir, normalize(vec3(0.5, 0.22, -0.8)))) * 1.6), 3.0);
-          col += vec3(0.11, 0.12, 0.18) * band * night;
+        float nUp = night * smoothstep(-0.02, 0.16, dir.y);   // night, above the horizon
+        if (nUp > 0.01) {
+          // Milky Way — a band about a galactic pole, FBM structure, cold→warm core, a dust rift
+          vec3 gpole = normalize(vec3(0.42, 0.32, 0.85));
+          float lat = dot(dir, gpole);
+          float f = fbm(dir * 4.0);
+          float band = exp(-lat*lat*20.0), broad = exp(-lat*lat*6.0);
+          float core = pow(max(0.0, dot(dir, normalize(vec3(-0.55,0.18,-0.82)))), 2.0);
+          float rift = smoothstep(0.0, 0.22, abs(lat*9.0 + (f-0.5)*2.2));
+          float clouds = smoothstep(0.35, 0.85, f);
+          float mw = (band + broad*0.22) * clouds * rift;
+          vec3 mwCol = mix(vec3(0.10,0.13,0.22), vec3(0.46,0.40,0.52), smoothstep(0.25,0.7,f));
+          mwCol = mix(mwCol, vec3(0.70,0.60,0.42), core*0.6);
+          col += mwCol * mw * nUp * 0.95;
+          // stars — a fine dense layer + a sparse bright one
+          col += starLayer(dir, 150.0, 0.9915, 1.0) * nUp;
+          col += starLayer(dir, 70.0,  0.9975, 1.7) * nUp;
+        }
+        // ── aurora ── faint green→teal curtains low in the north sky, wavering (ours)
+        if (night > 0.02) {
+          float bandY = smoothstep(0.03, 0.16, dir.y) * (1.0 - smoothstep(0.16, 0.46, dir.y));
+          float side = smoothstep(0.0, 0.5, dir.z);
+          float curt = fbm(vec3(dir.x*5.0 + uT*0.05, dir.y*9.0, dir.z*5.0 - uT*0.03));
+          float a = bandY * side * smoothstep(0.5, 0.92, curt);
+          vec3 auCol = mix(vec3(0.10,0.75,0.42), vec3(0.30,0.50,0.90), curt);
+          col += auCol * a * night * 0.55;
         }
         gl_FragColor = vec4(col, 1.0);
       }`,
