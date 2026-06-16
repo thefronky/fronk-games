@@ -6853,16 +6853,32 @@ loadAnimals().then(() => {
 // single tap flies you down. (Autoplay blocks sound until a gesture, so the
 // orbit reveals silent and the cinematic theme hits on the tap, swelling as you
 // plummet and fading as you wake.)
-let _titleReady = false;
+let _titleReady = false, _themeOn = false;
+function startTheme() {                    // the cinematic theme, swelling over the orbit
+  if (_themeOn) return;
+  _themeOn = true;
+  try { audio.start(); if (audio.titleTheme) audio.titleTheme(); } catch (e) {}
+}
 {
   const ttl = document.getElementById('title');
-  setTimeout(() => { if (ttl) ttl.classList.add('revealed'); }, 350);   // hold black a beat, then part the cloud
-  setTimeout(() => { _titleReady = true; }, 2350);                       // dive locked until the 1.8s bg fade finishes
+  // open the app → hold the black CONSUME card a half-beat, then the music
+  // starts AND the backdrop fades out over ~4s to reveal you already orbiting.
+  setTimeout(() => { if (ttl) ttl.classList.add('revealed'); startTheme(); }, 500);
+  setTimeout(() => { _titleReady = true; }, 4600);   // fly-down stays locked through the slow fade
+  // autoplay is gated until a gesture on most phones — so the FIRST touch
+  // anywhere kicks the music in if it hasn't started (no dive, just sound).
+  const wake = () => { startTheme();
+    window.removeEventListener('pointerdown', wake, true);
+    window.removeEventListener('touchstart', wake, true);
+    window.removeEventListener('keydown', wake, true); };
+  window.addEventListener('pointerdown', wake, true);
+  window.addEventListener('touchstart', wake, true);
+  window.addEventListener('keydown', wake, true);
 }
 window._titleReady = () => _titleReady;   // debug/test hook
 function onTitleTap() {
-  if (!_titleReady || launching || started) return;   // nothing until the fade is done → then fly down
-  try { audio.start(); } catch (e) {}                 // unlock audio inside the gesture
+  if (!_titleReady || launching || started) return;   // nothing until the slow fade is done → then fly down
+  startTheme();                                        // ensure the theme is going (no-op if already)
   // On touch we want fullscreen, but the resize must NOT land mid-dive (that
   // reframes the shot — the old seam). So request it now, let it settle over a
   // few more frames of the orbit, THEN start the fall. The delay is imperceptible.
@@ -6912,9 +6928,9 @@ function beginLaunch() {
   // ONE continuous shot: the dive begins from exactly where the orbit camera is
   // RIGHT NOW (after the fullscreen resize has settled) — no cut, no stale origin.
   _diveFrom.copy(camera.position);
-  // the cinematic theme kicks in here and swells over the 2.2s plummet (peaking
-  // at impact); it's faded out at landing as you wake into the world.
-  try { audio.start(); if (audio.titleTheme) audio.titleTheme(); } catch (e) {}
+  // the theme is already swelling over the orbit; just make sure it's going
+  // (covers autoplay-blocked phones where this tap is the first gesture).
+  startTheme();
   document.getElementById('title').style.opacity = 0;
   setTimeout(() => document.getElementById('title').style.display = 'none', 800);
   // fullscreen (touch) was requested on the tap in onTitleTap so its resize

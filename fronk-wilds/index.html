@@ -59,11 +59,14 @@
   /* ── title screen — the world itself is the backdrop, gone wrong ── */
   #title{position:fixed;inset:0;z-index:10;cursor:pointer;display:flex;flex-direction:column;
     align-items:center;justify-content:center;color:#d9cfc0;text-align:center;
-    padding:24px;transition:opacity 1.2s, background 1.8s ease-out;
-    /* dark to start — the map is hidden behind cloud. just CONSUME. */
-    background:radial-gradient(ellipse at center,rgba(8,5,5,.95) 0%,rgba(2,1,1,.99) 100%)}
-  /* first tap: the cloud parts, the valley appears beneath */
-  #title.revealed{background:radial-gradient(ellipse at center,transparent 28%,rgba(4,2,2,.5) 100%)}
+    padding:24px;transition:opacity 1.2s;background:transparent}
+  /* the black backdrop that hides the valley — fades out SLOWLY on load (real
+     opacity fade; gradient backgrounds don't interpolate) to reveal the orbit.
+     The CONSUME title sits above it and stays. */
+  #titleback{position:absolute;inset:0;z-index:-1;pointer-events:none;opacity:1;
+    transition:opacity 4s ease-out;
+    background:radial-gradient(ellipse at center,rgba(8,5,5,.97) 0%,rgba(2,1,1,1) 100%)}
+  #title.revealed #titleback{opacity:.1}   /* drone shot revealed, faint vignette remains */
   #title h1{font-family:'Cinzel','Times New Roman',serif;font-weight:700;
     white-space:nowrap;margin:0;
     font-size:clamp(46px,12.5vw,128px);letter-spacing:.1em;text-indent:.1em;
@@ -243,6 +246,7 @@
 <div id="exhaust"></div>
 <button id="consume">Consume</button>
 <div id="title">
+  <div id="titleback"></div>
   <h1>CONSUME</h1>
   <div class="rule"><i></i>
     <svg viewBox="0 0 30 12" aria-hidden="true"><line x1="2" y1="6" x2="22" y2="6" stroke="#caa06a" stroke-width="1.4"/><path d="M21 2 L28 6 L21 10" fill="none" stroke="#caa06a" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
