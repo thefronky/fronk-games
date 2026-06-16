@@ -6113,8 +6113,7 @@ function tickBody() {
     if (_heaven) _heaven.style.opacity = '0';
     if (audio.tripMusic) audio.tripMusic(false);
   }
-  // auto-launch: after the theme's opening swell, the cinematic dive begins
-  if (titleArmed && !launching && !started && (t - titleArmT) > 6.5) beginLaunch();
+  // (the title now auto-reveals and waits for a tap to dive — no auto-launch)
   // kill-feel: juice timers decay on REAL time (hitstop scales the
   // world dt further down, where animals/arrows update)
   if (kickT > 0) kickT -= dt;
@@ -6634,6 +6633,7 @@ function tickBody() {
       player.yaw = camera.rotation.y; player.pitch = 0.62;
       grounded = true; player.airY = player.y;
       _wakeYaw = player.yaw; _wakePitch = player.pitch; _wakeT = t;   // reveal reference
+      if (audio.fadeTitle) audio.fadeTitle(4);   // theme peaked at impact — let it fall away as you wake
       blinkAwake();                       // no crater, no blast — you BLINK awake,
       respawnMushroomNear(3);             // and everything fades in around you
     }
@@ -6847,43 +6847,31 @@ loadAnimals().then(() => {
   }
 }
 
-// ── title is two-beat ── first tap wakes the audio + starts the cinematic
-// theme over the slow aerial of CONSUME (autoplay needs that first gesture);
-// a second tap, or ~6.5s of letting it swell, dives in and fades the music.
-let titleArmed = false, titleArmT = 0;
-// the cinematic theme should be playing the instant Fronk touches anything —
-// browsers block audio until a gesture, so the FIRST contact anywhere on the
-// page wakes it. The title keeps orbiting; the music swells over it.
-function startTitleMusic() {
-  if (titleArmed || launching || started) return;
-  titleArmed = true; titleArmT = clock.elapsedTime;
-  // the cloud parts — the dark title clears to reveal the valley beneath
-  const ttl = document.getElementById('title'); if (ttl) ttl.classList.add('revealed');
-  // go fullscreen NOW, on the first touch — so the viewport resize (URL bar
-  // sliding away) happens here, hidden under the 1.8s cloud-parting reveal,
-  // and NOT mid-dive where it would reframe the shot and break the seam.
-  if (IS_TOUCH && document.documentElement.requestFullscreen)
-    document.documentElement.requestFullscreen().catch(() => {});
-  // the stinger that swells into the emotional theme, on that first touch
-  try { audio.start(); if (audio.titleTheme) audio.titleTheme(); } catch (e) {}
-}
-function onTitleTap() {
-  if (launching || started) return;
-  if (!titleArmed) { startTitleMusic(); return; }   // first contact → music only
-  if (clock.elapsedTime - titleArmT < 0.6) return;  // let that first beat breathe before the dive
-  beginLaunch();                                     // a deliberate second tap → dive in + fade
-}
-// one-shot: the absolute first gesture anywhere starts the music early
+// ── title: auto-fade in, then one tap dives ──
+// On load the black title smoothly fades on its own to reveal the orbiting drone
+// shot — no tap needed. Taps do NOTHING until that fade completes; after it, a
+// single tap flies you down. (Autoplay blocks sound until a gesture, so the
+// orbit reveals silent and the cinematic theme hits on the tap, swelling as you
+// plummet and fading as you wake.)
+let _titleReady = false;
 {
-  const wake = () => {
-    startTitleMusic();
-    window.removeEventListener('pointerdown', wake, true);
-    window.removeEventListener('touchstart', wake, true);
-    window.removeEventListener('keydown', wake, true);
-  };
-  window.addEventListener('pointerdown', wake, true);
-  window.addEventListener('touchstart', wake, true);
-  window.addEventListener('keydown', wake, true);
+  const ttl = document.getElementById('title');
+  setTimeout(() => { if (ttl) ttl.classList.add('revealed'); }, 350);   // hold black a beat, then part the cloud
+  setTimeout(() => { _titleReady = true; }, 2350);                       // dive locked until the 1.8s bg fade finishes
+}
+window._titleReady = () => _titleReady;   // debug/test hook
+function onTitleTap() {
+  if (!_titleReady || launching || started) return;   // nothing until the fade is done → then fly down
+  try { audio.start(); } catch (e) {}                 // unlock audio inside the gesture
+  // On touch we want fullscreen, but the resize must NOT land mid-dive (that
+  // reframes the shot — the old seam). So request it now, let it settle over a
+  // few more frames of the orbit, THEN start the fall. The delay is imperceptible.
+  if (IS_TOUCH && document.documentElement.requestFullscreen) {
+    document.documentElement.requestFullscreen().catch(() => {});
+    setTimeout(beginLaunch, 400);
+  } else {
+    beginLaunch();
+  }
 }
 // death → you're cast down from the sky AGAIN. Same plummet + genesis blast
 // as the first arrival, but the game's already running (started stays true).
@@ -6919,17 +6907,18 @@ function beginLaunch() {
     if (d < bd) { bd = d; best = bed; }
   }
   LAND = { x: best.x, z: best.z };
-  // ONE continuous shot: the dive begins from exactly where the orbit camera
-  // is right now — your second tap's timing picks the approach. No cut.
-  _diveFrom.copy(camera.position);
   // hide the home — it doesn't exist yet. The impact will blow it into being.
   if (window._base && window._base.group) window._base.group.visible = false;
-  try { audio.start(); } catch (e) {}
-  if (audio.fadeTitle) audio.fadeTitle(LAUNCH_DUR + 0.4);   // the theme fades as you fall
+  // ONE continuous shot: the dive begins from exactly where the orbit camera is
+  // RIGHT NOW (after the fullscreen resize has settled) — no cut, no stale origin.
+  _diveFrom.copy(camera.position);
+  // the cinematic theme kicks in here and swells over the 2.2s plummet (peaking
+  // at impact); it's faded out at landing as you wake into the world.
+  try { audio.start(); if (audio.titleTheme) audio.titleTheme(); } catch (e) {}
   document.getElementById('title').style.opacity = 0;
   setTimeout(() => document.getElementById('title').style.display = 'none', 800);
-  // fullscreen was already requested on the first tap (startTitleMusic) so the
-  // resize never lands mid-dive. Desktop just grabs the pointer here.
+  // fullscreen (touch) was requested on the tap in onTitleTap so its resize
+  // lands over the orbit, not mid-dive. Desktop just grabs the pointer here.
   if (!IS_TOUCH) canvas.requestPointerLock();
 }
 // tap ANYWHERE to begin — no button, no instructions
