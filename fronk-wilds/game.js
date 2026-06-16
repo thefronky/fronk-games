@@ -5574,7 +5574,17 @@ function arrowUpdate(dt) {
       const gy = heightAt(tr.x, tr.z);
       const zoneTop = a.fire ? ((tr.top !== undefined ? tr.top - gy : 10) + 3) : 10;
       if (cyp > gy + 0.3 && cyp < gy + zoneTop) {       // trunk + canopy (full for fire)
-        a.m.position.set(cxp, cyp, czp);                // snap to the trunk face
+        if (a.fire) {
+          a.m.position.set(cxp, cyp, czp);              // burning shaft: snap to the trunk, it's consumed anyway
+        } else {
+          // lodge only a couple inches: tip at the trunk FACE, shaft proud
+          const vl = Math.hypot(a.v.x, a.v.y, a.v.z) || 1;
+          const dx = a.v.x / vl, dy = a.v.y / vl, dz = a.v.z / vl, hh = Math.hypot(dx, dz) || 1;
+          const surf = Math.max(0.05, trunkR - 0.05);
+          const ex = tr.x - (dx / hh) * surf, ez = tr.z - (dz / hh) * surf;
+          a.m.position.set(ex - dx * 0.40, cyp - dy * 0.40, ez - dz * 0.40);
+          a.m.lookAt(ex, cyp, ez);                      // tip just bites the wood, shaft sticks out
+        }
         a.stuck = true; a.t = a.fire ? 2.0 : ARROW_STUCK_LIFE;   // a burning shaft is consumed by its own fire
         if (a.m.userData.streak) { a.m.remove(a.m.userData.streak); a.m.userData.streak = null; }
         if (audio.impact) audio.impact('wood', distVol);
@@ -5590,10 +5600,18 @@ function arrowUpdate(dt) {
       scene.remove(a.m); arrows.splice(i, 1); continue;
     }
 
-    // ground hit (grass/dirt) — embed it, head buried, fletching proud
+    // ground hit (grass/dirt) — PLANT it tip-down so the shaft ALWAYS shows,
+    // any shot angle (a steep shot used to bury flat and vanish). ~8cm in the
+    // dirt, the rest of the shaft proud and findable.
     if (py < heightAt(px, pz)) {
-      const vl = Math.hypot(a.v.x, a.v.y, a.v.z) || 1;
-      a.m.position.addScaledVector(a.v, -0.30 / vl);   // back out ~30 cm along the shot line
+      const gy = heightAt(px, pz);
+      let hx = a.v.x, hz = a.v.z; const hl = Math.hypot(hx, hz) || 1; hx /= hl; hz /= hl;
+      const ax = hx * 0.42, az = hz * 0.42, ay = -0.92;          // steep down, leaning the way it flew
+      const k = Math.hypot(ax, ay, az) || 1;
+      const nx2 = ax / k, ny2 = ay / k, nz2 = az / k;
+      const oy = gy - 0.08 - 0.40 * ny2;                         // origin so tip lodges ~8cm, tail high
+      a.m.position.set(px, oy, pz);
+      a.m.lookAt(px + nx2, oy + ny2, pz + nz2);                  // tip points down into the ground
       a.stuck = true; a.t = ARROW_STUCK_LIFE;
       if (a.m.userData.streak) { a.m.remove(a.m.userData.streak); a.m.userData.streak = null; }
       if (audio.impact) audio.impact('ground', distVol);
