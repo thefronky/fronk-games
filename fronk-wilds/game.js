@@ -4539,12 +4539,9 @@ function endIntro() {                  // hand control to the player
 }
 // big centered line, no box — fades in slow, holds, fades out
 function cinematic(text, ms = 4000) {
-  const el = document.getElementById('cinematic');
-  if (!el) return;
-  el.textContent = text;
-  el.style.opacity = 1;
-  clearTimeout(cinematic._t);
-  cinematic._t = setTimeout(() => { el.style.opacity = 0; }, ms);
+  // no centered narration cards either — death/arrival read through the visual
+  // beat (the black veil) + audio. (no-op so call sites stay harmless)
+  return;
 }
 // CSS-var driver for the eyelids (DOM lives in index.html)
 const _eyelids = document.getElementById('eyelids');
@@ -6208,10 +6205,9 @@ window._say = say;
 
 let toastTimer = null;
 function toast(msg, ms = 2600) {
-  const el = document.getElementById('toast');
-  el.textContent = msg; el.style.opacity = 1;
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.style.opacity = 0, ms);
+  // NO on-screen narration — everything is conveyed through audio + visuals now.
+  // (kept as a no-op so every existing toast()/say() call site stays harmless)
+  return;
 }
 function pick(arr) { return arr[Math.random() * arr.length | 0]; }
 function renderNotes() {
@@ -6713,9 +6709,10 @@ function tickBody() {
     const starving = t - player.lastAte > 120;
     if (starving) {
       player.hp -= dt * 0.7; renderHP();
-      if (!tickBody._hungerWarned || t - tickBody._hungerWarned > 30) {
+      if (!tickBody._hungerWarned || t - tickBody._hungerWarned > 22) {
         tickBody._hungerWarned = t;
-        say('hungry', 4200);
+        // no text — hunger now reads as a tired, hollow breath (+ the exhaustion vignette)
+        if (audio.breath) audio.breath(0.5);
       }
       if (player.hp <= 0 && !dead) { dead = true;
         resetDrawState();
