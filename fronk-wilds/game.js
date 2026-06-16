@@ -2773,7 +2773,8 @@ const pollen = (() => {
   const p = new THREE.Points(geo, mat); p.frustumCulled = false; scene.add(p); return p;
 })();
 function updatePollen(t, dt, night) {
-  pollen.material.opacity = 0.5 * (1 - night);          // day only
+  // day only — and the gold motes need sun, so they thin out under a shower
+  pollen.material.opacity = 0.5 * (1 - night) * (1 - _rainLevel * 0.9);
   if (night > 0.96) return;
   pollen.position.set(player.x, heightAt(player.x, player.z), player.z);
   const a = pollen.geometry.attributes.position.array;
@@ -6027,7 +6028,7 @@ function tickBody() {
   // occasional swell. Day only, and off during the trip (which owns the grade).
   {
     const cc = Math.max(0, Math.sin(t * 0.06) * 0.6 + Math.sin(t * 0.025 + 1.3) * 0.4);
-    const cover = cc * cc * (1 - night) * (tripT > 0 ? 0 : 1) * 0.55;
+    const cover = cc * cc * (1 - night) * (tripT > 0 ? 0 : 1) * (1 - _rainLevel) * 0.55;
     _cloudCover = cover;
     sun.intensity *= 1 - cover * 0.72;
     hemi.intensity *= 1 - cover * 0.28;
