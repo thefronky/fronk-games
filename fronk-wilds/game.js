@@ -5084,6 +5084,75 @@ window._dust = () => DUST.filter(p => p.visible).length;   // debug/test hook
 // tan of the ground you're standing on (rock kicks up almost nothing)
 function dustTintFor(grd) { return grd === 'sand' ? 0xccb892 : grd === 'rock' ? 0x8c857e : 0xa3906f; }
 
+// ── weather: a passing rain ── most of the time it's clear, but now and then a
+// light shower rolls through — the light greys over, a soft hiss, thin streaks
+// around you — then it passes and the gold warms back. Mood, not a downpour:
+// transient, occasional, restrained. Cheap: one Points cloud that follows you.
+const _rainN = IS_TOUCH ? 340 : 640;
+const _rainHW = 26, _rainTop = 30, _rainBot = -6;
+// each drop is a short slanted LINE (real streaks — Points only draw squares).
+const _rainFall = 24, _rainSlant = 3.2, _rainLen = 1.5;
+const _rainMag = Math.hypot(_rainFall, _rainSlant);
+const _rainSx = (_rainSlant / _rainMag) * _rainLen, _rainSy = (_rainFall / _rainMag) * _rainLen;
+let _rain = null, _rainHeads = null, _rainLevel = 0, _rainTarget = 0, _rainDur = 0, _rainCd = 90 + Math.random() * 120;
+const FOG_RAIN = new THREE.Color(0x8b9095);   // cool overcast grey
+function buildRain() {
+  _rainHeads = new Float32Array(_rainN * 3);
+  const pos = new Float32Array(_rainN * 6);          // 2 verts (head, tail) per drop
+  for (let i = 0; i < _rainN; i++) {
+    const hx = (Math.random() - 0.5) * 2 * _rainHW,
+          hy = _rainBot + Math.random() * (_rainTop - _rainBot),
+          hz = (Math.random() - 0.5) * 2 * _rainHW;
+    _rainHeads[i * 3] = hx; _rainHeads[i * 3 + 1] = hy; _rainHeads[i * 3 + 2] = hz;
+    const b = i * 6;
+    pos[b] = hx; pos[b + 1] = hy; pos[b + 2] = hz;
+    pos[b + 3] = hx - _rainSx; pos[b + 4] = hy - _rainSy; pos[b + 5] = hz;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  const mat = new THREE.LineBasicMaterial({ color: 0xaebccc, transparent: true,
+    opacity: 0, depthWrite: false });
+  _rain = new THREE.LineSegments(geo, mat); _rain.frustumCulled = false; _rain.visible = false;
+  scene.add(_rain);
+}
+function weatherUpdate(t, dt, night) {
+  if (!_rain) return;
+  // shower scheduler: long clear spells, then a shower that swells and passes.
+  // suppressed entirely during the trip (it owns the sky/grade).
+  if (tripT > 0) { _rainTarget = 0; }
+  else if (_rainDur > 0) { _rainDur -= dt; if (_rainDur <= 0) { _rainTarget = 0; _rainCd = 150 + Math.random() * 240; } }
+  else { _rainCd -= dt; if (_rainCd <= 0) { _rainDur = 28 + Math.random() * 40; _rainTarget = 0.45 + Math.random() * 0.4; } }
+  _rainLevel += (_rainTarget - _rainLevel) * Math.min(1, dt * 0.35);   // slow roll-in/out
+  _rain.material.opacity = 0.62 * _rainLevel;
+  _rain.visible = _rainLevel > 0.01;
+  if (_rain.visible) {
+    const pos = _rain.geometry.attributes.position.array;
+    const fall = _rainFall * dt, slant = _rainSlant * dt;
+    for (let i = 0; i < _rainN; i++) {
+      let hx = _rainHeads[i * 3] + slant, hy = _rainHeads[i * 3 + 1] - fall, hz = _rainHeads[i * 3 + 2];
+      if (hy < _rainBot) { hy = _rainTop; hx = (Math.random() - 0.5) * 2 * _rainHW; hz = (Math.random() - 0.5) * 2 * _rainHW; }
+      if (hx > _rainHW) hx -= 2 * _rainHW;
+      _rainHeads[i * 3] = hx; _rainHeads[i * 3 + 1] = hy; _rainHeads[i * 3 + 2] = hz;
+      const b = i * 6;
+      pos[b] = hx; pos[b + 1] = hy; pos[b + 2] = hz;
+      pos[b + 3] = hx - _rainSx; pos[b + 4] = hy - _rainSy; pos[b + 5] = hz;
+    }
+    _rain.geometry.attributes.position.needsUpdate = true;
+    _rain.position.set(player.x, player.y, player.z);
+    // the light goes flat and overcast as the shower deepens
+    const k = _rainLevel;
+    sun.intensity *= 1 - k * 0.5;
+    hemi.intensity *= 1 - k * 0.18;
+    if ('environmentIntensity' in scene) scene.environmentIntensity *= 1 - k * 0.28;
+    scene.fog.color.lerp(FOG_RAIN, k * 0.5);
+    scene.background.copy(scene.fog.color);
+    scene.fog.far -= k * 90;   // closes the world in a touch
+  }
+}
+window._rain = () => _rainLevel;                       // debug/test hook
+window._forceRain = () => { _rainDur = 40; _rainTarget = 0.8; _rainCd = 0; };   // debug/test hook
+buildRain();
+
 function loose() {
   // a real press always looses a shot — even a quick tap (raiseT confirms the
   // bow came up). Only a true no-draw is ignored. Floor the power so a fast
@@ -5979,6 +6048,7 @@ function tickBody() {
   const fogClose = night * Math.sqrt(night);
   scene.fog.near = 60 - 26 * fogClose;
   scene.fog.far = 340 - 170 * fogClose;
+  weatherUpdate(t, dt, night);   // a passing shower greys the light + closes the fog (after the day/night grade)
   // moon rides opposite the sun — only shows once it clears the horizon
   _moonDir.copy(_sunDir).multiplyScalar(-1);
   moon.position.set(player.x + _moonDir.x * 820, _moonDir.y * 820, player.z + _moonDir.z * 820);
@@ -6377,7 +6447,7 @@ function tickBody() {
       moving: !!(mx || mz), sprint: sprinting, _moveLvl,
       wolfDist, lakeDist: Math.hypot(player.x - 70, player.z + 90),
       night: window._night || 0, hp: player.hp, breath: breathLoad,
-      px: player.x, pz: player.z, yaw: player.yaw,
+      px: player.x, pz: player.z, yaw: player.yaw, rain: _rainLevel,
     });
   }
 

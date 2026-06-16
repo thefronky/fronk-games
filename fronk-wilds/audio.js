@@ -166,6 +166,14 @@ export class AudioEngine {
     const wf = C.createBiquadFilter(); wf.type = 'lowpass'; wf.frequency.value = 600;
     ws.connect(wf).connect(this.waterGain).connect(this.master);
 
+    // ── rain bed ── a soft hiss for a passing shower; gain driven from update()
+    // by s.rain (0..1). Bandpassed noise — higher than wind, airier than water.
+    this.rainGain = C.createGain(); this.rainGain.gain.value = 0;
+    const rs = this._noiseLoop();
+    const rhp = C.createBiquadFilter(); rhp.type = 'highpass'; rhp.frequency.value = 600;
+    const rlp = C.createBiquadFilter(); rlp.type = 'lowpass'; rlp.frequency.value = 4200;
+    rs.connect(rhp).connect(rlp).connect(this.rainGain).connect(this.master);
+
     // ── danger drone (predators) — detuned three-voice cluster, plus a
     // breath of bandpassed noise so it sounds like something breathing
     this.dangerGain = C.createGain(); this.dangerGain.gain.value = 0;
@@ -1309,6 +1317,9 @@ export class AudioEngine {
     // water by lake proximity (full inside 60m, silent past 220m)
     const lk = Math.max(0, Math.min(1, 1 - (s.lakeDist - 60) / 160));
     this.waterGain.gain.setTargetAtTime(lk * 0.14, t, 0.5);
+
+    // rain hiss tracks the passing shower (s.rain 0..1)
+    this.rainGain.gain.setTargetAtTime(Math.max(0, Math.min(1, s.rain || 0)) * 0.13, t, 0.7);
 
     // danger by wolf proximity (starts at 34m, max at 6m)
     const dz = Math.max(0, Math.min(1, 1 - (s.wolfDist - 6) / 28));
