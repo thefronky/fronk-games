@@ -5702,6 +5702,23 @@ function arrowUpdate(dt) {
     const distVol = Math.min(1, Math.hypot(a.m.position.x - player.x, a.m.position.z - player.z) / 60);
     const px = a.m.position.x, py = a.m.position.y, pz = a.m.position.z;
 
+    // ── clouds SWALLOW arrows during the climb ── so you can't fire one (and
+    // ride its camera) up to the top and spoil the ascent. The motion bleeds
+    // away in the cloud — a soft poof — and the shaft drops, ending the ride.
+    if (tripLevel >= 2 && CLOUDSTEPS.length && !a.fire) {
+      let swallowed = false;
+      for (const cs of CLOUDSTEPS) {
+        if (Math.hypot(px - cs.x, py - cs.y, pz - cs.z) < cs.r + 1.0) { swallowed = true; break; }
+      }
+      if (swallowed) {
+        trailPuff(px, py, pz);                          // a little dissipating poof
+        if (a.m.userData.streak) { a.m.remove(a.m.userData.streak); a.m.userData.streak = null; }
+        a.v.set(0, -2, 0);                              // motion gone — it just sinks out
+        a.stuck = true; a.t = 0.5;                      // brief linger, then removed — ends the arrow-cam
+        continue;
+      }
+    }
+
     // tree hit — SWEPT against the trunk (a fast arrow steps >2m/frame, so
     // a point test would tunnel through a thin trunk). It stops IN the
     // wood and knocks like it. Closest approach of this frame's segment.
