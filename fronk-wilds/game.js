@@ -6272,28 +6272,29 @@ function tickBody() {
     const alt = Math.max(0, player.y - heightAt(player.x, player.z));
     const heaven = Math.min(1, Math.max(0, (alt - 28) / 95));
     // a SLOW, dreamy hue drift — not a strobing disco. Underwater, not a rave.
-    const hue = (t * (16 + lv * 7) + 45 * Math.sin(t * 0.45)) % 360;
-    const sat = 1 + (1.7 + 0.5 * lv) * k * (1 - heaven * 0.75);    // colors melt toward white up high
-    const con = 1 + (0.28 + 0.1 * lv) * k * (1 - heaven * 0.6);
-    const bri = 1 + (0.05 + 0.02 * lv) + heaven * 0.38 + 0.04 * Math.sin(t * 1.3) * k;  // overexposed up high (but kitchen still visible)
-    const blur = IS_TOUCH ? 0 : (0.35 + 0.45 * Math.sin(t * 0.5)) * k;
-    // surreal liquid WARP (desktop): an SVG displacement that breathes — the
-    // world melts and bends, not just a neon color shift.
+    // SUBTLE & SLOW — the trip should ooze in, never flash. The come-up
+    // envelopes (k=colour, ks=sway) already ease from 0; these peaks are now
+    // gentle so even at full it's a soft shift, not a neon disco.
+    const hue = (t * (7 + lv * 3) + 28 * Math.sin(t * 0.4)) % 360;   // slow drift, never races a bad colour
+    const sat = 1 + (0.4 + 0.15 * lv) * k * (1 - heaven * 0.75);     // ~1.55 max @ L1 (was ~3.2)
+    const con = 1 + (0.10 + 0.05 * lv) * k * (1 - heaven * 0.6);     // ~1.15 max
+    const bri = 1 + (0.03 + 0.015 * lv) + heaven * 0.38 + 0.02 * Math.sin(t * 1.0) * k;
+    const blur = IS_TOUCH ? 0 : (0.12 + 0.22 * Math.sin(t * 0.5)) * k;
+    // surreal liquid WARP (desktop): a gentle breathing displacement, not a melt
     let warp = '';
     if (_warpDisp) {
-      _warpDisp.setAttribute('scale', (IS_TOUCH ? 0 : (10 + lv * 10) * k * (1 - heaven * 0.7)).toFixed(1));
+      _warpDisp.setAttribute('scale', (IS_TOUCH ? 0 : (4 + lv * 4) * k * (1 - heaven * 0.7)).toFixed(1));
       if (!IS_TOUCH) warp = 'url(#warp) ';
     }
     canvas.style.filter = warp + 'hue-rotate(' + hue.toFixed(0) + 'deg) saturate(' + sat.toFixed(2)
       + ') contrast(' + con.toFixed(2) + ') brightness(' + bri.toFixed(2)
       + ') blur(' + blur.toFixed(2) + 'px)';
-    // a slow oceanic swell + drift + a melting SKEW — surreal, not a fast spin.
-    // rides ks (the EARLY envelope) so the view starts swaying with the trees,
-    // before the colour comes in — that "am I losing it?" beat.
-    const sc = 1 + (0.02 + 0.01 * lv) * Math.sin(t * 0.8) * ks;
-    const rot = (0.3 + 0.14 * lv) * Math.sin(t * 0.3) * ks;
-    const skx = (1.4 + lv * 0.9) * Math.sin(t * 0.6) * ks;       // the picture leans + warps
-    const sky = (1.4 + lv * 0.9) * Math.cos(t * 0.42) * ks;
+    // a slow oceanic swell + drift + a faint SKEW — the "am I losing it?" lean,
+    // riding ks (the early envelope) so it shifts in with the trees first.
+    const sc = 1 + (0.012 + 0.006 * lv) * Math.sin(t * 0.8) * ks;
+    const rot = (0.16 + 0.08 * lv) * Math.sin(t * 0.3) * ks;
+    const skx = (0.6 + lv * 0.35) * Math.sin(t * 0.6) * ks;      // gentle lean
+    const sky = (0.6 + lv * 0.35) * Math.cos(t * 0.42) * ks;
     canvas.style.transformOrigin = 'center';
     canvas.style.transform = 'scale(' + sc.toFixed(3) + ') rotate(' + rot.toFixed(2)
       + 'deg) skewX(' + skx.toFixed(2) + 'deg) skewY(' + sky.toFixed(2) + 'deg)';
