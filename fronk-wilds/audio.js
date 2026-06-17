@@ -1115,12 +1115,11 @@ export class AudioEngine {
   titleTheme() {
     if (!this.started || this._title || this._titleH) return;
     if (this._music.title) { this._titleH = this._startTrack('title', { gain: 1.15, fade: 0.7 }); return; }
-    this._wantTitle = true;            // not loaded yet → start it on load (procedural plays meanwhile)
-    const t = this.ctx.currentTime;
-    this.titleBus.gain.cancelScheduledValues(t);
-    this.titleBus.gain.setValueAtTime(0.0001, t);
-    this.titleBus.gain.exponentialRampToValueAtTime(1.15, t + 2.2);   // a bigger, faster swell in
-    this._title = { ix: 0, nextT: t + 0.1, fading: false, stopAt: 1e9 };
+    // Not loaded yet → play the REAL cinematic violin theme the instant it loads
+    // (handled by the _wantTitle hook in _loadSfx). NO procedural fallback: the
+    // synth "bars" read as a cheap metallic clang at the open — a beat of silence
+    // until the theme is ready is far better, and it's only ever a fraction.
+    this._wantTitle = true;
   }
   // runs every frame (even before the game starts) to keep the theme going
   pumpTitle(dt) {

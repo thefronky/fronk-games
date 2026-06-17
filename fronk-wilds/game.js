@@ -7642,15 +7642,21 @@ function tickBody() {
     // gentle so even at full it's a soft shift, not a neon disco.
     // the kitchen is a REAL modern place — barely any hue drift so its colours
     // read true (a faint dreamy shimmer only); the valley keeps the full drift.
-    const hue = ((t * (7 + lv * 3) + 28 * Math.sin(t * 0.4)) * (_inKitchen ? 0.05 : 1)) % 360;
-    const sat = 1 + (0.4 + 0.15 * lv) * k * (1 - heaven * 0.75);     // ~1.55 max @ L1 (was ~3.2)
-    const con = 1 + (0.10 + 0.05 * lv) * k * (1 - heaven * 0.6);     // ~1.15 max
-    const bri = 1 + (0.03 + 0.015 * lv) + (_inKitchen ? 0.04 : heaven * 0.38) + 0.02 * Math.sin(t * 1.0) * k;
-    const blur = IS_TOUCH ? 0 : (0.12 + 0.22 * Math.sin(t * 0.5)) * k;
+    // COLOUR DEPTH — the FIRST cap barely tints the world (movement/sway come in,
+    // colour stays a whisper); it's the SECOND that floods it. ~0.12 at level 1,
+    // ~1.12 at level 2, up from there. Movement (ks/sway, below) is NOT gated by
+    // this — motion always arrives first, colour trails well behind.
+    const cD = Math.max(0, _tripLvlVis - 1) + 0.12;
+    const hueAmt = Math.min(1, cD);             // L1 hardly rotates the hue at all
+    const hue = ((t * (7 + lv * 3) + 28 * Math.sin(t * 0.4)) * hueAmt * (_inKitchen ? 0.05 : 1)) % 360;
+    const sat = 1 + (0.5 * cD) * k * (1 - heaven * 0.75);    // ~1.06 @ L1, ~1.5 @ L2
+    const con = 1 + (0.08 * cD) * k * (1 - heaven * 0.6);
+    const bri = 1 + (0.03 + 0.015 * lv) * k + (_inKitchen ? 0.04 : heaven * 0.38) + 0.02 * Math.sin(t * 1.0) * k;
+    const blur = IS_TOUCH ? 0 : (0.12 + 0.22 * Math.sin(t * 0.5)) * k * hueAmt;
     // surreal liquid WARP (desktop): a gentle breathing displacement, not a melt
     let warp = '';
     if (_warpDisp) {
-      _warpDisp.setAttribute('scale', (IS_TOUCH || _inKitchen ? 0 : (4 + lv * 4) * k * (1 - heaven * 0.7)).toFixed(1));
+      _warpDisp.setAttribute('scale', (IS_TOUCH || _inKitchen ? 0 : (4 + lv * 4) * k * cD * (1 - heaven * 0.7)).toFixed(1));
       if (!IS_TOUCH) warp = 'url(#warp) ';
     }
     canvas.style.filter = warp + 'hue-rotate(' + hue.toFixed(0) + 'deg) saturate(' + sat.toFixed(2)
