@@ -656,7 +656,11 @@ const waterUniforms = { uTime: { value: 0 } };
        float road = pow(nh, 13.0) * 0.34;            // broad soft body of the road
        float glint = pow(nh, 70.0) * 0.9;            // crisp facet sparkle on aligned crests
        vec3 sunCol = mix(vec3(1.0,0.52,0.26), vec3(1.0,0.93,0.76), sunUp);
-       gl_FragColor.rgb += sunCol * (road + glint) * (1.0 - uNight) * smoothstep(0.02, 0.16, sunUp);`);
+       gl_FragColor.rgb += sunCol * (road + glint) * (1.0 - uNight) * smoothstep(0.02, 0.16, sunUp);
+       // ── depth-driven alpha ── shallow water near the bank goes more transparent
+       //    so the shoreline softly reveals the lakebed instead of a hard sheet edge
+       //    (this replaces the old flat shallows-tint plane). Deep water stays full.
+       gl_FragColor.a *= mix(0.4, 1.0, smoothstep(0.0, 1.5, vDepth));`);
   };
   // lake-local plane (a world-sized sheet pokes out past the terrain rim and
   // reads as a band on the horizon). Per-vertex DEPTH = how far the lakebed sits
@@ -672,14 +676,10 @@ const waterUniforms = { uTime: { value: 0 } };
   w.rotation.x = -Math.PI / 2;
   w.position.set(70, WATER_Y, -90);
   scene.add(w);
-  // shallows tint — a paler sheet just under the surface reads as
-  // shore depth-gradient without a real depth shader
-  const sh = new THREE.Mesh(new THREE.PlaneGeometry(440, 440),
-    new THREE.MeshStandardMaterial({ color: 0x5e8a80, transparent: true,
-      opacity: 0.30, roughness: 0.6, metalness: 0 }));
-  sh.rotation.x = -Math.PI / 2;
-  sh.position.set(70, WATER_Y - 0.4, -90);
-  scene.add(sh);
+  // (the flat 440x440 shallows tint plane was removed — it laid a cool teal band
+  //  under the surface that clashed with the golden-hour palette and duplicated
+  //  what the water shader already does: depth-based shallow→deep colour plus a
+  //  depth-driven alpha fade so the shoreline softens instead of a hard edge.)
   // (the 240 additive sparkle Points were removed — they sat at fixed world
   //  positions, ignored the sun, and read as scattered noise. The sun's
   //  reflection is now a single broad "sun road" computed in the water shader,
