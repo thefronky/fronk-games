@@ -2000,8 +2000,10 @@ function corruptionUpdate(dt, t) {
 // drifting clouds
 const clouds = [];
 {
-  const geo = new THREE.IcosahedronGeometry(1, 0);
-  const mat = new THREE.MeshLambertMaterial({ color: 0xf0dcc2, transparent: true, opacity: 0.88 });
+  // ROUND, soft puffs — was detail-0 (faceted 20-face blocks); now subdivided so
+  // each puff reads as a smooth billow. (Lower detail on phones for perf.)
+  const geo = new THREE.IcosahedronGeometry(1, IS_TOUCH ? 1 : 2);
+  const mat = new THREE.MeshLambertMaterial({ color: 0xf4e7d4, transparent: true, opacity: 0.9 });
   window._cloudMat = mat;
   // clouds scattered across the WHOLE map, at mixed heights — some hang high,
   // others come DOWN low and drift over the valley/hilltops. Each cloud's puffs
@@ -2009,12 +2011,16 @@ const clouds = [];
   const N = IS_TOUCH ? 20 : 30;
   for (let i = 0; i < N; i++) {
     const puffs = [];
-    const n = 6 + (Math.random() * 5 | 0);
+    // more puffs of widely varied size → a fluffier, billowy cumulus silhouette
+    const n = 9 + (Math.random() * 7 | 0);
     for (let p = 0; p < n; p++) {
-      const s = 6 + Math.random() * 11;
+      const s = 4 + Math.random() * 13;
       const g = geo.clone();
-      g.scale(s, s * 0.55, s * 0.8);                 // flat-bottomed cumulus
-      g.translate((Math.random() - 0.5) * 46, s * 0.28 + Math.random() * 3, (Math.random() - 0.5) * 18);
+      g.scale(s, s * (0.5 + Math.random() * 0.22), s * (0.7 + Math.random() * 0.25));   // flattish, varied billows
+      // pile them in a rounded mound: denser/taller toward the centre, thinning out
+      const rx = (Math.random() - 0.5) * 50, rz = (Math.random() - 0.5) * 22;
+      const lift = s * 0.24 * (1 - Math.min(1, Math.hypot(rx, rz) / 30));
+      g.translate(rx, s * 0.26 + lift + Math.random() * 2, rz);
       puffs.push(g);
     }
     const grp = new THREE.Group();
