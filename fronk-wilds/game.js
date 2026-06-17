@@ -161,6 +161,19 @@ scene.background = new THREE.Color(0xd89a55);
 // and render direct — so a black screen can never ship. ?bloom=0 forces it off.
 let USE_POST = new URLSearchParams(location.search).get('bloom') !== '0';
 scene.fog = new THREE.Fog(0xd89a55, 60, 340);
+// ── Firewatch-style aerial depth ── override the built-in linear-fog chunk ONCE,
+// globally, so EVERY fogged material gets a distance RAMP instead of one flat
+// wall-color: warm near → subtly cool/desaturated far, both derived from the live
+// scene fog color (stays day/night correct, and since scene.background IS the fog
+// color the far edge dissolves into the sky with no seam). Stacks receding
+// ridgelines into layers. One chunk edit — no per-material risk, no double fog.
+THREE.ShaderChunk.fog_fragment = `#ifdef USE_FOG
+  float fogFactor = smoothstep( fogNear, fogFar, vFogDepth );
+  vec3 fogNearC = fogColor * vec3(1.06, 1.0, 0.92);              // near: a touch warmer
+  vec3 fogFarC  = mix(fogColor, vec3(0.58, 0.62, 0.72), 0.22);  // far: subtly cool/desaturated
+  vec3 fogRamp  = mix(fogNearC, fogFarC, fogFactor);
+  gl_FragColor.rgb = mix( gl_FragColor.rgb, fogRamp, fogFactor );
+#endif`;
 
 const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.1, 1200);
 let composer = null, bloomPass = null;
