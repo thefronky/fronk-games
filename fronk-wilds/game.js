@@ -432,14 +432,14 @@ function heightAt(x, z) {
     a -= Math.max(0, 1 - dv / 90) * 26 * (0.4 + tt * 0.6);
   }
 
-  // central lake — a BIG open SEA now (was a ~130 pond): widened + deepened so
-  // you can really sail without bumping the shore. Reaches out toward the rim.
-  const d = Math.hypot(x - 70, z + 90) / 230;
-  a -= Math.max(0, 1 - d * d) * 30;
+  // central lake — a HUGE open SEA (was a ~130 pond): widened + deepened so you
+  // can sail for ages without bumping the shore. Reaches out toward the rim.
+  const d = Math.hypot(x - 70, z + 90) / 300;
+  a -= Math.max(0, 1 - d * d) * 35;
   // keep the spawn meadow + home a dry shore standing above the enlarged sea,
   // so you still wake on land (not in the water) — a raised peninsula by origin.
   const ds = Math.hypot(x - 0, z - 26);
-  a += Math.max(0, 1 - ds / 95) * 38;
+  a += Math.max(0, 1 - ds / 100) * 44;
 
   // climbable rocky outcrops — added LAST so a perch always sits
   // proud of whatever terrain it rests on (raw x,z, not warped, so
@@ -5387,7 +5387,7 @@ const canoe = (() => {
   // square sail, and a masthead WIND PENNANT. You stand amidships; the sail is
   // a good ~5.5m ahead so it reads as part of the boat, not a wall on your face.
   // Logs are 'z' (fore-aft), x = beam.
-  const L = 22, R = 0.5, N = 11;   // bigger vessel — longer + wider deck
+  const L = 30, R = 0.5, N = 11;   // a long vessel — much longer deck
   for (let i = 0; i < N; i++) {
     const log = new THREE.Mesh(new THREE.CylinderGeometry(R, R * 0.93, L, 8), logM);
     log.rotation.x = Math.PI / 2;                       // lay it flat, running fore-aft
@@ -5418,14 +5418,6 @@ const canoe = (() => {
   sp.needsUpdate = true; sail.geometry.computeVertexNormals();
   sail.position.set(0, 0.1, 0);                          // centered on the mast, up near the bow
   sailPivot.add(sail);
-  // a TELLTALE — a little wool streamer on the sail. It lies flat/streaming when
-  // the sail is drawing (good trim) and lifts/flutters when it's luffing, so you
-  // can read your trim at a glance. Animated in the sail block (canoe._telltale).
-  const telltale = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.09),
-    new THREE.MeshBasicMaterial({ color: 0xe8584a, side: THREE.DoubleSide }));
-  telltale.position.set(1.7, 0.4, 0.05);      // out near the leading edge of the sail
-  sailPivot.add(telltale);
-  g._telltale = telltale;
   g.add(sailPivot);
   // masthead pennant — re-aimed downwind each frame in the loop (g._windFlag)
   const flag = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.42), flagM);
@@ -5509,6 +5501,7 @@ let _gust = 0;                   // 0..1 fast gust ripple — flutters the penna
 let _raftAirborne = false, _raftAirVy = 0;   // wave-jump: launched off a steep face
 let _raftCreakT = 0;             // occasional timber-creak cooldown
 let _raftLaunch = 0;             // >0 = the launch glide: a clean push straight off the bank
+let _raftJumpCd = 0;            // cooldown so the raft only rarely leaps off a crest
 let _sailFovT = 0;               // 0..1 eased "sailing view" zoom-out
 let _sailTrim = 0;               // -1..1 — the SHEET: pull the rope to swing the sail
 let _boatWake = 0;               // 0..1 eased boat speed — drives wave size + bow wake
@@ -8261,12 +8254,6 @@ function tickBody() {
           const fill = _luffing ? 0.18 : 0.7 + catchW * 0.55;   // flat & flapping vs full & taut
           canoe._sail.scale.z += (fill - canoe._sail.scale.z) * Math.min(1, dt * 6);
         }
-        // telltale streamer: lies flat + streaming when drawing (good trim),
-        // lifts and flutters when luffing — a read-at-a-glance trim cue.
-        if (canoe._telltale) {
-          const flutter = _luffing ? Math.sin(t * 24) * 0.7 + 0.5 : Math.sin(t * 6) * 0.06;
-          canoe._telltale.rotation.z += (flutter - canoe._telltale.rotation.z) * Math.min(1, dt * 9);
-        }
       }
       // continuous sail/wind hiss + the occasional timber creak. A LUFFING sail
       // rushes/flaps audibly even at low speed, so you hear you've spilled the wind.
@@ -8590,17 +8577,10 @@ function tickBody() {
     _anchorBtn.classList.toggle('show', showAnchor);
     if (showAnchor) _anchorBtn.textContent = anchored ? 'raise anchor' : 'drop anchor';
   }
-  const _sailing = inCanoe && started && _raftLaunch <= 0 && !anchored;   // anchored = bow out to fish, not the sheet
-  if (sheetHand.visible !== _sailing) sheetHand.visible = _sailing;
-  if (_sailing) {
-    if (bow.visible) bow.visible = false;                 // can't shoot while working the sheet
-    sheetHand.position.x = 0.3 + _sailTrim * 0.16;        // pull the rope across
-    sheetHand.position.y = -0.36 + (_boatPitch || 0) * 0.4;
-    sheetHand.rotation.z = -_sailTrim * 0.4 + (_boatRoll || 0) * 0.5;
-    sheetHand.rotation.y = -0.25 - _sailTrim * 0.25;
-  } else if (started && !intro && !dead && !launching && !bow.visible) {
-    bow.visible = true;                                   // restore the bow after stepping ashore
-  }
+  // (the first-person sheet hand was removed per Fronk — no rope in hand while
+  // sailing; the bow stays in hand as normal.)
+  if (sheetHand.visible) sheetHand.visible = false;
+  if (started && !intro && !dead && !launching && !bow.visible) bow.visible = true;
   if (canoe.visible) {
     const cspd = Math.hypot(canoeVX, canoeVZ);
     const spd = Math.min(1, cspd / 11);
@@ -8608,10 +8588,13 @@ function tickBody() {
     // the bow's local fore-aft / lateral slope, from the wave gradient
     const fwdSlope = wv.gx * Math.sin(raftYaw) + wv.gz * Math.cos(raftYaw);
     const latSlope = wv.gx * Math.cos(raftYaw) - wv.gz * Math.sin(raftYaw);
-    // ── wave-jump ── moving fast UP a steep face (slope rising toward the bow)
-    // flings the raft off the crest. Bounded airtime, integrated like the player.
-    if (!_raftAirborne && cspd > 6 && fwdSlope > 0.12 && wv.o > 0.4) {
-      _raftAirborne = true;
+    // ── wave-jump ── only off a GENUINELY steep, fast crest (rare). It used to
+    // fire on nearly every swell, so the raft kept leaping + crash-landing — that
+    // repetitive launch/splash read as a jarring 'metallic' wave sound and made
+    // the ride feel choppy. Now it mostly just rides the swell smoothly.
+    _raftJumpCd = (_raftJumpCd || 0) - dt;
+    if (!_raftAirborne && cspd > 9 && fwdSlope > 0.45 && wv.o > 0.6 && _raftJumpCd <= 0) {
+      _raftAirborne = true; _raftJumpCd = 6 + Math.random() * 6;   // and a cooldown between jumps
       _raftAirVy = 2.2 + cspd * 0.32 + fwdSlope * 6;     // takeoff kick scales with speed/steepness
       if (audio.waveLaunch) audio.waveLaunch(Math.min(1, _raftAirVy / 9));
     }
