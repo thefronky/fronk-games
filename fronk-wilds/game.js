@@ -443,6 +443,15 @@ function heightAt(x, z) {
   return a;
 }
 
+// terrain up-vector at a point — central-difference of heightAt. Used so a
+// carcass lies FLUSH on a slope instead of half-buried at one end.
+function normalAt(x, z, out) {
+  const e = 1.2;
+  const hx = heightAt(x + e, z) - heightAt(x - e, z);
+  const hz = heightAt(x, z + e) - heightAt(x, z - e);
+  return (out || new THREE.Vector3()).set(-hx, 2 * e, -hz).normalize();
+}
+
 // ───────────────────────── biome regions ─────────────────────────
 // Distinct AREAS so exploration has variety. Cheap zoning by world
 // position + distance-from-anchors (terrain is already composed, so we
@@ -3978,7 +3987,9 @@ function animalUpdate(a, dt) {
         player.lastAte = clock.elapsedTime;
         bloodedUntil = clock.elapsedTime + 90;   // the opening gets on you
         if (firstTake) {
-          gutCarcass(a);                          // opened up, blood all around
+          takeHead(a);                            // take the head first — drops a severed-head proxy
+          gutCarcass(a);                          // then open it up, blood all around
+          lastHarvest = a.name; renderNotes();    // surface the species icon on the HUD
           if (a._stuck) { player.arrows = Math.min(ARROW_MAX, player.arrows + a._stuck);
             a._stuck = 0; renderNotes();          // your arrows come back with the meat —
             for (let k = a.obj.children.length - 1; k >= 0; k--) {   // and leave the body with you
@@ -4768,7 +4779,7 @@ const _organMat = new THREE.MeshStandardMaterial({ color: 0x4a0e0a, roughness: 0
   emissive: 0x240605, emissiveIntensity: 0.35 });
 window._gutCarcass = (a) => gutCarcass(a);   // debug/test hook
 function gutCarcass(a) {
-  if (a._gore) return;
+  if (a._gutted) return;
   const p = a.obj.position, gy = heightAt(p.x, p.z) + 0.04;
   // gore SCALES with the animal — a fox leaves a smear, a bear a slaughter.
   const sc = (a.obj.scale.x || 1) * 2.2;
@@ -4797,11 +4808,44 @@ function gutCarcass(a) {
   place(_organGeo, _organMat, Math.round(1 + sc * 0.8), 0.05, 0.6, 1.0, true);
   // a few stray chunks of gut
   place(_gutGeo, _gutMat, Math.round(2 + sc), 0.05, 0.5, 0.9, false);
-  a._gore = gore;
+  if (a._gore) a._gore.push(...gore);             // append — never clobber the severed head
+  else a._gore = gore;
+  a._gutted = true;
   a.obj.scale.y *= 0.78;                          // the body slumps open
   if (audio.impact) audio.impact('flesh', 0.12);
 }
 
+// the severed-head proxy: a small dark lump dropped on the ground beside the kill.
+const _headGeo = new THREE.IcosahedronGeometry(0.26, 0);
+const _headMat = new THREE.MeshStandardMaterial({ color: 0x140807, roughness: 0.6,
+  emissive: 0x0a0302, emissiveIntensity: 0.25 });
+window._takeHead = (a) => takeHead(a);            // debug/test hook
+function takeHead(a) {
+  if (a._headTaken) return;
+  a._headTaken = true;
+  // detach the actual head: GLTF rigs name a 'Head' bone; the procedural bear keeps a headPiv.
+  let headObj = null;
+  if (a.obj.userData.bear && a.obj.userData.bear.headPiv) headObj = a.obj.userData.bear.headPiv;
+  else a.obj.traverse(o => { if (!headObj && (o.isBone || o.isMesh) && /^head$/i.test(o.name)) headObj = o; });
+  if (headObj) headObj.visible = false;
+  // drop a small dark severed-head proxy on the ground next to the body
+  const p = a.obj.position, sc = a.obj.scale.x || 1;
+  const off = 0.6 + sc * 0.4, an = Math.random() * Math.PI * 2;
+  const hx = p.x + Math.cos(an) * off, hz = p.z + Math.sin(an) * off;
+  const head = new THREE.Mesh(_headGeo, _headMat);
+  head.scale.setScalar(0.7 + sc * 0.6);
+  head.position.set(hx, heightAt(hx, hz) + 0.18 * (0.7 + sc * 0.6), hz);
+  head.rotation.set(Math.random() * 3, Math.random() * 6.28, Math.random() * 3);
+  head.castShadow = true;
+  scene.add(head);
+  (a._gore = a._gore || []).push(head);           // tracked so it's cleaned up with the body
+  if (audio.impact) audio.impact('flesh', 0.4);
+}
+
+// scratch for the slope-aligned death pose (no per-kill allocation)
+const _deathN = new THREE.Vector3(), _deathUp = new THREE.Vector3(0, 1, 0),
+      _deathAlign = new THREE.Quaternion(), _deathYaw = new THREE.Quaternion(),
+      _deathRoll = new THREE.Quaternion(), _deathE = new THREE.Euler();
 window._kill = (a) => killAnimal(a);   // debug/test hook
 function killAnimal(a, suffered = false) {
   a.dead = true; a.t = 75;   // carcasses linger — long enough for scavengers
@@ -4810,8 +4854,17 @@ function killAnimal(a, suffered = false) {
   if (a._flame) { a.obj.remove(a._flame); a._flame = null; }   // the fire goes out with it
   a.suffered = suffered || !!a.bleeding || a.state === 'wounded';
   setAnim(a, 'Death', true);
-  if (a.cfg.bearish) { a.obj.rotation.z = 1.35; a.obj.rotation.x = 0;   // the bear goes down on its side
-    a.obj.position.y = heightAt(a.obj.position.x, a.obj.position.z) + 0.5; }
+  if (a.cfg.bearish) {
+    // lie FLUSH on the slope: keep facing (yaw), fold the side-roll, then tip the
+    // whole body so its up-axis matches the terrain normal — no half-buried carcass.
+    const p = a.obj.position;
+    normalAt(p.x, p.z, _deathN);
+    _deathYaw.setFromEuler(_deathE.set(0, a.obj.rotation.y, 0));    // preserve heading
+    _deathRoll.setFromEuler(_deathE.set(0, 0, 1.35));              // down on its side
+    _deathAlign.setFromUnitVectors(_deathUp, _deathN);            // body up → ground normal
+    a.obj.quaternion.copy(_deathAlign).multiply(_deathYaw).multiply(_deathRoll);
+    a.obj.position.y = heightAt(p.x, p.z) + 0.5;
+  }
   score[a.name] = (score[a.name] || 0) + 1;
   spawnCarrion(a);                               // scavengers gather over the kill
   // the violin theme punctuates every kill (procedural stinger as fallback)
@@ -7081,6 +7134,23 @@ function toast(msg, ms = 2600) {
   return;
 }
 function pick(arr) { return arr[Math.random() * arr.length | 0]; }
+// tiny inline-SVG outline icons, one per harvestable species — drawn as the
+// most-recent kill next to the meat count. currentColor inherits the #notes tint.
+const SPECIES_ICON = {
+  Deer:  '<path d="M5 14 Q5 9 8 9 Q11 9 11 14 M8 9 V5 M6 6 L4 3 M10 6 L12 3"/>',
+  Stag:  '<path d="M5 14 Q5 9 8 9 Q11 9 11 14 M8 9 V4 M6 5 L3 2 M5 5 L4 2 M10 5 L13 2 M11 5 L12 2"/>',
+  Fox:   '<path d="M3 13 L8 5 L13 13 Z M5 6 L3 3 M11 6 L13 3"/>',
+  Cow:   '<path d="M4 13 Q4 7 8 7 Q12 7 12 13 M4 8 L2 5 M12 8 L14 5 M8 7 V4"/>',
+  Horse: '<path d="M4 14 Q4 7 9 6 L12 3 L11 6 L13 7 M9 6 L8 9"/>',
+  Wolf:  '<path d="M2 13 L5 6 L8 9 L11 6 L14 13 M8 9 V12"/>',
+  Bear:  '<path d="M4 13 Q3 8 8 8 Q13 8 12 13 M5 7 A1.4 1.4 0 1 1 7 7 M9 7 A1.4 1.4 0 1 1 11 7"/>',
+};
+function speciesIcon(name) {
+  const body = SPECIES_ICON[name] || SPECIES_ICON[name === 'Bull' ? 'Cow' : 'Deer'];
+  return '<svg class="spc" viewBox="0 0 16 16" fill="none" stroke="currentColor" '
+    + 'stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">' + body + '</svg>';
+}
+let lastHarvest = null;   // name of the most-recent species you took
 function renderNotes() {
   // arrows you have on hand (you feel it when it's low), the meat you carry
   // as solid marks, and the meat laid by at the base as hollow ones.
@@ -7092,7 +7162,14 @@ function renderNotes() {
       + (player.stored > 8 ? '◇×' + player.stored : '◇'.repeat(player.stored))
       + '</span>'
     : '';
-  document.getElementById('notes').innerHTML = ammo + carried + kept;
+  // the most-recent species you took — outline icon + a running tally from score
+  let spc = '';
+  if (lastHarvest) {
+    const n = score[lastHarvest === 'Bear' && score.Bull ? 'Bull' : lastHarvest] || 1;
+    spc = '  <span class="spcwrap">' + speciesIcon(lastHarvest)
+        + (n > 1 ? '<span class="spcn">×' + n + '</span>' : '') + '</span>';
+  }
+  document.getElementById('notes').innerHTML = ammo + carried + kept + spc;
 }
 function renderHP() {
   document.getElementById('hpfill').style.width = Math.max(0, player.hp) + '%';
