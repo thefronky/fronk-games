@@ -400,13 +400,16 @@ export class AudioEngine {
     return this._playAt(base, x, z, { gain: 1, n, ref: 12, max: 150, rolloff: 0.85, ...opts });
   }
 
-  // a sudden, LOUD gator strike: an explosive water lunge + thrash splash, with
-  // a short guttural growl layered under for menace. Reuses existing samples.
+  // a sudden, TERRIFYING gator strike: an explosive water lunge + thrash splash
+  // under a DEEP monstrous bellow — bear_growl pitched WAY down and doubled into
+  // a reptilian roar. Loud + close so it hits hard. Reuses existing samples.
   gatorAttack(x, z) {
     if (!this.started || this.muted) return;
-    this._playAt('shark_lunge', x, z, { gain: 1.4, ref: 9, max: 150, rolloff: 0.8 });
-    this._playAt('shark_splash', x, z, { gain: 1.1, n: 2, ref: 9, max: 150, rolloff: 0.85 });
-    this._playAt('bear_growl', x, z, { gain: 0.7, n: 2, rate: 1.25, ref: 10, max: 120, rolloff: 0.9 });
+    this._playAt('shark_lunge', x, z, { gain: 1.7, ref: 8, max: 170, rolloff: 0.7 });
+    this._playAt('shark_splash', x, z, { gain: 1.25, n: 2, ref: 8, max: 170, rolloff: 0.8 });
+    // two growl layers pitched DOWN (0.6 / 0.48) = a huge, guttural, scaly roar
+    this._playAt('bear_growl', x, z, { gain: 1.05, n: 2, rate: 0.6, ref: 10, max: 160, rolloff: 0.85 });
+    this._playAt('bear_growl', x, z, { gain: 0.6, n: 2, rate: 0.48, ref: 10, max: 160, rolloff: 0.85 });
   }
 
   // play a foley sample (non-spatial) through the foley bus. `n` picks a random

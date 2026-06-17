@@ -3873,6 +3873,8 @@ function leviathanUpdate(t) {
 }
 window._leviathan = () => _leviathan;   // debug/test hook
 
+// gator lunge tuning — it bursts out and surges this far/fast over this long.
+const GATOR_LUNGE_R = 9, GATOR_LUNGE_DUR = 0.7, GATOR_LUNGE_SPD = 11;
 // ════ THE GATORS ════ submerged ambush predators. Procedural, dark, low-poly.
 // They pin to the waterline (mostly under) and SNAP at the player or a Horse
 // that strays within snapR. A bite is rare (snapKill) but takes a big chunk.
@@ -3923,9 +3925,39 @@ function gatorUpdate(a, dt, dx, dz, dist) {
       const tox = 70 - spot.x, toz = -90 - spot.z, tl = Math.hypot(tox, toz) || 1;
       p.x = spot.x + (tox / tl) * 2.0; p.z = spot.z + (toz / tl) * 2.0;
     }
+    a._homeX = p.x; a._homeZ = p.z;                 // the lurk spot it returns to
+  }
+  const gt0 = a.obj.userData.gator;
+  // ── MID-LUNGE ── it has EXPLODED out of the water and is surging at the target,
+  // jaws wide, body arcing up out of the lake. Bites hard if it reaches.
+  if (a._lungeT > 0) {
+    a._lungeT -= dt;
+    const prog = 1 - a._lungeT / GATOR_LUNGE_DUR;   // 0..1
+    const arc = Math.sin(prog * Math.PI);           // rise then fall
+    p.y = (WATER_Y - 0.34) + arc * 2.2;             // launches ~2m clear of the surface
+    p.x += Math.sin(a.dir) * GATOR_LUNGE_SPD * dt;  // surges along its locked heading
+    p.z += Math.cos(a.dir) * GATOR_LUNGE_SPD * dt;
+    a._gape = 1.0;
+    if (gt0) { gt0.jaw.rotation.x = 0.9; a.obj.rotation.y = a.dir; a.obj.rotation.x = -arc * 0.5; }
+    const reach = Math.hypot(player.x - p.x, player.z - p.z);
+    if (!a._lungeHit && reach < 3.0 && meleeReach()) {
+      a._lungeHit = true; hurtPlayer(a.cfg.dmg); camShakeT = SHAKE_DUR * 3;
+    }
+    // a horse caught in the lunge path is dragged under
+    if (!a._lungeHit && a._lungeTgt && !a._lungeTgt.dead
+        && Math.hypot(a._lungeTgt.obj.position.x - p.x, a._lungeTgt.obj.position.z - p.z) < 3.2) {
+      a._lungeHit = true; killAnimal(a._lungeTgt);
+    }
+    if (a._lungeT <= 0) {                            // splashes back under, returns to its lurk
+      p.x = a._homeX ?? p.x; p.z = a._homeZ ?? p.z; a.obj.rotation.x = 0;
+      a.attackCd = 3.5 + Math.random() * 3.5;
+      if (audio.sharkSfx) audio.sharkSfx('shark_splash', p.x, p.z, { gain: 0.9 });
+    }
+    return;
   }
   // pin the body to the waterline — mostly submerged, only eyes/snout above
   p.y = WATER_Y - 0.34;
+  if (a.obj.rotation.x) a.obj.rotation.x = 0;
   // nearest target: the player, OR any Horse within range (scan throttled)
   let tx = player.x, tz = player.z, td = dist, tgt = null;
   a._scanT = (a._scanT ?? 0) - dt;
@@ -3953,16 +3985,16 @@ function gatorUpdate(a, dt, dx, dz, dist) {
     a._gape = Math.max(0, (a._gape || 0) - dt * 3);
     gt.jaw.rotation.x = a._gape * 0.7;
   }
-  // SNAP when something crosses snapR and the bite is ready
-  if (td < a.cfg.snapR && a.attackCd <= 0) {
-    a.attackCd = 2.2; a._gape = 1.0;
+  // ── LUNGE ── once you (or a horse) come within striking range and it's ready,
+  // it doesn't just snap — it EXPLODES out of the water and lunges. The lunge
+  // itself does the damage (see the mid-lunge block above), so it's a real,
+  // committed attack you have to dodge, not a coin-flip.
+  if (td < GATOR_LUNGE_R && a.attackCd <= 0) {
+    a._lungeT = GATOR_LUNGE_DUR; a._lungeHit = false; a._lungeTgt = tgt;
+    a.dir = Math.atan2(tx - p.x, tz - p.z);          // lock heading onto the target
+    a.obj.rotation.y = a.dir; a._gape = 1.0;
     if (audio.gatorAttack) audio.gatorAttack(p.x, p.z);
     else if (audio.snapAt) audio.snapAt(p.x, p.z, player, 1.0);
-    if (Math.random() < a.cfg.snapKill) {           // ~20% to connect
-      if (tgt) { killAnimal(tgt); }                 // a horse dragged under
-      else { hurtPlayer(a.cfg.dmg); camShakeT = SHAKE_DUR * 2; }
-    }
-    // a miss just resubmerges — the eyes slide back under (handled by the pin)
   }
 }
 
