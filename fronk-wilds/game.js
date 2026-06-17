@@ -1333,7 +1333,14 @@ function rockShade(sh) {
                    : reg === REGION.PINE ? 1.0
                    : 0.8;
     // bias toward thickets: square the mask, then mix with flat by gveffect
-    const groveAccept = (1 - gveffect) + gveffect * (0.18 + 1.45 * gv * gv);
+    let groveAccept = (1 - gveffect) + gveffect * (0.18 + 1.45 * gv * gv);
+    // ── island fuel ── pack the dry lake-shore ring with trees so "shooting
+    // the island" ignites a big self-contained blaze. The lake basin centers on
+    // (70,-90); the band ~14..34m out from its rim is solid shore — load it up.
+    {
+      const dLake = Math.hypot(x - 70, z + 90);
+      if (dLake > 14 && dLake < 34) groveAccept = Math.min(1, groveAccept + 0.6);
+    }
     if (Math.random() > groveAccept) continue;
     const roll = Math.random();
     let sp;
@@ -1443,6 +1450,12 @@ function rockShade(sh) {
                 : reg === REGION.ALPINE ? 0.4
                 : reg === REGION.WETLAND ? 1.2     // >1 = no rejection, reeds cluster
                 : 0.9;                              // autumn
+    // ── island fuel ── thicken undergrowth on the dry lake-shore ring too, so
+    // grass↔bush↔tree all chain when the island goes up (lake basin at 70,-90)
+    {
+      const dLake = Math.hypot(x - 70, z + 90);
+      if (dLake > 12 && dLake < 36) bdens += 0.7;
+    }
     if (Math.random() > bdens) continue;
     P.set(x, y - 0.1, z);
     E.set(0, Math.random() * Math.PI * 2, (Math.random() - 0.5) * 0.15);
@@ -5226,8 +5239,9 @@ function explodeArrival() {
   // screen flash + a hard shake + the boom
   const fl = document.getElementById('flash'); if (fl) { fl.style.transition = 'none'; fl.style.opacity = '0.92'; }
   camShakeT = SHAKE_DUR * 3;
-  if (audio.killStinger) audio.killStinger();
-  if (audio.impact) audio.impact('ground', 1);
+  // NO metallic stinger here — the arrival is a cinematic beat: just the swelling
+  // theme + the visual blast + a soft earthen impact. (killStinger removed.)
+  if (audio.impact) audio.impact('ground', 0.7);
   _arrival = { t: 0, ring, sphere, beam, light, gx, gy, gz };
 }
 function arrivalUpdate(dt) {
@@ -6018,9 +6032,175 @@ function treeFireUpdate(dt) {
       scene.remove(f.grp);
       if (f.light) scene.remove(f.light);
       TREEFIRES.splice(i, 1);
+    } else if (f.t > 0.6 && (f._gseed = (f._gseed || 0) - dt) <= 0) {
+      // a burning tree drops embers into the grass at its feet → ground fire,
+      // so a forest blaze ALSO sweeps the meadow floor (tree → grass chaining).
+      f._gseed = 1.2 + Math.random();
+      igniteGround(f.tr.x + (Math.random() - 0.5) * 4, f.tr.z + (Math.random() - 0.5) * 4);
     }
   }
 }
+
+// ───────────────────── ground / grass wildfire ─────────────────────
+// A fire arrow into the GROUND (or a burning tree's embers) lights the grass.
+// Each active cell carries a life timer + a cheap flame billboard cluster and,
+// on a throttled tick, REACHES to a neighbouring flammable cell — so the burn
+// sweeps grass↔bush↔tree across the island. When a cell burns out it SCORCHES
+// (existing _burned/scorch system: grass clears, terrain → sand). Bounded by
+// GFIRE_MAX for the phone; spread is throttled, never a full-map scan.
+const GROUNDFIRES = [];
+const GFIRE_MAX = IS_TOUCH ? 120 : 200;
+const GFIRE_CELL = 4;                              // metres between distinct ground-fire cells
+const _gfireKey = (x, z) => Math.floor(x / GFIRE_CELL) * 100003 + Math.floor(z / GFIRE_CELL);
+const _gfireCells = new Set();                     // keys currently ablaze (dedupe + fast lookup)
+// cheap shared flame visual for a ground cell — additive cones, reusing the
+// tree-fire mats so the whole blaze reads as one warm glow under the bloom pass.
+function _buildGroundFlame() {
+  const g = new THREE.Group();
+  for (let i = 0; i < 3; i++) {
+    const f = new THREE.Mesh(i ? flameGeoB : flameGeoA, i === 2 ? _fmC : (i ? _fmB : _fmA));
+    f.position.set((Math.random() - 0.5) * 1.4, 0.5 + i * 0.35, (Math.random() - 0.5) * 1.4);
+    f.scale.setScalar(0.7 + Math.random() * 0.4);
+    f.userData.ph = i * 1.4 + Math.random();
+    g.add(f);
+  }
+  return g;
+}
+// is a spot flammable? green land with fuel (grass grows everywhere green, plus
+// bushes), above water, below the rock/snow line, not already burned/ablaze.
+function _flammable(x, z) {
+  const y = heightAt(x, z);
+  if (y < WATER_Y + 0.5 || y > 24) return false;   // water / bare rock-snow: no fuel
+  if (_isBurned(x, z)) return false;               // already scorched to sand
+  return true;
+}
+function igniteGround(x, z) {
+  if (GROUNDFIRES.length >= GFIRE_MAX) return false;
+  if (!_flammable(x, z)) return false;
+  const key = _gfireKey(x, z);
+  if (_gfireCells.has(key)) return false;          // this cell already burning
+  _gfireCells.add(key);
+  const gy = heightAt(x, z);
+  const grp = _buildGroundFlame();
+  grp.position.set(x, gy, z);
+  grp.scale.setScalar(0.2);                         // grows in
+  scene.add(grp);
+  if (audio.fireCatch) audio.fireCatch();
+  GROUNDFIRES.push({ x, z, key, grp, t: 0,
+                     dur: 3.5 + Math.random() * 2.5,   // a cell burns ~3.5-6s then chars
+                     spreadAt: 0.5 + Math.random() * 0.5, spreadCd: 0 });
+  return true;
+}
+window._igniteGround = (x, z) => igniteGround(x, z);   // debug/test hook
+window._groundfires = () => GROUNDFIRES.length;        // debug/test hook
+const _gfireOff = [[GFIRE_CELL, 0], [-GFIRE_CELL, 0], [0, GFIRE_CELL], [0, -GFIRE_CELL],
+                   [GFIRE_CELL, GFIRE_CELL], [-GFIRE_CELL, -GFIRE_CELL]];
+function groundFireUpdate(dt) {
+  if (!GROUNDFIRES.length) return;
+  const t = clock.elapsedTime;
+  for (let i = GROUNDFIRES.length - 1; i >= 0; i--) {
+    const f = GROUNDFIRES[i];
+    f.t += dt;
+    const grow = Math.min(1, f.t / 0.8);
+    const die = Math.max(0, 1 - (f.t - (f.dur - 0.8)) / 0.8);   // shrink out the last 0.8s
+    f.grp.scale.setScalar(0.2 + 0.9 * grow * die);
+    for (const m of f.grp.children) {
+      const ph = m.userData.ph || 0;
+      m.rotation.z = Math.sin(t * 9 + ph) * 0.26;
+      m.scale.y = (0.7 + 0.5 * Math.abs(Math.sin(t * 16 + ph))) * 1.6;
+    }
+    // ── spread ── reach to ONE random flammable neighbour cell on a throttled
+    // tick. Some randomness so the front fingers out, not a perfect ring.
+    f.spreadCd -= dt;
+    if (f.t > f.spreadAt && f.t < f.dur - 0.4 && f.spreadCd <= 0) {
+      const o = _gfireOff[(Math.random() * _gfireOff.length) | 0];
+      const jx = (Math.random() - 0.5) * 2, jz = (Math.random() - 0.5) * 2;
+      igniteGround(f.x + o[0] + jx, f.z + o[1] + jz);
+      // a ground fire that reaches a TREE lights it too → grass→tree chaining
+      if (Math.random() < 0.5) {
+        for (const tr of TREES) {
+          if (tr._burning || tr._gone || tr.top === undefined) continue;
+          if (Math.hypot(tr.x - f.x, tr.z - f.z) < GFIRE_CELL + 1.5) { igniteTree(tr); break; }
+        }
+      }
+      f.spreadCd = 0.5 + Math.random() * 0.7;       // ~0.5-1.2s between reaches
+    }
+    // burn out → scorch the cell to sand (existing system) and clear the flame
+    if (f.t > f.dur) {
+      scorch(f.x, f.z, GFIRE_CELL * 0.9);
+      scene.remove(f.grp);
+      _gfireCells.delete(f.key);
+      GROUNDFIRES.splice(i, 1);
+    }
+  }
+  // ── animals flee + burn ── prey within sensing range of a fire RUN from the
+  // nearest one; an animal standing IN a burning cell catches fire (existing
+  // burnT DoT). Bounded: scan animals once, nearest-fire test is cheap.
+  for (const a of animals) {
+    if (a.dead || a.cfg.spiderish) continue;
+    let nd = 1e9, nf = null;
+    for (const f of GROUNDFIRES) {
+      const d = Math.hypot(a.obj.position.x - f.x, a.obj.position.z - f.z);
+      if (d < nd) { nd = d; nf = f; }
+    }
+    if (!nf) continue;
+    if (nd < 2.2) {                                  // standing in the flames → alight
+      if (!a.cfg.bearish && !a.cfg.hunts && !a.cfg.territorial)
+        a.burnT = Math.max(a.burnT || 0, 8);         // many will still outrun it before it kills
+      else a.burnT = Math.max(a.burnT || 0, 5);
+    }
+    // prey within ~16m bolt directly away from the nearest fire
+    if (nd < 16 && !a.cfg.bearish && !a.cfg.hunts && !a.cfg.territorial) {
+      a.state = 'flee';
+      a.t = Math.max(a.t || 0, 2.5 + Math.random() * 2);
+      a.dir = Math.atan2(a.obj.position.x - nf.x, a.obj.position.z - nf.z)
+              + (Math.random() - 0.5) * 0.5;
+    }
+  }
+  // ── the fire HURTS the player ── stand within ~2.5m of any ground fire (or a
+  // burning tree) and you catch fire: burn DoT + a fire vignette + a hiss. Get
+  // away or into water and it stops. Telegraphed, escapable — not instant death.
+  _playerHeat(dt);
+}
+// player burn state — a fire vignette (reuses #hurt's red glow at low opacity)
+// + steady burn damage while near flames; cools off the moment you escape.
+let _onFireT = 0;
+function _playerHeat(dt) {
+  if (dead || _inKitchen) { _onFireT = 0; return; }
+  // in water? deep water / canoe douses you outright
+  const inWater = player.y < WATER_Y + 0.5 && heightAt(player.x, player.z) < WATER_Y + 0.6;
+  let near = false;
+  if (!inWater) {
+    const HEAT = 2.6;
+    for (const f of GROUNDFIRES) {
+      if (Math.hypot(player.x - f.x, player.z - f.z) < HEAT) { near = true; break; }
+    }
+    if (!near) for (const f of TREEFIRES) {
+      if (Math.hypot(player.x - f.tr.x, player.z - f.tr.z) < HEAT + 0.6) { near = true; break; }
+    }
+  }
+  if (near) {
+    _onFireT = Math.min(2.2, _onFireT + dt);          // takes a beat to fully catch
+    _playerBurnTick = (_playerBurnTick || 0) - dt;
+    if (_playerBurnTick <= 0) { _playerBurnTick = 0.5; hurtPlayer(2.4); }   // ~4.8 hp/s
+    if (audio.fireCatch && !_onFireWasNear) audio.fireCatch();
+  } else {
+    _onFireT = Math.max(0, _onFireT - dt * 1.8);      // cools off fast once clear
+  }
+  _onFireWasNear = near;
+  // fire vignette — warm flicker layered on the #hurt overlay (skip while a
+  // hit-flash owns it). Off entirely when not burning.
+  const ov = document.getElementById('hurt');
+  if (ov && clock.elapsedTime - (player.lastHit || -9) > 0.3) {
+    const heat = _onFireT / 2.2;
+    ov.style.opacity = heat > 0.02
+      ? String(Math.min(0.7, heat * (0.42 + 0.18 * Math.sin(clock.elapsedTime * 14))))
+      : (ov.style.opacity === '0' ? '0' : ov.style.opacity);
+    if (heat <= 0.02 && ov.style.opacity !== '0' && !_onFireWasNear) ov.style.opacity = '0';
+  }
+}
+let _playerBurnTick = 0, _onFireWasNear = false;
+window._onFire = () => _onFireT > 0.1;   // debug/test hook
 
 // ───────────────────────── arrows ─────────────────────────
 // Ballistics: real longbow numbers. ~60 m/s at full draw, true 9.81
@@ -6648,7 +6828,10 @@ function arrowUpdate(dt) {
       const oy = gy - 0.08 - 0.40 * ny2;                         // origin so tip lodges ~8cm, tail high
       a.m.position.set(px, oy, pz);
       a.m.lookAt(px + nx2, oy + ny2, pz + nz2);                  // tip points down into the ground
-      a.stuck = true; a.t = ARROW_STUCK_LIFE;
+      // a FIRE arrow into the ground LIGHTS THE GRASS — start a spreading
+      // ground fire at this cell. The burning shaft is then consumed quickly.
+      if (a.fire) { igniteGround(px, pz); a.stuck = true; a.t = 1.5; }
+      else { a.stuck = true; a.t = ARROW_STUCK_LIFE; }
       if (a.m.userData.streak) { a.m.remove(a.m.userData.streak); a.m.userData.streak = null; }
       if (audio.impact) audio.impact('ground', distVol);
     }
@@ -7822,11 +8005,13 @@ function tickBody() {
     // the nearest one is. Floors at a low murmur when far (a distant roar), and
     // it caps so a whole forest fire never gets obnoxious.
     let fireLvl = 0;
-    if (TREEFIRES.length) {
+    const _nFire = TREEFIRES.length + GROUNDFIRES.length;
+    if (_nFire) {
       let nd = 1e9;
       for (const f of TREEFIRES) { const d = Math.hypot(player.x - f.tr.x, player.z - f.tr.z); if (d < nd) nd = d; }
+      for (const f of GROUNDFIRES) { const d = Math.hypot(player.x - f.x, player.z - f.z); if (d < nd) nd = d; }
       const prox = Math.max(0.25, Math.min(1, 1 - (nd - 25) / 170));   // near=1, far floors at 0.25
-      fireLvl = Math.min(1, TREEFIRES.length / 8) * prox;
+      fireLvl = Math.min(1, _nFire / 10) * prox;
     }
     audio.update(dt, {
       moving: !inCanoe && !!(mx || mz), sprint: sprinting, _moveLvl,   // no footsteps in the boat
@@ -8113,6 +8298,7 @@ function tickBody() {
   sharkUpdate(wdt);               // the lake patrollers — fin on the surface, Jaws bed
   arrowUpdate(wdt);
   treeFireUpdate(dt);              // burning trees climb, spread, then fall
+  groundFireUpdate(dt);           // grass/bush fire sweeps the ground; animals flee/burn; player heat
   trailUpdate(dt);                 // rocket-fuel embers fade
   dustUpdate(dt);                  // kicked-up dirt rises and settles
   arrivalUpdate(dt);              // the genesis blast: ring/flash/beam + the home growing in
