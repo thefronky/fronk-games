@@ -21,7 +21,7 @@ window._audio = audio;
 const IS_TOUCH = matchMedia('(pointer: coarse)').matches;
 const WORLD = 860;            // square world size
 const WATER_Y = 2.1;          // lake level
-const EYE = 2.3;   // stand TALL — grass tops ~1.3m, so 1.7 read as wading chin-deep; this lifts you clearly above it
+const EYE = 2.85;  // stand TALL — grass tops ~1.3m; earlier 2.3 still read short, so this puts the eyeline clearly head-and-shoulders above the field
 const CFG = IS_TOUCH
   ? { grass: 30000, trees: 2200, bushes: 380, rocks: 150, px: 2, shadow: 1536, segs: 230,
       flowers: 2200, tufts: 1400, mushrooms: 260, bedFlowers: 1300 }
@@ -3209,9 +3209,12 @@ function buildBearMesh(tint) {
   body.position.set(0, 1.05, 0); body.castShadow = true; g.add(body);
   const rump = new THREE.Mesh(new THREE.SphereGeometry(0.66, 8, 6), fur);
   rump.position.set(0, 1.05, -1.05); rump.scale.set(1.05, 1.0, 0.95); g.add(rump);
-  // a TALL grizzly shoulder hump — the signature menace silhouette
+  // grizzly shoulder hump — a low, elongated muscular ridge over the FRONT
+  // shoulders that flows into the spine and neck. (Earlier it sat tall, round
+  // and isolated right behind the skull, reading as a dinosaur frill/shield —
+  // flattened + stretched along z so it blends instead of looming.)
   const hump = new THREE.Mesh(new THREE.SphereGeometry(0.7, 8, 6), fur);
-  hump.position.set(0, 1.7, 0.6); hump.scale.set(1.1, 1.05, 1.2); hump.castShadow = true; g.add(hump);
+  hump.position.set(0, 1.32, 0.4); hump.scale.set(1.12, 0.62, 1.55); hump.castShadow = true; g.add(hump);
   const headPiv = new THREE.Group(); headPiv.position.set(0, 1.2, 1.12); g.add(headPiv);
   const head = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.62, 0.66), fur);
   head.position.set(0, -0.05, 0.12); head.castShadow = true; headPiv.add(head);
@@ -5796,13 +5799,18 @@ let bowString1, bowString2, nockedArrow, drawHand;
   const woodTex = (() => {
     const c = document.createElement('canvas'); c.width = 64; c.height = 512;
     const x = c.getContext('2d');
-    x.fillStyle = '#6b4524'; x.fillRect(0, 0, 64, 512);
-    for (let i = 0; i < 240; i++) {
+    // a deep oiled-walnut base with a vertical patina gradient — darker, aged
+    const base = x.createLinearGradient(0, 0, 0, 512);
+    base.addColorStop(0, '#4a2c14'); base.addColorStop(0.5, '#5e3a1d');
+    base.addColorStop(1, '#412613');
+    x.fillStyle = base; x.fillRect(0, 0, 64, 512);
+    // long flowing grain lines — denser and higher-contrast = real figured wood
+    for (let i = 0; i < 320; i++) {
       const gx = Math.random() * 64;
       const shade = 18 + Math.random() * 40;
-      const dark = Math.random() < 0.5;
-      x.strokeStyle = dark ? `rgba(40,24,10,${0.05 + Math.random() * 0.12})`
-                           : `rgba(${150 + shade},${108 + shade * 0.7},${60 + shade * 0.5},${0.05 + Math.random() * 0.1})`;
+      const dark = Math.random() < 0.55;
+      x.strokeStyle = dark ? `rgba(28,16,7,${0.06 + Math.random() * 0.16})`
+                           : `rgba(${150 + shade},${108 + shade * 0.7},${60 + shade * 0.5},${0.04 + Math.random() * 0.1})`;
       x.lineWidth = 0.5 + Math.random() * 1.6;
       x.beginPath();
       let gy = 0; x.moveTo(gx, 0);
@@ -5810,13 +5818,37 @@ let bowString1, bowString2, nockedArrow, drawHand;
         x.lineTo(gx + Math.sin(gy * 0.03) * 3 + (Math.random() - 0.5) * 2, gy); }
       x.stroke();
     }
+    // a couple of dark KNOTS — concentric oval rings where a branch once was
+    for (let n = 0; n < 3; n++) {
+      const kx = 8 + Math.random() * 48, ky = Math.random() * 512;
+      for (let r = 7; r > 0; r--) {
+        x.strokeStyle = `rgba(24,13,5,${0.05 + r * 0.02})`;
+        x.lineWidth = 1; x.beginPath();
+        x.ellipse(kx, ky, r * 1.6, r * 2.6, 0, 0, 6.28); x.stroke();
+      }
+    }
+    // WEAR — pale scuffs/handling rub where the wood's oil has worn thin,
+    // and a few dark nicks/dings. The bow has clearly been used for years.
+    for (let i = 0; i < 26; i++) {
+      const wx = Math.random() * 64, wy = Math.random() * 512;
+      x.strokeStyle = `rgba(190,160,120,${0.05 + Math.random() * 0.1})`;
+      x.lineWidth = 0.6 + Math.random() * 1.2; x.beginPath();
+      x.moveTo(wx, wy); x.lineTo(wx + (Math.random() - 0.5) * 6, wy + (Math.random() - 0.5) * 14); x.stroke();
+    }
+    for (let i = 0; i < 14; i++) {
+      x.fillStyle = `rgba(20,11,4,${0.18 + Math.random() * 0.22})`;
+      x.beginPath(); x.arc(Math.random() * 64, Math.random() * 512, 0.5 + Math.random() * 1.4, 0, 6.28); x.fill();
+    }
     const t = new THREE.CanvasTexture(c);
     t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(1, 3);
     t.anisotropy = 4;
     return t;
   })();
-  const woodM = new THREE.MeshStandardMaterial({ map: woodTex, color: 0xb89066,
-    roughness: 0.5, metalness: 0.08 });
+  // worn wood: matte, no metal sheen, the grain itself carries the highlight.
+  // The same canvas drives roughness so oiled grain reads glossier than the
+  // worn/scuffed patches — light catches the figure as it would on real wood.
+  const woodM = new THREE.MeshStandardMaterial({ map: woodTex, color: 0x9c7a52,
+    roughness: 0.74, metalness: 0.0, roughnessMap: woodTex });
   const limbPts = [];
   // LONGBOW profile (y, z): a man-tall D-bow — the limbs run out of
   // frame when held. You should feel 6'2" behind it.

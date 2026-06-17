@@ -435,13 +435,31 @@ export class AudioEngine {
       o.frequency.value = 64;
       const og = C.createGain(); og.gain.value = 0;
       o.connect(og).connect(this.foleyBus); o.start();
-      this._creak = { g, bp, lfo, lfoG, lfo2, lfo2G, o, og };
+      // ELASTIC STRING layer — the taut bowstring/sinew itself stretching:
+      // a high, resonant "zing" band off the same noise that brightens and
+      // swells with the draw, plus a tightening fibre overtone whose pitch
+      // climbs as the fibres pull tight. This is the elastic, not the wood.
+      const hb = C.createBiquadFilter(); hb.type = 'bandpass';
+      hb.frequency.value = 2300; hb.Q.value = 6;
+      const hg = C.createGain(); hg.gain.value = 0;
+      src.connect(hb).connect(hg).connect(this.foleyBus);
+      const es = C.createOscillator(); es.type = 'sawtooth';
+      es.frequency.value = 220;
+      const esf = C.createBiquadFilter(); esf.type = 'lowpass'; esf.frequency.value = 1800;
+      const esg = C.createGain(); esg.gain.value = 0;
+      es.connect(esf).connect(esg).connect(this.foleyBus); es.start();
+      this._creak = { g, bp, lfo, lfoG, lfo2, lfo2G, o, og, hb, hg, es, esf, esg };
     }
     const cr = this._creak;
     // LOUD, escalating creak — the bow STRETCHING. Gain ramps hard with
     // the draw and the stutter LFO speeds up so near full draw it
     // sputters like wood and sinew fighting you.
-    cr.g.gain.setTargetAtTime((0.06 + k * 0.20), t, 0.05);          // much louder
+    cr.g.gain.setTargetAtTime((0.05 + k * 0.15), t, 0.05);          // wood grind — backed off so the string reads
+    // elastic string: zing band swells + brightens, fibre overtone tightens up
+    cr.hg.gain.setTargetAtTime(0.015 + k * 0.05, t, 0.05);
+    cr.hb.frequency.setTargetAtTime(1900 + k * 1700, t, 0.07);
+    cr.es.frequency.setTargetAtTime(180 + k * k * 230, t, 0.06);
+    cr.esg.gain.setTargetAtTime(k * k * 0.035, t, 0.05);
     cr.lfoG.gain.setTargetAtTime(0.04 + k * 0.10, t, 0.05);         // deep stutter
     cr.lfo.frequency.setTargetAtTime(5 + k * 13, t, 0.08);          // sputters faster as you pull
     cr.lfo2.frequency.setTargetAtTime(3.3 + k * 7, t, 0.08);        // 2nd LFO = irregular grind
@@ -476,6 +494,8 @@ export class AudioEngine {
     cr.lfoG.gain.setTargetAtTime(0, t, 0.03);
     if (cr.lfo2G) cr.lfo2G.gain.setTargetAtTime(0, t, 0.03);
     cr.og.gain.setTargetAtTime(0, t, 0.03);
+    if (cr.hg) cr.hg.gain.setTargetAtTime(0, t, 0.03);
+    if (cr.esg) cr.esg.gain.setTargetAtTime(0, t, 0.03);
   }
 
   // arrow IMPACT. kind: 'flesh' | 'ground' | 'wood'.
