@@ -1381,8 +1381,9 @@ function rockShade(sh) {
   // (bendY scales with local y). Same windUniforms.uTime, per-instance phase.
   bushMat.onBeforeCompile = (sh) => {
     sh.uniforms.uTime = windUniforms.uTime;
-    sh.vertexShader = 'uniform float uTime;\n' + sh.vertexShader.replace('#include <begin_vertex>',
+    sh.vertexShader = 'uniform float uTime;\nvarying float vBushY;\n' + sh.vertexShader.replace('#include <begin_vertex>',
       `#include <begin_vertex>
+       vBushY = position.y;                      // local height → fragment AO/tip
        float bendY = position.y * 0.10;
        float ph = instanceMatrix[3][0]*0.21 + instanceMatrix[3][2]*0.17;
        float gust = 0.6 + 0.4*sin(uTime*0.3 + instanceMatrix[3][2]*0.015);
@@ -1391,6 +1392,16 @@ function rockShade(sh) {
        gust *= wave;
        transformed.x += (sin(uTime*1.6 + ph) + 0.3*sin(uTime*3.1 + ph*1.6)) * bendY * gust;
        transformed.z += cos(uTime*1.2 + ph) * bendY * 0.6 * gust;`);
+    // foliage-mass depth — same canopy AO/tip idea (beyond-fable leaves.ts, MIT
+    // © xikhar, reimplemented): shaded base, sun-kissed crown, so undergrowth
+    // reads as a dimensional mass instead of a flat green blob.
+    sh.fragmentShader = 'varying float vBushY;\n' + sh.fragmentShader.replace('#include <color_fragment>',
+      `#include <color_fragment>
+       {
+         float cy = clamp(vBushY / 1.7, 0.0, 1.0);            // 0 base → 1 crown
+         diffuseColor.rgb *= mix(0.62, 1.06, cy);             // shaded underside
+         diffuseColor.rgb += vec3(0.10, 0.12, 0.04) * smoothstep(0.58, 1.0, cy) * 0.9;  // sunlit top
+       }`);
   };
   const bushes = new THREE.InstancedMesh(bushGeo, bushMat, CFG.bushes);
   bushes.castShadow = true;
@@ -1481,13 +1492,23 @@ function rockShade(sh) {
       emissive: 0x101a08, emissiveIntensity: 0.45 });
     blockerMat.onBeforeCompile = (sh) => {
       sh.uniforms.uTime = windUniforms.uTime;
-      sh.vertexShader = 'uniform float uTime;\n' + sh.vertexShader.replace('#include <begin_vertex>',
+      sh.vertexShader = 'uniform float uTime;\nvarying float vBushY;\n' + sh.vertexShader.replace('#include <begin_vertex>',
         `#include <begin_vertex>
+         vBushY = position.y;                     // local height → fragment AO/tip
          float bendY = position.y * 0.07;
          float ph = instanceMatrix[3][0]*0.2 + instanceMatrix[3][2]*0.16;
          float gust = 0.6 + 0.4*sin(uTime*0.28 + instanceMatrix[3][2]*0.013);
          transformed.x += (sin(uTime*1.5 + ph) + 0.3*sin(uTime*3.0 + ph*1.6)) * bendY * gust;
          transformed.z += cos(uTime*1.1 + ph) * bendY * 0.6 * gust;`);
+      // matching foliage-mass depth (see bushMat) so eye-level thickets read
+      // dimensional instead of flat — beyond-fable leaves.ts idea, our GLSL.
+      sh.fragmentShader = 'varying float vBushY;\n' + sh.fragmentShader.replace('#include <color_fragment>',
+        `#include <color_fragment>
+         {
+           float cy = clamp(vBushY / 2.6, 0.0, 1.0);
+           diffuseColor.rgb *= mix(0.6, 1.06, cy);
+           diffuseColor.rgb += vec3(0.10, 0.12, 0.04) * smoothstep(0.55, 1.0, cy) * 0.9;
+         }`);
     };
     const tintFoliage = (geo, lo, hi) => {
       const n = geo.attributes.position.count, col = new Float32Array(n * 3);
