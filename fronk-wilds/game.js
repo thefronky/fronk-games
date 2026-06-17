@@ -5047,44 +5047,48 @@ const canoe = (() => {
   const lashM = new THREE.MeshStandardMaterial({ color: 0x3a2414, roughness: 0.95 });
   const mastM = new THREE.MeshStandardMaterial({ color: 0x4f3320, roughness: 0.9, flatShading: true });
   const sailM = new THREE.MeshStandardMaterial({ color: 0xcfc4ac, roughness: 0.95, side: THREE.DoubleSide });
-  // a lashed LOG RAFT — five logs running fore-aft, two cross-lash spars over
-  // them, a stubby mast and a simple bowed sail on a pivot. Wide and low so a
-  // shark reads right up to the deck. Logs are 'z' (fore-aft), x = beam.
-  const L = 4.8, R = 0.26, N = 5;
+  const flagM = new THREE.MeshBasicMaterial({ color: 0xc2402c, side: THREE.DoubleSide });
+  // a BIG lashed LOG RAFT — a walk-on platform (~5.6m x 9m): seven thick logs
+  // fore-aft, three cross-lash spars, a TALL mast carrying a large square sail
+  // you can clearly see, and a masthead WIND PENNANT that points downwind so
+  // the sailing reads. Logs are 'z' (fore-aft), x = beam.
+  const L = 9, R = 0.4, N = 7;
   for (let i = 0; i < N; i++) {
-    const log = new THREE.Mesh(new THREE.CylinderGeometry(R, R * 0.92, L, 7), logM);
+    const log = new THREE.Mesh(new THREE.CylinderGeometry(R, R * 0.93, L, 8), logM);
     log.rotation.x = Math.PI / 2;                       // lay it flat, running fore-aft
     log.position.set((i - (N - 1) / 2) * (R * 2.02), 0, 0);
     g.add(log);
   }
-  // two cross-lash spars sitting ON TOP of the logs (the binding poles)
   const W = N * R * 2.02;
-  const sparGeo = new THREE.CylinderGeometry(0.07, 0.07, W + 0.2, 6);
-  for (const sz of [-L * 0.32, L * 0.32]) {
+  const sparGeo = new THREE.CylinderGeometry(0.1, 0.1, W + 0.3, 6);
+  for (const sz of [-L * 0.36, 0, L * 0.36]) {
     const spar = new THREE.Mesh(sparGeo, lashM);
-    spar.rotation.z = Math.PI / 2; spar.position.set(0, R + 0.05, sz);
+    spar.rotation.z = Math.PI / 2; spar.position.set(0, R + 0.06, sz);
     g.add(spar);
   }
-  // mast a touch forward of center, with a sail on a pivot group so it can swing
-  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 3.0, 6), mastM);
-  mast.position.set(0, R + 1.5, -0.2);
+  // a tall mast just forward of center
+  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.17, 6.4, 8), mastM);
+  mast.position.set(0, R + 3.1, -0.7);
   g.add(mast);
+  // the sail rides a pivot (swings to the lee). A cross-yard + a big bowed sail.
   const sailPivot = new THREE.Group();
-  sailPivot.position.set(0, R + 1.5, -0.2);            // hinge at the mast
-  const sail = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 2.2, 6, 1), sailM);
-  // bow the sail so it reads as wind-filled cloth, not a flat board
+  sailPivot.position.set(0, R + 3.1, -0.7);
+  const yard = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 5.2, 6), mastM);
+  yard.rotation.z = Math.PI / 2; yard.position.set(0, 2.1, 0); sailPivot.add(yard);
+  const sail = new THREE.Mesh(new THREE.PlaneGeometry(4.8, 4.2, 8, 2), sailM);
   const sp = sail.geometry.attributes.position;
-  for (let i = 0; i < sp.count; i++) {
-    const u = sp.getX(i) / 1.1;                          // -1..1 across the sail
-    sp.setZ(i, (1 - u * u) * 0.35);                      // belly outward
-  }
+  for (let i = 0; i < sp.count; i++) { const u = sp.getX(i) / 2.4; sp.setZ(i, (1 - u * u) * 0.7); }
   sp.needsUpdate = true; sail.geometry.computeVertexNormals();
-  sail.position.set(1.1, 0, 0);                          // hangs off one side of the mast
+  sail.position.set(0, 0.0, 0);                          // big, centered on the mast — clearly in view
   sailPivot.add(sail);
   g.add(sailPivot);
+  // masthead pennant — re-aimed downwind each frame in the loop (g._windFlag)
+  const flag = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 0.4), flagM);
+  flag.position.set(0.55, R + 6.4, -0.7);
+  g.add(flag);
   g.traverse(o => { if (o.isMesh) o.castShadow = true; });
   g._sailPivot = sailPivot;     // game swings this to the lee side each frame
-  g._sail = sail;
+  g._sail = sail; g._windFlag = flag;
   g.visible = false;
   return g;
 })();
@@ -7868,7 +7872,10 @@ function tickBody() {
       inCanoe = true;
       if (audio.themeSting) audio.themeSting('sting_boat', 0.85);   // setting off — adventure lift
       const sinY = Math.sin(player.yaw), cosY = Math.cos(player.yaw);
-      canoeVX = (-sinY * mz + cosY * mx) * 2.0; canoeVZ = (-cosY * mz - sinY * mx) * 2.0;
+      // a STRONG shove straight off the bank toward open water, so the sail
+      // can't immediately drag you back ashore — you clear the shallows first,
+      // then the wind takes over. (You walked in facing the water.)
+      canoeVX = -sinY * 6.5; canoeVZ = -cosY * 6.5;
       raftYaw = player.yaw;            // shove off pointing where you were facing
       player.x = nx; player.z = nz; player.y = WATER_Y;
     }
@@ -8076,6 +8083,10 @@ function tickBody() {
     canoe.position.set(player.x, rideY, player.z);
     canoe.rotation.set(pitch, raftYaw, roll);            // heading is the raft's own, not the camera's
     _boatRoll = roll; _boatPitch = pitch;                // hand to the camera for the same rock
+    // masthead pennant streams DOWNWIND (world windDir), so you can read the
+    // wind at a glance — the whole point of the sailing. (flag is a raft child,
+    // so subtract raftYaw to land on the world direction, + a little flutter.)
+    if (canoe._windFlag) canoe._windFlag.rotation.y = (windDir - raftYaw) + Math.sin(t * 6) * 0.12;
   }
   if (inCanoe !== _wasCanoe) { _wasCanoe = inCanoe;
     document.body.classList.toggle('canoe', inCanoe); }
