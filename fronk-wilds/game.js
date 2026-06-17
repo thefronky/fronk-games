@@ -1093,6 +1093,20 @@ function mergeGeoms(list) {
   return out;
 }
 
+// shared rock facet-shading shader hook (see the comment at the rock material).
+function rockShade(sh) {
+  sh.vertexShader = 'varying float vRockY;\n' +
+    sh.vertexShader.replace('#include <begin_vertex>',
+      '#include <begin_vertex>\n       vRockY = position.y;');
+  sh.fragmentShader = 'varying float vRockY;\n' +
+    sh.fragmentShader.replace('#include <color_fragment>',
+      `#include <color_fragment>
+       {
+         float ry = smoothstep(-1.2, 2.0, vRockY);          // base in shadow → crown in sun
+         diffuseColor.rgb *= mix(0.66, 1.12, ry);
+         diffuseColor.rgb += vec3(0.05, 0.045, 0.035) * smoothstep(0.5, 1.0, ry);   // warm sunlit crown
+       }`);
+}
 // ───────────────────────── trees + rocks (instanced) ─────────────────────────
 {
   // three species, altitude-distributed: broadleaf low, pines mid,
@@ -1422,9 +1436,14 @@ function mergeGeoms(list) {
   if (bushes.instanceColor) bushes.instanceColor.needsUpdate = true;
   scene.add(bushes);
 
+  // rock facet shading — beyond-fable stone idea (MIT © xikhar), reimplemented:
+  // a shadowed/earthbound underside fading to a sun-kissed crown, by local
+  // height, so flat low-poly boulders gain top-down FORM instead of one flat
+  // grey. Works with or without vertex colours; instanced-safe (local pos).
   const rg = new THREE.DodecahedronGeometry(1.1, 0);
-  const rocks = new THREE.InstancedMesh(rg,
-    new THREE.MeshStandardMaterial({ color: 0x8d8678, roughness: 1 }), CFG.rocks);
+  const _rockMat = new THREE.MeshStandardMaterial({ color: 0x8d8678, roughness: 1 });
+  _rockMat.onBeforeCompile = rockShade;
+  const rocks = new THREE.InstancedMesh(rg, _rockMat, CFG.rocks);
   rocks.castShadow = true;
   placed = 0; guard = 0;
   while (placed < CFG.rocks && guard++ < CFG.rocks * 40) {
@@ -1611,6 +1630,7 @@ function mergeGeoms(list) {
     emissive: 0x14160e, emissiveIntensity: 0.35 });
   const stoneMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1,
     emissive: 0x0a0b0d, emissiveIntensity: 0.25 });
+  stoneMat.onBeforeCompile = rockShade;     // boulders + standing stones gain facet form
   // ── WIND ── only the foliage props get sway; logs/stumps/boulders/stones
   // stay dead-rigid (they're wood-on-ground / rock) and keep propMat/stoneMat.
   // Dedicated clones so the rigid props sharing propMat are untouched.
@@ -1942,6 +1962,7 @@ const clouds = [];
 // fires once (persisted in localStorage) with a music stinger.
 
 const stoneMat = new THREE.MeshStandardMaterial({ color: 0x9a948a, roughness: 1 });
+stoneMat.onBeforeCompile = rockShade;       // landmark boulders/cairns gain facet form
 
 // ── reverence kit: shared camp materials, fire + tent builders ────────────
 // Frontier camps repeat across the map. Geometry/materials are built ONCE
