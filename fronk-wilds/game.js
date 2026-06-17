@@ -1185,10 +1185,11 @@ function mergeGeoms(list) {
   treeMat.onBeforeCompile = (sh) => {
     sh.uniforms.uTime = windUniforms.uTime;
     sh.uniforms.uTrip = tripUniforms.uTrip;
-    sh.vertexShader = 'uniform float uTime;\nuniform float uTrip;\nvarying float vLeafY;\n' +
+    sh.vertexShader = 'uniform float uTime;\nuniform float uTrip;\nvarying float vLeafY;\nvarying vec3 vLocalPos;\n' +
       sh.vertexShader.replace('#include <begin_vertex>',
       `#include <begin_vertex>
        vLeafY = position.y;                      // local canopy height → fragment AO/tip
+       vLocalPos = position;                     // local pos → fragment bark grain
        if (uTrip > 0.001) {
          float h = max(position.y, 0.0);
          float bendY = h * 0.16;                 // crown-weighted, base planted
@@ -1202,7 +1203,7 @@ function mergeGeoms(list) {
     // lift + warm the sunlit crown, so the low-poly blobs read as dimensional
     // foliage instead of flat green balls. Leaf fragments only (green-dominant
     // vertex colour); trunks/branches/birch-bark are left untouched.
-    sh.fragmentShader = 'varying float vLeafY;\n' +
+    sh.fragmentShader = 'varying float vLeafY;\nvarying vec3 vLocalPos;\n' +
       sh.fragmentShader.replace('#include <color_fragment>',
       `#include <color_fragment>
        {
@@ -1212,6 +1213,18 @@ function mergeGeoms(list) {
          float tip = smoothstep(0.62, 1.0, cy) * 0.16;        // sun-kissed top
          diffuseColor.rgb *= mix(1.0, ao, leaf);
          diffuseColor.rgb += vec3(0.13, 0.14, 0.05) * tip * leaf;
+         // ── bark grain — beyond-fable tree-shading idea (MIT © xikhar),
+         // our own procedural: vertical fluted ridges around the trunk + a
+         // little fibre grain + root-AO at the base, so trunks read as carved
+         // bark instead of flat brown poles. Trunk/branch fragments only.
+         float bark = 1.0 - leaf;
+         float ang = atan(vLocalPos.x, vLocalPos.z);
+         float ridge = sin(ang * 13.0) * 0.5 + 0.5;           // fluted vertical ridges
+         ridge = mix(ridge, fract(sin(ang * 47.0) * 43.0), 0.28);   // break the regularity
+         float fibre = sin(vLeafY * 7.0 + ang * 2.3) * 0.5 + 0.5;   // long vertical fibre
+         float barkShade = mix(0.72, 1.12, ridge * 0.62 + fibre * 0.38);
+         float rootAO = mix(0.58, 1.0, clamp(vLeafY / 3.4, 0.0, 1.0));  // dark at the base
+         diffuseColor.rgb *= mix(1.0, barkShade * rootAO, bark);
        }`);
   };
   const species = [
