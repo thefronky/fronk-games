@@ -657,6 +657,13 @@ const waterUniforms = { uTime: { value: 0 } };
        float glint = pow(nh, 70.0) * 0.9;            // crisp facet sparkle on aligned crests
        vec3 sunCol = mix(vec3(1.0,0.52,0.26), vec3(1.0,0.93,0.76), sunUp);
        gl_FragColor.rgb += sunCol * (road + glint) * (1.0 - uNight) * smoothstep(0.02, 0.16, sunUp);
+       // ── subsurface back-glow ── when you look toward the low sun, lit wave crests
+       //    glow translucent amber (light passing THROUGH the water). Cheap wrap-light:
+       //    fires only looking sunward (dot(V,-sun)) on sun-facing crests (vWave). The
+       //    golden-hour money shot — ~5 ALU, no texture, stays inside the warm palette.
+       float back = pow(clamp(dot(V, -uSunDir), 0.0, 1.0), 4.0) * (dot(N, uSunDir)*0.5 + 0.5);
+       back *= smoothstep(0.10, 0.30, vWave);
+       gl_FragColor.rgb += back * vec3(0.95, 0.55, 0.30) * (1.0 - uNight) * smoothstep(0.02, 0.16, sunUp);
        // ── depth-driven alpha ── shallow water near the bank goes more transparent
        //    so the shoreline softly reveals the lakebed instead of a hard sheet edge
        //    (this replaces the old flat shallows-tint plane). Deep water stays full.
