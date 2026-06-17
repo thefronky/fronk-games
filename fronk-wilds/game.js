@@ -4510,6 +4510,7 @@ window._cloudCover = () => _cloudCover;   // debug/test hook
 let _curGround = 'grass';   // footstep material under the player
 let tripT = 0;      // seconds left of a mushroom trip (trippy visuals + moon-jump)
 let tripLevel = 0;  // 0=sober, 1=jump+vibrant, 2=animals bounce+higher+bullet arrows, 3=cloud-climb
+let _idleCalls = 0; // live ambient animal-call voices (cap so the woods never get chatty)
 // the COME-UP: a fresh (sober→trip) hit eases in over ~10s. The trees start to
 // move + the view sways FIRST (you're not sure it's real), THEN the colour and
 // music slowly flood in. _tripOnset = seconds since that sober→trip moment;
@@ -7355,6 +7356,27 @@ function tickBody() {
   if (juiceT > 0) { juiceT -= dt; wdt = dt * 0.05; }
   for (const a of animals) {
     animalUpdate(a, wdt);
+    // ── ambient idle calls ── a living creature bleats/lows/yelps out in
+    // the world now and then. Only calm prey (idle|wary), never spiders or
+    // bears, never mid-trip; per-animal cooldown + a global cap keep it from
+    // turning into a barnyard. Nearer animals read a touch louder.
+    if (audio.animalCall && !a.dead && a.obj && a.state !== undefined
+        && tripLevel < 2 && !a.cfg.spiderish && !a.cfg.bearish && !a.aggro
+        && (a.state === 'idle' || a.state === 'wary') && _idleCalls < 3) {
+      a._callT = (a._callT ?? (14 + Math.random() * 16)) - wdt;   // 14-30s cooldown
+      if (a._callT <= 0) {
+        const dx = a.obj.position.x - player.x, dz = a.obj.position.z - player.z;
+        const d = Math.hypot(dx, dz);
+        if (d < 130) {
+          const vol = 0.45 + 0.25 * (1 - d / 130);   // nearer = slightly louder
+          if (audio.animalCall(a.name, a.obj.position.x, a.obj.position.z, vol)) {
+            _idleCalls++;
+            setTimeout(() => { _idleCalls = Math.max(0, _idleCalls - 1); }, 1600);
+          }
+        }
+        a._callT = 14 + Math.random() * 16;
+      }
+    }
     // L2+: the world goes oceanic — the animals don't HOP, they FLOAT, low-
     // gravity, drifting and swaying like fish in water. The deeper the trip,
     // the higher they hang in the sky. Gentle, never a hyper 10ft pogo.

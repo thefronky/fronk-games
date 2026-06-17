@@ -252,6 +252,9 @@ export class AudioEngine {
       'step_sand_1','step_sand_2','step_sand_3','twig_snap_1','twig_snap_2',
       'breath_1','breath_2','thud','fire_catch',
       'shark_splash_1','shark_splash_2','shark_lunge',
+      'deer_call_1','deer_call_2','stag_call_1','stag_call_2',
+      'fox_call_1','fox_call_2','cow_moo_1','cow_moo_2',
+      'horse_call_1','horse_call_2','wolf_call_1','wolf_call_2',
     ];
     names.forEach(async (name) => {
       try {
@@ -892,6 +895,26 @@ export class AudioEngine {
     g.gain.linearRampToValueAtTime(0.0008, t + 0.5);
     n.connect(hp).connect(g).connect(pan);
     n.start(t, Math.random() * 0.5); n.stop(t + 0.55);
+  }
+
+  // ════ AMBIENT ANIMAL CALLS ════════════════════════════════════════
+  // a living idle voice from a creature out in the world — a deer bleat
+  // off to your left, a fox scream, a cow lowing. Spatialized so its
+  // bearing reads. Sample-only (no synth fallback); unmapped species or
+  // a missing sample just returns false.
+  animalCall(species, x, z, vol = 0.6) {
+    if (!this.started || this.muted) return false;
+    let base, rate = 1;
+    switch (species) {
+      case 'Deer':  base = 'deer_call'; break;
+      case 'Stag':  base = 'stag_call'; rate = 0.92; break;
+      case 'Fox':   base = 'fox_call';  break;
+      case 'Cow':   base = 'cow_moo';   break;
+      case 'Horse': base = 'horse_call'; break;
+      case 'Wolf':  base = 'wolf_call'; break;
+      default: return false;
+    }
+    return this._playAt(base, x, z, { gain: vol, n: 2, rate, ref: 14, max: 150, rolloff: 0.9 });
   }
 
   // the breath-in of waking — a soft rising inhale of filtered noise
