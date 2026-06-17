@@ -3071,6 +3071,89 @@ function updateButterflies(dt, t) {
   }
 }
 
+// ── woodland critters ── tiny skittish rabbits & squirrels that graze, hop
+// about, and BOLT when you get near. Ambient life, not huntable prey — their
+// own light update (like the butterflies), NOT the full animal brain.
+const _critters = [];
+const _critFurBrown = new THREE.MeshStandardMaterial({ color: 0x6b5436, roughness: 0.9 });
+const _critFurGrey  = new THREE.MeshStandardMaterial({ color: 0x8a8478, roughness: 0.9 });
+const _critTailWhite = new THREE.MeshStandardMaterial({ color: 0xefe9df, roughness: 1 });
+function buildCritterMesh(kind) {
+  const g = new THREE.Group();
+  const fur = kind === 'squirrel' ? _critFurGrey : _critFurBrown;
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.16, 7, 6), fur);
+  body.scale.set(1, 0.85, 1.4); body.position.y = 0.16; body.castShadow = true; g.add(body);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.1, 7, 6), fur);
+  head.position.set(0, 0.26, 0.2); g.add(head);
+  if (kind === 'rabbit') {
+    for (const sx of [-1, 1]) {                         // two tall ears
+      const ear = new THREE.Mesh(new THREE.CapsuleGeometry(0.025, 0.16, 2, 4), fur);
+      ear.position.set(sx * 0.045, 0.42, 0.18); ear.rotation.x = -0.18; g.add(ear);
+    }
+    const tail = new THREE.Mesh(new THREE.SphereGeometry(0.06, 6, 5), _critTailWhite);
+    tail.position.set(0, 0.18, -0.24); g.add(tail);
+  } else {                                              // squirrel — big bushy curled tail
+    const tail = new THREE.Mesh(new THREE.SphereGeometry(0.13, 7, 6), fur);
+    tail.scale.set(0.5, 1.25, 0.5); tail.position.set(0, 0.32, -0.2); g.add(tail);
+    for (const sx of [-1, 1]) {
+      const ear = new THREE.Mesh(new THREE.SphereGeometry(0.035, 5, 4), fur);
+      ear.position.set(sx * 0.05, 0.36, 0.2); g.add(ear);
+    }
+  }
+  g.visible = false; scene.add(g); return g;
+}
+{
+  for (let i = 0; i < 14; i++) {
+    const kind = Math.random() < 0.5 ? 'rabbit' : 'squirrel';
+    _critters.push({ mesh: buildCritterMesh(kind), kind, state: 'idle',
+      x: 0, z: 0, dir: 0, t: Math.random() * 3, hopY: 0, ph: Math.random() * 6.28, placed: false });
+  }
+}
+window._critters = _critters;   // debug/test hook
+function _placeCritter(c) {
+  for (let tr = 0; tr < 20; tr++) {
+    const a = Math.random() * 6.283, r = 16 + Math.random() * 70;
+    const x = player.x + Math.cos(a) * r, z = player.z + Math.sin(a) * r;
+    if (heightAt(x, z) > WATER_Y + 1) {
+      c.x = x; c.z = z; c.dir = Math.random() * 6.283;
+      c.placed = true; c.state = 'idle'; c.t = Math.random() * 2; c.mesh.visible = true; return;
+    }
+  }
+}
+function updateCritters(dt, t) {
+  for (const c of _critters) {
+    if (!c.placed) { _placeCritter(c); continue; }
+    const dx = c.x - player.x, dz = c.z - player.z;   // critter→away-from-you vector
+    const pd = Math.hypot(dx, dz);
+    if (pd > 110) { c.placed = false; c.mesh.visible = false; continue; }  // out of sight → re-home near you
+    c.t -= dt;
+    // SKITTISH — you closed in → bolt away in quick low hops
+    if (pd < 9 && c.state !== 'bolt') {
+      c.state = 'bolt'; c.t = 1.3 + Math.random() * 1.4; c.dir = Math.atan2(dx, dz);
+    }
+    let speed = 0;
+    if (c.state === 'bolt') {
+      c.dir += (Math.random() - 0.5) * 4 * dt; speed = 4.4;
+      if (c.t <= 0) { c.state = 'idle'; c.t = 1 + Math.random() * 2; }
+    } else if (c.state === 'hop') {
+      speed = 1.3;
+      if (c.t <= 0) { c.state = 'idle'; c.t = 1.5 + Math.random() * 3; }
+    } else if (c.t <= 0) {                              // graze → little wander hop
+      c.state = 'hop'; c.t = 0.5 + Math.random() * 1.2; c.dir = Math.random() * 6.283;
+    }
+    if (speed > 0) {
+      const nx = c.x + Math.sin(c.dir) * speed * dt, nz = c.z + Math.cos(c.dir) * speed * dt;
+      if (heightAt(nx, nz) > WATER_Y + 0.5) { c.x = nx; c.z = nz; } else c.dir += 2.1;  // veer off water
+    }
+    const moving = speed > 0;
+    c.hopY = moving ? Math.abs(Math.sin(t * (c.state === 'bolt' ? 16 : 9) + c.ph))
+                      * (c.state === 'bolt' ? 0.17 : 0.08) : 0;
+    c.mesh.position.set(c.x, heightAt(c.x, c.z) + c.hopY, c.z);
+    c.mesh.rotation.y = lerpAngle(c.mesh.rotation.y, c.dir, Math.min(1, dt * 8));
+    c.mesh.rotation.x = moving ? 0 : Math.sin(t * 3 + c.ph) * 0.12;   // idle nibble bob
+  }
+}
+
 // ── golden-hour pollen ── soft motes drifting in the light around you. Day
 // only; additive gold; the box follows you so the air always shimmers.
 const _dotTex = (() => {
@@ -7694,7 +7777,8 @@ function tickBody() {
   moon.material.opacity = night * Math.max(0, Math.min(1, (_moonDir.y - 0.06) * 6)) * 0.9;
   updateFireflies(t, night);
   updateButterflies(dt, t);
-  if (started) { updatePollen(t, dt, night); updateBirds(t, dt, night); updateDarters(dt, night); carrionUpdate(t, dt, night); }
+  if (started) { updatePollen(t, dt, night); updateBirds(t, dt, night); updateDarters(dt, night); carrionUpdate(t, dt, night);
+    if (!_inKitchen) updateCritters(dt, t); }
   silhouettesUpdate(t, dt, night);   // distant ridge wildlife — also alive during the title orbit
   corruptionUpdate(dt, t);
   updateMist(t, night);
