@@ -1184,9 +1184,10 @@ function mergeGeoms(list) {
   treeMat.onBeforeCompile = (sh) => {
     sh.uniforms.uTime = windUniforms.uTime;
     sh.uniforms.uTrip = tripUniforms.uTrip;
-    sh.vertexShader = 'uniform float uTime;\nuniform float uTrip;\n' +
+    sh.vertexShader = 'uniform float uTime;\nuniform float uTrip;\nvarying float vLeafY;\n' +
       sh.vertexShader.replace('#include <begin_vertex>',
       `#include <begin_vertex>
+       vLeafY = position.y;                      // local canopy height → fragment AO/tip
        if (uTrip > 0.001) {
          float h = max(position.y, 0.0);
          float bendY = h * 0.16;                 // crown-weighted, base planted
@@ -1194,6 +1195,22 @@ function mergeGeoms(list) {
          transformed.x += (sin(uTime*0.9 + ph) + 0.5*sin(uTime*1.7 + ph*1.7)) * bendY * uTrip;
          transformed.z += (cos(uTime*0.8 + ph*1.2) + 0.4*sin(uTime*1.3 + ph)) * bendY * uTrip;
          transformed.y += sin(uTime*1.1 + ph) * h * 0.06 * uTrip;   // the canopy breathes
+       }`);
+    // ── canopy depth — beyond-fable leaves.ts technique (MIT © xikhar),
+    // reimplemented in our own GLSL: AO the shaded canopy interior/underside,
+    // lift + warm the sunlit crown, so the low-poly blobs read as dimensional
+    // foliage instead of flat green balls. Leaf fragments only (green-dominant
+    // vertex colour); trunks/branches/birch-bark are left untouched.
+    sh.fragmentShader = 'varying float vLeafY;\n' +
+      sh.fragmentShader.replace('#include <color_fragment>',
+      `#include <color_fragment>
+       {
+         float leaf = step(vColor.r + 0.04, vColor.g) * step(0.12, vColor.g);
+         float cy = clamp((vLeafY - 4.0) / 8.5, 0.0, 1.0);   // 0 low canopy → 1 crown
+         float ao = mix(0.6, 1.04, cy);                       // underside in shadow
+         float tip = smoothstep(0.62, 1.0, cy) * 0.16;        // sun-kissed top
+         diffuseColor.rgb *= mix(1.0, ao, leaf);
+         diffuseColor.rgb += vec3(0.13, 0.14, 0.05) * tip * leaf;
        }`);
   };
   const species = [
