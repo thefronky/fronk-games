@@ -564,7 +564,8 @@ let _grassResweep = 0;   // frames of full-field grass reblade after a burn (cle
 const waterUniforms = { uTime: { value: 0 } };
 {
   const m = new THREE.MeshStandardMaterial({
-    color: 0x2e5a62, transparent: true, opacity: 0.85,
+    color: 0x2e5a62, transparent: true, opacity: 0.6,
+    depthWrite: false,                 // let the deep (the leviathan) show THROUGH the surface
     roughness: 0.35, metalness: 0.0,
   });
   m.envMapIntensity = 0.3;   // the warm IBL was washing the lake pale-tan — let the water colour read
@@ -2528,18 +2529,22 @@ const BURROWS = [], WATERSPOTS = [];
     made++;
   }
   // ~10 shoreline points ringing the lake centroid (70, -90). Horses rotate
-  // through them to drink; gators stake out a hidden subset (see spawn()).
-  for (let i = 0; i < 10; i++) {
-    const a = (i / 10) * Math.PI * 2 + 0.4;
-    // walk outward from the centre until we find the first dry-ish shore
-    let sx = 70, sz = -90;
-    for (let r = 20; r < 90; r += 4) {
-      const px = 70 + Math.cos(a) * r, pz = -90 + Math.sin(a) * r;
-      if (heightAt(px, pz) > WATER_Y + 0.3) { sx = px; sz = pz; break; }
+  // through them to drink; gators lurk at them. The lake is BIG and irregular,
+  // so we search far out (to r=200) and ONLY keep a spot where we actually found
+  // dry shore — never a fallback at the lake centre (that put horses + gators in
+  // the middle of the deep water). Step back ~3m into the shallows from the bank.
+  for (let i = 0; i < 18; i++) {
+    const a = (i / 18) * Math.PI * 2 + 0.4;
+    let bankR = -1;
+    for (let r = 16; r < 200; r += 3) {
+      if (heightAt(70 + Math.cos(a) * r, -90 + Math.sin(a) * r) > WATER_Y + 0.3) { bankR = r; break; }
     }
-    WATERSPOTS.push({ x: sx, z: sz });
+    if (bankR < 0) continue;                         // open water on this bearing — no spot here
+    const r = bankR - 3;                             // ~3m off the bank, in the shallows
+    WATERSPOTS.push({ x: 70 + Math.cos(a) * r, z: -90 + Math.sin(a) * r });
   }
 }
+window._WATERSPOTS = WATERSPOTS;   // debug/test hook
 
 // nearest entry of a list to point p (skips taken FORAGE); jitter spreads
 // the pick a touch so a herd doesn't stack on one exact spot.
@@ -3762,7 +3767,7 @@ function buildSharkMesh() {
 // the music fades — a near-miss, not (usually) a bite. Then a cooldown.
 const SHARKS = [];
 const SHARK_CENTER = { x: 70, z: -90 };   // the deepest part of the lake
-const SHARK_SCALE = 2.0;                  // ~twice the raft — a monster
+const SHARK_SCALE = 4.0;                  // a true leviathan — bigger than the whole raft
 function spawnSharks() {
   for (let i = 0; i < 2; i++) {           // sparse — rarely more than one in view
     const obj = buildSharkMesh(); obj.scale.setScalar(SHARK_SCALE);
@@ -3834,6 +3839,40 @@ function sharkUpdate(dt) {
 }
 spawnSharks();   // the lake already exists (built at module load) — stock it once
 
+// ════ THE DEEP ONE ════ a building-sized thing that lives far below, deeper than
+// anything else, never quite resolved. It only ever drifts back and forth in the
+// abyss, slow as a continent. No interaction, no threat — pure thalassophobia:
+// glance down through the half-clear water and a shape the size of a building is
+// just… moving down there. (Opaque, so it shows through the transparent surface.)
+let _leviathan = null;
+const LEVI_Y = -26;                                  // far below the sharks (~-7..-10)
+{
+  const g = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({ color: 0x0a161e, roughness: 1, metalness: 0, flatShading: true });
+  const body = new THREE.Mesh(new THREE.SphereGeometry(1, 12, 9), mat); body.scale.set(4.5, 5.5, 22); g.add(body);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 8), mat); head.scale.set(4.0, 4.6, 7); head.position.z = 22; g.add(head);
+  const tail = new THREE.Mesh(new THREE.SphereGeometry(1, 8, 6), mat); tail.scale.set(1.6, 4.6, 9); tail.position.z = -24; g.add(tail);
+  const fluke = new THREE.Mesh(new THREE.BoxGeometry(20, 0.9, 5), mat); fluke.position.z = -30; g.add(fluke);
+  for (const sx of [-1, 1]) {                         // vast slow pectoral fins
+    const fin = new THREE.Mesh(new THREE.BoxGeometry(15, 0.7, 5), mat);
+    fin.position.set(sx * 5.5, -1, 6); fin.rotation.z = sx * 0.3; fin.rotation.y = sx * 0.45; g.add(fin);
+  }
+  g.position.set(SHARK_CENTER.x, LEVI_Y, SHARK_CENTER.z);
+  scene.add(g); _leviathan = g;
+}
+function leviathanUpdate(t) {
+  if (!_leviathan) return;
+  const L = _leviathan;
+  const ph = t * 0.04;                                // ~150s round trip — glacial
+  const vx = Math.cos(ph) * 40, vz = -Math.sin(ph * 0.6) * 22 * 0.6;   // velocity (for heading)
+  L.position.x = SHARK_CENTER.x + Math.sin(ph) * 40;
+  L.position.z = SHARK_CENTER.z + Math.cos(ph * 0.6) * 22;
+  L.position.y = LEVI_Y + Math.sin(t * 0.07) * 2.5;  // a slow swell up and down
+  L.rotation.y = Math.atan2(vx, vz);
+  L.rotation.z = Math.sin(t * 0.09) * 0.05;          // a slow roll
+}
+window._leviathan = () => _leviathan;   // debug/test hook
+
 // ════ THE GATORS ════ submerged ambush predators. Procedural, dark, low-poly.
 // They pin to the waterline (mostly under) and SNAP at the player or a Horse
 // that strays within snapR. A bite is rare (snapKill) but takes a big chunk.
@@ -3874,6 +3913,17 @@ function buildGatorMesh() {
 function gatorUpdate(a, dt, dx, dz, dist) {
   a.attackCd -= dt;
   const p = a.obj.position;
+  // SAFETY NET — a gator must NEVER sit out in deep water. If one ever ends up
+  // there (placement edge cases), yank it to a shore waterspot on its first
+  // frame. Belt-and-suspenders so the lake-centre bug can never be seen.
+  if (!a._shoreFixed) {
+    a._shoreFixed = true;
+    if (WATER_Y - heightAt(p.x, p.z) > 2.5 && WATERSPOTS.length) {
+      const spot = WATERSPOTS[Math.floor(Math.random() * WATERSPOTS.length)];
+      const tox = 70 - spot.x, toz = -90 - spot.z, tl = Math.hypot(tox, toz) || 1;
+      p.x = spot.x + (tox / tl) * 2.0; p.z = spot.z + (toz / tl) * 2.0;
+    }
+  }
   // pin the body to the waterline — mostly submerged, only eyes/snout above
   p.y = WATER_Y - 0.34;
   // nearest target: the player, OR any Horse within range (scan throttled)
@@ -3949,24 +3999,20 @@ function spawn(name, near) {
     // sitting a few metres offshore in real water — exactly where horses come to
     // drink. The land placement below rejects water, so we site it here and skip.
     // gatorUpdate pins p.y every frame, so y only needs to be sane.
-    x = 70; z = -90; y = WATER_Y - 0.28;
-    const free = WATERSPOTS.filter(w => !w._guarded);
-    const spot = free.length ? free[Math.floor(Math.random() * free.length)] : null;
-    if (spot) {
-      spot._guarded = true;
-      // step from the shore spot toward the lake centre until we hit real water
+    // gators WAIT AT THE BANK. The WATERSPOTS are pre-validated shore points
+    // (the horse drinking spots); sit AT one, nudged a couple metres toward the
+    // water so the gator lurks in the shallows right where horses come to drink.
+    // gatorUpdate pins y to the waterline regardless.
+    y = WATER_Y - 0.28;
+    if (WATERSPOTS.length) {
+      const spot = WATERSPOTS[Math.floor(Math.random() * WATERSPOTS.length)];
       const tox = 70 - spot.x, toz = -90 - spot.z, tl = Math.hypot(tox, toz) || 1;
-      for (let r = 1.5; r < 32; r += 1.5) {
-        const px = spot.x + (tox / tl) * r, pz = spot.z + (toz / tl) * r;
-        if (heightAt(px, pz) < WATER_Y - 0.2) { x = px; z = pz; break; }
+      let bestR = 1.5;
+      for (let r = 1.0; r <= 5; r += 0.5) {       // find a shallow step off the bank
+        if (WATER_Y - heightAt(spot.x + (tox / tl) * r, spot.z + (toz / tl) * r) > 0.3) { bestR = r; break; }
       }
-    } else {
-      for (let tr = 0; tr < 40; tr++) {      // fallback: random lake interior
-        const ang = Math.random() * Math.PI * 2, rr = 6 + Math.random() * 18;
-        const gx = 70 + Math.cos(ang) * rr, gz = -90 + Math.sin(ang) * rr;
-        if (heightAt(gx, gz) < WATER_Y - 0.1) { x = gx; z = gz; break; }
-      }
-    }
+      x = spot.x + (tox / tl) * bestR; z = spot.z + (toz / tl) * bestR;
+    } else { x = 64; z = -50; }                    // last-ditch: a fixed near-shore point, never the centre
   } else do {
     if (near && tries < 40) {           // herd member — settle near the anchor
       x = near.x + (Math.random() - 0.5) * 18;
@@ -7943,15 +7989,15 @@ function tickBody() {
       // ── SAILING the raft ── YOU work the wind. LEFT/RIGHT (mx) is the SHEET:
       // pull the rope to swing the sail. The wind is the only engine — sheet the
       // sail to CATCH it and you drive; sheet it wrong and it luffs (dead). You
-      // STEER by looking: the bow eases toward your gaze (a slow rudder). You
-      // can't sail straight into the wind — fall off, find the wind, trim, go.
+      // TWO SEPARATE MECHANICS: looking around is FREE (it never moves the boat);
+      // you sail entirely with the SHEET (left/right = swing the sail). The sail's
+      // balance steers you: trim it PERFECTLY and you hold a straight, fast line;
+      // over- or under-sheet a touch and the bow carves that way. You can't point
+      // dead into the wind — fall off, find the wind, trim, go.
       const RAFT_ACCEL = 9.0, RAFT_MAXV = 11;
-      // the sheet — swing the sail with left/right; it's your throttle.
+      // the sheet — swing the sail with left/right; it's your throttle AND helm.
       _sailTrim = Math.max(-1, Math.min(1, _sailTrim + mx * 1.7 * dt));
       const boom = _sailTrim * 1.15;                      // boom angle off the centreline
-      // steer by gaze — the bow eases toward where the camera looks (a rudder)
-      const lookYaw = player.yaw + Math.PI;
-      raftYaw += Math.atan2(Math.sin(lookYaw - raftYaw), Math.cos(lookYaw - raftYaw)) * Math.min(1, dt * 0.7);
       // apparent wind relative to the bow (windDir = where the wind blows TO)
       const windRel = Math.atan2(Math.sin(windDir - raftYaw), Math.cos(windDir - raftYaw));
       const ar = Math.abs(windRel);
@@ -7962,9 +8008,13 @@ function tickBody() {
       // TRIM SKILL — the sail must be sheeted to the wind or it luffs (no drive).
       // ideal boom: hauled in close-hauled, eased right out downwind, to the lee.
       const idealBoom = -Math.sign(windRel || 1) * (ar / Math.PI) * 1.15;
-      const trimErr = Math.abs(Math.atan2(Math.sin(boom - idealBoom), Math.cos(boom - idealBoom)));
+      const trimSigned = Math.atan2(Math.sin(boom - idealBoom), Math.cos(boom - idealBoom)); // signed trim error
+      const trimErr = Math.abs(trimSigned);
       const catchW = Math.max(0, Math.cos(trimErr * 1.25));    // 1 = perfectly trimmed, 0 = luffing
       _luffing = pos > 0.05 && catchW < 0.4;                   // flapping — spilling the wind
+      // STEER with the sail's balance — perfect trim holds course, a little off
+      // turns you. Looking around no longer touches the helm.
+      raftYaw += trimSigned * 1.0 * windStr * pos * dt;
       const drive = RAFT_ACCEL * windStr * pos * catchW;
       canoeVX += Math.sin(raftYaw) * drive * dt;
       canoeVZ += Math.cos(raftYaw) * drive * dt;
@@ -8568,6 +8618,7 @@ function tickBody() {
     }
   }
   sharkUpdate(wdt);               // the lake patrollers — fin on the surface, Jaws bed
+  leviathanUpdate(t);             // the deep one drifts, forever
   arrowUpdate(wdt);
   treeFireUpdate(dt);              // burning trees climb, spread, then fall
   groundFireUpdate(dt);           // grass/bush fire sweeps the ground; animals flee/burn; player heat
