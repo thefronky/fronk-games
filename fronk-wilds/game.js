@@ -3877,6 +3877,9 @@ function spawn(name, near) {
   // ── nerves ── how jumpy THIS individual is. Wide spread: some graze
   // calm with you near, others bolt at a shadow. Folds into spook ranges.
   const paranoia = Math.max(0, Math.min(1, 0.5 + (Math.random() - 0.5) * 1.3));
+  // glance cadence — how fast/jerky THIS one cranes its head to look. Wide so a
+  // herd's heads don't all swing in lockstep (the turret-snap that read as cheesy).
+  const glanceTs = 1.6 + Math.random() * 2.4;           // 1.6–4.0 rad/s of crane
   // per-gait playback tempo: cow plods, horse is quick, bear is heavy — ±5%
   const gaitTs = (cfg.gait === 'sway' ? 0.85 : cfg.gait === 'smooth' ? 1.15
                  : cfg.gait === 'bound' ? 0.9 : 1) * (0.95 + Math.random() * 0.1);
@@ -3884,7 +3887,7 @@ function spawn(name, near) {
     name, cfg, obj, mixer, acts, cur: null,
     state: 'idle', t: Math.random() * 4, dir: Math.random() * Math.PI * 2,
     hp, dead: false, attackCd: 0,
-    aggression, hearJit, gaitTs, paranoia,
+    aggression, hearJit, gaitTs, paranoia, glanceTs,
     gaitPhase: Math.random() * Math.PI * 2,             // desyncs sway/bob across a herd
     gaitRoll: 0,                                         // current rotation.z, decays to 0
     sizeJit,
@@ -4237,20 +4240,38 @@ function animalUpdate(a, dt) {
       }
       if (a.t <= 0 && dist > a.cfg.flee * 1.2) a.state = 'idle', a.t = 1 + Math.random() * 3;
     } else if (a.state === 'alert') {
-      // it caught something — head up, turned your way, weighing it. This
-      // is the OUTER ring of the dartboard: cross it and it looks; hold or
-      // back off and it goes back to grazing; push closer and it bolts.
+      // it caught something — head up, weighing it. The OUTER ring of the
+      // dartboard: cross it and it looks; hold still and it keeps watching;
+      // back off or break its sightline and it grazes again; push closer and
+      // it bolts. The stare↔freeze give-and-take is the heart of the stealth.
       a.t -= dt;
       setAnim(a, 'Idle');
-      a.dir = lerpAngle(a.dir, Math.atan2(dx, dz), dt * 4);   // turn to look right at you
-      if (dist < spookRadius(a, dist)
-          || (noiseLevel >= 2 && dist < spookRadius(a, dist) * 1.3)) {
+      // CRANE toward you — don't turret-snap the whole body. Blend only PART of
+      // the way from its grazing heading to your bearing (jumpy ones turn more),
+      // at this individual's own glance tempo. Reads as a head/neck turn, and a
+      // herd's heads no longer swing in robotic lockstep.
+      const look = Math.atan2(dx, dz);
+      const crane = 0.4 + (a.paranoia ?? 0.5) * 0.45;
+      const aimDir = lerpAngle(a._grazeDir ?? a.dir, look, crane);
+      a.dir = lerpAngle(a.dir, aimDir, Math.min(1, dt * (a.glanceTs || 2)));
+      const hidden = dist < 60 && losBlocked(a);
+      // FREEZE = safety. Move under its gaze and the bolt range WIDENS (it
+      // spooks sooner); hold dead still and it SHRINKS (you can hold close).
+      // Break its sightline and it loses the thread and grazes again.
+      const playerMoving = noiseLevel >= 1 || _moveLvl > 0.12;
+      const boltR = spookRadius(a, dist) * (playerMoving ? 1.25 : 0.8);
+      if (hidden) a.t -= dt * 2.5;                       // can't see you → stands down fast
+      if (!hidden && (dist < boltR
+          || (noiseLevel >= 2 && dist < boltR * 1.2))) {
         a.state = 'flee'; a.t = 3 + Math.random() * 2.5;
         a.dir = Math.atan2(-dx, -dz) + (Math.random() - 0.5) * 0.7;
         spookHerd(a);
       } else if (a.t <= 0) {
-        // nerves decide how it stands down: a calm one (paranoia<0.45) drops
-        // its head and keeps feeding; a jumpy one stays up and glancy a beat
+        // stands down: un-cranes back to its grazing heading (so the next glance
+        // starts fresh and the crane can never ratchet into a full body-snap).
+        a.dir = a._grazeDir ?? a.dir;
+        // nerves decide HOW it stands down: a calm one (paranoia<0.45) drops its
+        // head and keeps feeding; a jumpy one stays up and glancy a beat.
         if ((a.paranoia ?? 0.5) < 0.45) { a.state = 'eat'; a.t = 3 + Math.random() * 4; }
         else { a.state = 'idle'; a.t = 0.8 + Math.random() * 1.2; }
       }
@@ -4274,6 +4295,7 @@ function animalUpdate(a, dt) {
       // head and stares before the inner ring makes it run. A jumpy one
       // catches you sooner (wider band); a calm one lets you drift closer.
       a.state = 'alert'; a.t = 1.8 + Math.random() * 2.0;   // it stares a good beat
+      a._grazeDir = a.dir;                                   // remember its body heading to crane FROM
     } else wander(a, dt);
   }
   a.obj.rotation.y = lerpAngle(a.obj.rotation.y, a.dir, Math.min(1, dt * 6));
