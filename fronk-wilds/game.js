@@ -1186,10 +1186,14 @@ function rockShade(sh) {
     0x5d452c, () => new THREE.Color().setHSL(0.23 + Math.random() * 0.05, 0.5,
                                              0.30 + Math.random() * 0.09));
 
-  const biTrunk = new THREE.CylinderGeometry(0.16, 0.22, 5.2, 6);
-  biTrunk.translate(0, 2.6, 0);
-  const bi1 = new THREE.IcosahedronGeometry(1.6, 0); bi1.translate(0, 6.0, 0);
-  const birchGeo = paintTwoTone(mergeGeoms([biTrunk, bi1]), biTrunk,
+  const biTrunk = new THREE.CylinderGeometry(0.13, 0.2, 5.6, 6);
+  biTrunk.translate(0, 2.8, 0);
+  // a layered crown of overlapping leaf blobs (was a single ball-on-a-stick
+  // "popsicle" — the weakest tree). Clustered + raised reads as real foliage.
+  const biBlob = (r, x, y, z) => { const gg = new THREE.IcosahedronGeometry(r, 0); gg.translate(x, y, z); return gg; };
+  const biCrown = [biBlob(1.25, 0, 6.2, 0), biBlob(0.95, 0.9, 5.7, 0.25), biBlob(0.92, -0.85, 5.9, -0.3),
+                   biBlob(0.82, 0.25, 6.95, 0.5), biBlob(0.78, -0.35, 6.7, -0.55)];
+  const birchGeo = paintTwoTone(mergeGeoms([biTrunk, ...biCrown]), biTrunk,
     0xd9d4c4, () => new THREE.Color().setHSL(0.21 + Math.random() * 0.04, 0.55,
                                              0.42 + Math.random() * 0.08));
 
@@ -3096,15 +3100,24 @@ function updatePollen(t, dt, night) {
 // life and a sense of scale to the valley.
 const birds = (() => {
   const g = new THREE.Group();
-  const mat = new THREE.MeshBasicMaterial({ color: 0x232730, side: THREE.DoubleSide });
-  for (let i = 0; i < 7; i++) {
-    const b = new THREE.Group();
-    for (const s of [-1, 1]) {
-      const w = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 0.6), mat);
-      w.rotation.x = -Math.PI / 2; w.position.x = s * 1.3; w.rotation.y = s * 0.5; b.add(w);
-    }
-    b.position.set((i - 3) * 4.5, (Math.random() - 0.5) * 5, (Math.random() - 0.5) * 10);
-    b.userData.ph = i * 0.8; g.add(b);
+  const mat = new THREE.MeshBasicMaterial({ color: 0x1e222b, side: THREE.DoubleSide });
+  // a proper GULL silhouette — two swept arcs meeting at a little body, laid
+  // flat so it reads from below as a distant bird, not a flat rectangle.
+  const s = new THREE.Shape();
+  s.moveTo(-2.0, 0.0);
+  s.quadraticCurveTo(-0.9, 0.55, -0.22, 0.07);     // left wing, swept up
+  s.quadraticCurveTo(0, 0.17, 0.22, 0.07);          // body hump
+  s.quadraticCurveTo(0.9, 0.55, 2.0, 0.0);          // right wing
+  s.quadraticCurveTo(0.9, 0.30, 0.2, -0.05);        // back along the trailing edge
+  s.quadraticCurveTo(0, -0.01, -0.2, -0.05);
+  s.quadraticCurveTo(-0.9, 0.30, -2.0, 0.0);
+  const geo = new THREE.ShapeGeometry(s);
+  for (let i = 0; i < 6; i++) {
+    const b = new THREE.Mesh(geo, mat);
+    b.rotation.x = -Math.PI / 2;                     // lay flat — viewed from below
+    b.scale.setScalar(0.65 + Math.random() * 0.5);
+    b.position.set((i - 2.5) * 5, (Math.random() - 0.5) * 4, (Math.random() - 0.5) * 12);
+    b.userData.ph = i * 0.9; g.add(b);
   }
   scene.add(g); return g;
 })();
@@ -3118,8 +3131,9 @@ function updateBirds(t, dt, night) {
   birds.position.set(x, 120 + Math.sin(_birdT * 0.2) * 12, Math.sin(_birdT * 0.05) * span * 0.3);
   birds.rotation.y = -Math.PI / 2;
   for (const b of birds.children) {
-    const fl = Math.sin(t * 7 + b.userData.ph) * 0.6;
-    b.children[0].rotation.y = 0.5 + fl; b.children[1].rotation.y = -0.5 - fl;
+    const fl = Math.sin(t * 4 + b.userData.ph);
+    b.rotation.x = -Math.PI / 2 + fl * 0.13;                 // wings dip — a slow flap read
+    b.rotation.z = Math.sin(t * 0.7 + b.userData.ph) * 0.16;  // gentle bank
   }
 }
 
