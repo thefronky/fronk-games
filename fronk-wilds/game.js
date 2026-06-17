@@ -8081,14 +8081,21 @@ function tickBody() {
           dustPuff(bx + sxv * s * spread, WATER_Y + 0.12, bz + szv * s * spread, 0xeaf2f4, 0.45 + speed01 * 0.7);
         }
       }
-      // the sail ANSWERS THE ROPE: the boom swings to your trim (and shivers a
-      // little when it's luffing, so you can see you've spilled the wind).
+      // the sail ANSWERS THE ROPE + TELEGRAPHS the wind: when it's LUFFING it
+      // flogs — shakes side to side and goes FLAT (loses its belly); when it's
+      // DRAWING it sits taut and bellies out FULL. So you can read catch at a glance.
       if (canoe._sailPivot) {
-        const luffShiver = _luffing ? Math.sin(t * 22) * 0.06 : 0;
+        const luffShiver = _luffing ? Math.sin(t * 26) * 0.13 : 0;
         canoe._sailPivot.rotation.y += (boom + luffShiver - canoe._sailPivot.rotation.y) * Math.min(1, dt * 7);
+        canoe._sailPivot.rotation.z = _luffing ? Math.sin(t * 19) * 0.11 : canoe._sailPivot.rotation.z * 0.9;
+        if (canoe._sail) {
+          const fill = _luffing ? 0.18 : 0.7 + catchW * 0.55;   // flat & flapping vs full & taut
+          canoe._sail.scale.z += (fill - canoe._sail.scale.z) * Math.min(1, dt * 6);
+        }
       }
-      // continuous sail/wind hiss + the occasional timber creak
-      if (audio.setSail) audio.setSail(speed01, windStr);
+      // continuous sail/wind hiss + the occasional timber creak. A LUFFING sail
+      // rushes/flaps audibly even at low speed, so you hear you've spilled the wind.
+      if (audio.setSail) audio.setSail(_luffing ? Math.max(speed01, 0.5) : speed01, windStr);
       _raftCreakT -= dt;
       if (_raftCreakT <= 0) { _raftCreakT = 2.4 + Math.random() * 3.5; if (audio.raftCreak) audio.raftCreak(); }
       const lim2 = WORLD * 0.47;
