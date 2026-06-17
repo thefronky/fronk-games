@@ -566,7 +566,7 @@ let _grassResweep = 0;   // frames of full-field grass reblade after a burn (cle
 }
 
 // water — animated lake
-const waterUniforms = { uTime: { value: 0 } };
+const waterUniforms = { uTime: { value: 0 }, uWindDir: { value: 0 }, uBoatWake: { value: 0 } };
 {
   const m = new THREE.MeshStandardMaterial({
     color: 0x2e5a62, transparent: true, opacity: 0.6,
@@ -581,30 +581,40 @@ const waterUniforms = { uTime: { value: 0 } };
     sh.uniforms.uTime = waterUniforms.uTime;
     sh.uniforms.uSunDir = skyUniforms.sunDir;     // shared live uniforms — free
     sh.uniforms.uNight = skyUniforms.night;
-    sh.vertexShader = 'uniform float uTime;\nattribute float depth;\nvarying float vDepth;\nvarying vec3 vWP;\nvarying float vWave;\nvarying vec3 vWN;\n'
+    sh.uniforms.uWindDir = waterUniforms.uWindDir;
+    sh.uniforms.uBoatWake = waterUniforms.uBoatWake;
+    sh.vertexShader = 'uniform float uTime;\nuniform float uWindDir;\nuniform float uBoatWake;\nattribute float depth;\nvarying float vDepth;\nvarying vec3 vWP;\nvarying float vWave;\nvarying vec3 vWN;\n'
       + sh.vertexShader
       .replace('#include <beginnormal_vertex>',
       `#include <beginnormal_vertex>
-       // ── analytic wave normal (the keystone) ── the surface DISPLACES below but
-       //    used to keep its flat up-normal, so it never caught the light. Take the
-       //    exact derivative of the wave height field → a true sloped normal, so the
-       //    sun glint and sky reflection now ride across the swells.
-       float wdN = clamp((depth-0.4)*0.6, 0.0, 1.0);
-       float ph1 = position.x*0.12 + position.y*0.05 + uTime*1.45;
-       float dWdx = (cos(ph1)*0.036 + cos(position.x*0.22 + uTime*1.7)*0.0264) * wdN;
-       float dWdy = (cos(ph1)*0.015 - sin(position.y*0.31 + uTime*1.3)*0.031) * wdN;
-       objectNormal = normalize(vec3(-dWdx, -dWdy, 1.0));
-       vWN = normalize(mat3(modelMatrix) * objectNormal);`)
+       // ── ONE shared Gerstner wave field ── identical to waveAt() in JS, evaluated
+       //    in WORLD coords and driven by the wind, so the crests you SEE are the
+       //    crests the boat RIDES (they used to be two unrelated fields). The normal
+       //    is the exact heightfield gradient (sun glint + sky reflection ride the
+       //    real swells); a Gerstner horizontal pinch sharpens rounded swells into
+       //    wind-driven peaks. (plane is rotated -PI/2: local x→world x, local y→
+       //    world -z, local z→world y.)
+       float WX = 70.0 + position.x, WZ = -90.0 - position.y;
+       float wAmp = clamp((depth-0.6)/5.0, 0.0, 1.0) * (0.85 + uBoatWake);
+       float wwx = sin(uWindDir), wwz = cos(uWindDir);
+       float pp = (WX*wwx + WZ*wwz)*0.085 - uTime*1.5;
+       float pa = (WX*0.7  + WZ*0.71)*0.16 + uTime*1.7;
+       float pb = (WX*-0.6 + WZ*0.8 )*0.11 + uTime*1.3;
+       float wHeight = (sin(pp)*0.9 + sin(pa)*0.34 + sin(pb)*0.26) * wAmp;
+       float dWX = (cos(pp)*0.9*wwx*0.085 + cos(pa)*0.34*0.7*0.16 + cos(pb)*0.26*(-0.6)*0.11) * wAmp;
+       float dWZ = (cos(pp)*0.9*wwz*0.085 + cos(pa)*0.34*0.71*0.16 + cos(pb)*0.26*0.8*0.11) * wAmp;
+       objectNormal = normalize(vec3(-dWX, dWZ, 1.0));
+       vWN = normalize(mat3(modelMatrix) * objectNormal);
+       float gX = (0.6*0.9*wwx*cos(pp) + 0.3*0.34*0.7*cos(pa) + 0.3*0.26*(-0.6)*cos(pb)) * wAmp;
+       float gZ = (0.6*0.9*wwz*cos(pp) + 0.3*0.34*0.71*cos(pa) + 0.3*0.26*0.8*cos(pb)) * wAmp;`)
       .replace('#include <begin_vertex>',
       `#include <begin_vertex>
-       float wd = clamp((depth-0.4)*0.6, 0.0, 1.0);   // calm at the bank, big swell offshore
-       float wave = sin(position.x*0.12 + position.y*0.05 + uTime*1.45)*0.30   // long primary roller
-                  + sin(position.x*0.22 + uTime*1.7)*0.12
-                  + cos(position.y*0.31 + uTime*1.3)*0.10;
-       transformed.z += wave * wd;
-       vWave = wave * wd;                              // hand the crest height to the fragment (whitecaps)
+       transformed.x += gX;            // Gerstner horizontal pinch (world x)
+       transformed.y += -gZ;           // world z  (local y is -world z)
+       transformed.z += wHeight;       // world-up height — the SAME field the hull rides
+       vWave = wHeight;                // real crest height → fragment crest/foam/SSS
        vDepth = depth;
-       vWP = (modelMatrix * vec4(position, 1.0)).xyz;`);
+       vWP = (modelMatrix * vec4(transformed, 1.0)).xyz;`);
     sh.fragmentShader = `uniform float uTime; uniform vec3 uSunDir; uniform float uNight;
       varying float vDepth; varying vec3 vWP; varying float vWave; varying vec3 vWN;
       float wh31(vec3 p){ return fract(sin(dot(p, vec3(127.1,311.7,74.7)))*43758.5453); }
@@ -630,7 +640,7 @@ const waterUniforms = { uTime: { value: 0 } };
        // (Whitecaps removed — the per-pixel foam flecks strobed/aliased into a
        //  glitchy speckle. The WAVES are the smooth vertex swell instead; a soft
        //  crest BRIGHTENING reads as a wave without any high-frequency sparkle.)
-       float crest = smoothstep(0.12, 0.32, vWave) * smoothstep(2.0, 5.0, vDepth);
+       float crest = smoothstep(0.30, 0.85, vWave) * smoothstep(2.0, 5.0, vDepth);  // vWave is now real height (taller)
        diffuseColor.rgb += vec3(0.05, 0.07, 0.08) * crest;`)
       .replace('#include <dithering_fragment>',
       `#include <dithering_fragment>
@@ -662,7 +672,7 @@ const waterUniforms = { uTime: { value: 0 } };
        //    fires only looking sunward (dot(V,-sun)) on sun-facing crests (vWave). The
        //    golden-hour money shot — ~5 ALU, no texture, stays inside the warm palette.
        float back = pow(clamp(dot(V, -uSunDir), 0.0, 1.0), 4.0) * (dot(N, uSunDir)*0.5 + 0.5);
-       back *= smoothstep(0.10, 0.30, vWave);
+       back *= smoothstep(0.25, 0.70, vWave);
        gl_FragColor.rgb += back * vec3(0.95, 0.55, 0.30) * (1.0 - uNight) * smoothstep(0.02, 0.16, sunUp);
        // ── depth-driven alpha ── shallow water near the bank goes more transparent
        //    so the shoreline softly reveals the lakebed instead of a hard sheet edge
@@ -8068,6 +8078,8 @@ function tickBody() {
   puffUpdate(dt);                  // blood puff plays through the hitstop
   windUniforms.uTime.value = t;
   waterUniforms.uTime.value = t;
+  waterUniforms.uWindDir.value = windDir;       // share the ONE wave field with waveAt (boat rides what you see)
+  waterUniforms.uBoatWake.value = _boatWake;
   // ── wind drift ── the breeze wanders slowly in direction and strength, so a
   // good point of sail isn't a fixed setting — you read it and re-trim. Cheap:
   // two slow sines, no allocation, bounded.
