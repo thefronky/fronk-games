@@ -632,8 +632,15 @@ const waterUniforms = { uTime: { value: 0 } };
        vec3 V = normalize(cameraPosition - vWP);
        vec3 N = normalize(vWN);                                                // the true wave-sloped normal
        float fres = mix(0.06, 0.7, pow(1.0 - max(dot(V, N), 0.0), 5.0));       // Schlick sky reflection, now riding the slopes
-       vec3 skyCol = mix(vec3(0.55,0.66,0.80), vec3(0.04,0.06,0.12), uNight);
-       gl_FragColor.rgb = mix(gl_FragColor.rgb, skyCol, fres*0.4);
+       // ── reflect the ACTUAL sky gradient ── sample the reflected ray's height and
+       //    blend the same warm-horizon → blue-zenith stops the sky dome uses, so the
+       //    water mirrors the real sky instead of a flat blue-gray that clashed with it.
+       vec3 R = reflect(-V, N);
+       float rh = clamp(R.y, 0.0, 1.0);
+       vec3 skyHorizon = mix(vec3(0.98,0.62,0.36), vec3(0.10,0.07,0.13), uNight);
+       vec3 skyZenith  = mix(vec3(0.32,0.46,0.66), vec3(0.03,0.04,0.10), uNight);
+       vec3 skyCol = mix(skyHorizon, skyZenith, pow(rh, 0.55));                // grazing reflections stay warm
+       gl_FragColor.rgb = mix(gl_FragColor.rgb, skyCol, fres*0.45);
        // ── the sun road ── one broad glittering path toward the sun. A wide soft
        //    pool (low exponent) is the road body; crisp facet glints (high exponent)
        //    sparkle where wave normals face the sun — both ride N, so the whole road
