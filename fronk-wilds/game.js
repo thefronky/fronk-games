@@ -3623,92 +3623,82 @@ function buildSharkMesh() {
   g.userData.shark = { tailPiv };
   return g;
 }
-// ── the shark system ── 2-3 patrollers in the deepest water (centroid ~70,-90).
-// Each shows only its dorsal fin (body sunk below WATER_Y). When you've been on
-// the water past its randomized commit timer, the nearest one HUNTS, converging
-// faster than the canoe; reaching you bites. On land they give up + submerge.
+// ── the shark system ── HUGE (~2x the raft), RARE and stealthy. They wander the
+// whole lake mostly fully submerged; you only glimpse a fin for a few seconds
+// now and then. After you've been afloat 30-90s the nearest one commits to a
+// SCARE: it surfaces and CIRCLES you ~15s (dread swelling), then DIVES under and
+// the music fades — a near-miss, not (usually) a bite. Then a cooldown.
 const SHARKS = [];
 const SHARK_CENTER = { x: 70, z: -90 };   // the deepest part of the lake
-const SHARK_SPEED = 7.4;                  // > canoe MAXV (4.6) — you can't outrun it
-const SHARK_PATROL = 4.4;                 // lazy cruising speed while idle
+const SHARK_SCALE = 2.0;                  // ~twice the raft — a monster
 function spawnSharks() {
-  const n = 2 + (Math.random() < 0.5 ? 1 : 0);   // 2 or 3
-  for (let i = 0; i < n; i++) {
-    const obj = buildSharkMesh();
-    const a = (i / n) * Math.PI * 2 + Math.random();
-    const r = 18 + Math.random() * 16;
-    obj.position.set(SHARK_CENTER.x + Math.cos(a) * r, WATER_Y, SHARK_CENTER.z + Math.sin(a) * r);
-    obj.rotation.y = a;
-    scene.add(obj);
+  for (let i = 0; i < 2; i++) {           // sparse — rarely more than one in view
+    const obj = buildSharkMesh(); obj.scale.setScalar(SHARK_SCALE);
+    const a = i * Math.PI + Math.random(), r = 22 + Math.random() * 30;
+    obj.position.set(SHARK_CENTER.x + Math.cos(a) * r, WATER_Y - 10, SHARK_CENTER.z + Math.sin(a) * r);
+    obj.rotation.y = a; scene.add(obj);
     SHARKS.push({
-      obj, dir: a, vy: 0, hunting: false, biteCd: 0,
-      patrolPh: Math.random() * 6.283,
-      commit: 30 + Math.random() * 30,    // seconds in the water before this one commits
-      tailPh: Math.random() * 6.283,
+      obj, dir: a, state: 'patrol', tailPh: Math.random() * 6.283,
+      wpx: obj.position.x, wpz: obj.position.z, wpT: 0,
+      surfaceT: 6 + Math.random() * 8, surfUp: 0,
+      circleT: 0, diveT: 0, circleSign: Math.random() < 0.5 ? 1 : -1,
+      biteCd: 0, _subY: WATER_Y - 10, _spl: 0,
     });
   }
 }
-let _sharkInWaterT = 0;        // how long the player has been out on the water (resets on land)
+let _sharkInWaterT = 0, _sharkScareCd = 0, _sharkOnset = 30 + Math.random() * 60;
 function sharkUpdate(dt) {
   if (!SHARKS.length) return;
-  // are you on the water at all? in the canoe or down in deep water counts;
-  // standing on land does not. The commit timer runs only while you're afloat.
   const onWater = inCanoe || (player.y < WATER_Y + 0.5
     && Math.hypot(player.x - SHARK_CENTER.x, player.z - SHARK_CENTER.z) < 150);
   if (onWater) _sharkInWaterT += dt; else _sharkInWaterT = 0;
-  let nearestProx = 0, nearestPursue = null, nearestD = 1e9;
+  _sharkScareCd -= dt;
+  const scareActive = SHARKS.some(s => s.state === 'circle' || s.state === 'dive');
+  if (onWater && !scareActive && _sharkInWaterT > _sharkOnset && _sharkScareCd <= 0) {
+    let best = null, bd = 1e9;            // the nearest shark commits to the scare
+    for (const s of SHARKS) { const d = Math.hypot(s.obj.position.x - player.x, s.obj.position.z - player.z); if (d < bd) { bd = d; best = s; } }
+    if (best) { best.state = 'circle'; best.circleT = 15; }
+  }
+  const finTip = 2.6 * SHARK_SCALE;
+  const upY = WATER_Y - (finTip - 0.6);  // fin breaks the surface
+  const downY = WATER_Y - finTip - 3.0;  // fully under, gone
+  let dread = 0;
   for (const s of SHARKS) {
     const p = s.obj.position;
-    const dx = player.x - p.x, dz = player.z - p.z;
-    const dist = Math.hypot(dx, dz);
+    const dist = Math.hypot(player.x - p.x, player.z - p.z);
     s.biteCd -= dt;
-    // commit only after you've been afloat past this shark's timer; give up the
-    // instant you're back on land (it loses interest and sinks back to patrol).
-    s.hunting = onWater && _sharkInWaterT > s.commit && dist < 110;
-    let speed;
-    if (s.hunting) {
-      s.dir = Math.atan2(dx, dz);             // converge straight on the player
-      speed = SHARK_SPEED;
-      if (dist < nearestD) { nearestD = dist; nearestPursue = s; }
-      // proximity bed: 0 far (110m) → 1 close (8m)
-      const prox = Math.max(0, Math.min(1, (110 - dist) / 102));
-      if (prox > nearestProx) nearestProx = prox;
-      // reached you → a lunge bite (debounced by biteCd)
-      if (dist < 3.2 && s.biteCd <= 0) {
-        s.biteCd = 1.6;
-        hurtPlayer(38);
-        if (audio.sharkSfx) { audio.sharkSfx('shark_lunge', p.x, p.z); audio.sharkSfx('shark_splash', p.x, p.z); }
-      }
-    } else {
-      // lazy patrol: a slow circle around the deep centre
-      s.patrolPh += dt * 0.12;
-      const tx = SHARK_CENTER.x + Math.cos(s.patrolPh) * 26;
-      const tz = SHARK_CENTER.z + Math.sin(s.patrolPh) * 26;
-      s.dir = Math.atan2(tx - p.x, tz - p.z);
-      speed = SHARK_PATROL;
+    let speed = 3.6, finUp;
+    if (s.state === 'circle') {
+      s.circleT -= dt; finUp = true;
+      const ang = Math.atan2(p.z - player.z, p.x - player.x) + s.circleSign * dt * 0.5;
+      const tx = player.x + Math.cos(ang) * 13, tz = player.z + Math.sin(ang) * 13;
+      s.dir = Math.atan2(tx - p.x, tz - p.z); speed = 6.5;
+      dread = Math.max(dread, 0.5 + 0.5 * Math.min(1, (15 - s.circleT) / 4));
+      s._spl -= dt; if (s._spl <= 0) { s._spl = 0.8 + Math.random() * 0.7; if (audio.sharkSfx) audio.sharkSfx('shark_splash', p.x, p.z, { gain: 0.7 }); }
+      if (dist < 5 && s.biteCd <= 0) { s.biteCd = 2.5; hurtPlayer(30); if (audio.sharkSfx) audio.sharkSfx('shark_lunge', p.x, p.z); }   // only if you crowd it
+      if (s.circleT <= 0) { s.state = 'dive'; s.diveT = 10; if (audio.sharkSfx) audio.sharkSfx('shark_splash', p.x, p.z, { gain: 0.9 }); }
+    } else if (s.state === 'dive') {
+      s.diveT -= dt; finUp = false; speed = 5.5;
+      dread = Math.max(dread, Math.max(0, (s.diveT / 10) * 0.5));   // fades over ~10s
+      if (s.diveT <= 0) { s.state = 'patrol'; _sharkScareCd = 25 + Math.random() * 35; _sharkOnset = 30 + Math.random() * 60; _sharkInWaterT = 0; }
+    } else {                               // patrol: WANDER the lake, mostly submerged
+      s.wpT -= dt;
+      if (s.wpT <= 0) { s.wpT = 6 + Math.random() * 8; const a = Math.random() * 6.283, r = Math.random() * 75; s.wpx = SHARK_CENTER.x + Math.cos(a) * r; s.wpz = SHARK_CENTER.z + Math.sin(a) * r; }
+      s.dir = Math.atan2(s.wpx - p.x, s.wpz - p.z);
+      s.surfaceT -= dt;                    // a rare fin glimpse: up ~3s every ~8-16s
+      if (s.surfaceT <= 0) { s.surfUp = s.surfUp > 0.5 ? 0 : 1; s.surfaceT = s.surfUp > 0.5 ? (2.5 + Math.random() * 2) : (8 + Math.random() * 8); }
+      finUp = s.surfUp > 0.5;
     }
-    // steer + swim
-    s.obj.rotation.y = lerpAngle(s.obj.rotation.y, s.dir, Math.min(1, dt * 2.2));
-    p.x += Math.sin(s.obj.rotation.y) * speed * dt;
-    p.z += Math.cos(s.obj.rotation.y) * speed * dt;
-    // sink the body so only ~0.5m of dorsal fin (peak ~+2.6 local) shows above
-    // the surface; a faint bob keeps it alive. fin tip sits just over WATER_Y.
-    p.y = WATER_Y - 2.1 + Math.sin(s.patrolPh * 2 + s.tailPh) * 0.05;
-    // tail sweep — faster when hunting
+    s.obj.rotation.y = lerpAngle(s.obj.rotation.y, s.dir, Math.min(1, dt * 2.0));
+    const nx = p.x + Math.sin(s.obj.rotation.y) * speed * dt, nz = p.z + Math.cos(s.obj.rotation.y) * speed * dt;
+    if (WATER_Y - heightAt(nx, nz) > 1.5) { p.x = nx; p.z = nz; } else { s.wpT = 0; }   // stay in deep water
+    const tgtY = finUp ? upY : downY;
+    s._subY += (tgtY - s._subY) * Math.min(1, dt * 1.4);
+    p.y = s._subY + Math.sin(s.tailPh) * 0.05;
     const sd = s.obj.userData.shark;
-    if (sd) { s.tailPh += dt * (s.hunting ? 9 : 4); sd.tailPiv.rotation.y = Math.sin(s.tailPh) * 0.45; }
+    if (sd) { s.tailPh += dt * (s.state === 'circle' ? 9 : 4); sd.tailPiv.rotation.y = Math.sin(s.tailPh) * 0.45; }
   }
-  // drive the Jaws bed off the nearest hunting shark; a periodic splash as it
-  // closes in (the fin cutting the surface). Silent when nothing is pursuing.
-  if (audio.sharkDread) audio.sharkDread(nearestProx);
-  if (nearestPursue && nearestD < 26) {
-    nearestPursue._splashCd = (nearestPursue._splashCd ?? 0) - dt;
-    if (nearestPursue._splashCd <= 0) {
-      nearestPursue._splashCd = 0.9 + Math.random() * 0.6;
-      const pp = nearestPursue.obj.position;
-      if (audio.sharkSfx) audio.sharkSfx('shark_splash', pp.x, pp.z, { gain: 0.7 });
-    }
-  }
+  if (audio.sharkDread) audio.sharkDread(dread);
 }
 spawnSharks();   // the lake already exists (built at module load) — stock it once
 
