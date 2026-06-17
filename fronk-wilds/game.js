@@ -5271,9 +5271,10 @@ const canoe = (() => {
     spar.rotation.z = Math.PI / 2; spar.position.set(0, R + 0.06, sz);
     g.add(spar);
   }
-  // a tall mast set WELL AFT — behind the helmsman, so the sail never blocks
-  // the forward view while you steer toward the bow (+z).
-  const MASTZ = -2.9;
+  // mast set just FORWARD of the helmsman — the sail is the thing you work, in
+  // view ahead of you; trimmed to the wind it swings out to the lee and clears
+  // the centre of your view, so you see where you're going while you sail it.
+  const MASTZ = 1.3;
   const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.17, 6.4, 8), mastM);
   mast.position.set(0, R + 3.1, MASTZ);
   g.add(mast);
@@ -5309,7 +5310,7 @@ scene.add(canoe);
 function waveAt(x, z, t) {
   const depth = Math.max(0, WATER_Y - heightAt(x, z));   // how deep below the surface
   const o = Math.max(0, Math.min(1, (depth - 0.6) / 5));  // ~0 at the bank, 1 far out
-  const amp = o * 0.55;                                    // wave height offshore
+  const amp = o * (0.55 + _boatWake * 0.7);               // the swell builds as you get underway
   // two crossing swells, different headings/wavelengths/speeds
   const k1 = 0.16, p1 = (x * 0.7 + z * 0.71) * k1 + t * 1.1;
   const k2 = 0.11, p2 = (x * -0.6 + z * 0.8) * k2 + t * 0.8;
@@ -5368,6 +5369,9 @@ let _raftAirborne = false, _raftAirVy = 0;   // wave-jump: launched off a steep 
 let _raftCreakT = 0;             // occasional timber-creak cooldown
 let _raftLaunch = 0;             // >0 = the launch glide: a clean push straight off the bank
 let _sailFovT = 0;               // 0..1 eased "sailing view" zoom-out
+let _sailTrim = 0;               // -1..1 — the SHEET: pull the rope to swing the sail
+let _boatWake = 0;               // 0..1 eased boat speed — drives wave size + bow wake
+let _luffing = false;            // sail flapping / spilling wind (no drive)
 
 // ── the wake-up: a ~3.5s cinematic intro that plays on enter and on
 // every respawn. Driven entirely by introT on the dt loop (no setTimeout),
@@ -7922,10 +7926,10 @@ function tickBody() {
     if (inCanoe && _raftLaunch > 0) {
       // ── LAUNCH GLIDE ── a guaranteed clean push straight off the bank (~10
       // yards). The wind is OFF and you can't beach — you slide out into open
-      // water first, THEN the sail takes the helm. Helm still nudges the bow so
-      // you can aim where you're heading out.
+      // water first, THEN you sail. The bow eases toward your gaze as you go.
       _raftLaunch -= dt;
-      raftYaw -= mx * 0.8 * dt;
+      const lookYaw = player.yaw + Math.PI;
+      raftYaw += Math.atan2(Math.sin(lookYaw - raftYaw), Math.cos(lookYaw - raftYaw)) * Math.min(1, dt * 0.7);
       const lspd = 7.0;
       canoeVX = Math.sin(raftYaw) * lspd; canoeVZ = Math.cos(raftYaw) * lspd;
       const cx = player.x + canoeVX * dt, cz = player.z + canoeVZ * dt;
@@ -7936,35 +7940,45 @@ function tickBody() {
       if (canoe._sailPivot) canoe._sailPivot.rotation.y += (0.6 - canoe._sailPivot.rotation.y) * Math.min(1, dt * 3);
       _moveLvl = 0.55;
     } else if (inCanoe) {
-      // ── SAILING the raft ── hold LEFT/RIGHT (mx) to tack the heading; the
-      // sail does the pushing. Thrust depends on your point of sail: a broad
-      // reach (sailing across/with the wind) is fast, sailing straight INTO
-      // the wind stalls you (you can't point dead upwind). Heavy momentum —
-      // slow to build, long to slide. The view is never touched by the helm.
-      const RAFT_ACCEL = 7.0, RAFT_MAXV = 11;
-      raftYaw -= mx * 1.4 * dt;             // helm: left/right swings the bow
-      // angle between where the bow points and where the wind blows TO
-      const rel = Math.atan2(Math.sin(raftYaw - windDir), Math.cos(raftYaw - windDir));
-      const ar = Math.abs(rel);
-      // sail efficiency: ~0 dead into the wind (ar≈π), peaks on a broad reach,
-      // decent running downwind (ar≈0). No-go zone close-hauled into the wind.
-      const trim = ar < Math.PI * 0.28 ? 0.55 + ar / (Math.PI * 0.28) * 0.45   // run → reach
-                 : ar > Math.PI * 0.82 ? Math.max(0, (Math.PI - ar) / (Math.PI * 0.18)) * 0.5  // stall upwind
-                 : 1.0;                                                          // beam/broad reach
-      const thrust = RAFT_ACCEL * windStr * trim;
-      canoeVX += Math.sin(raftYaw) * thrust * dt;
-      canoeVZ += Math.cos(raftYaw) * thrust * dt;
-      const drag = Math.pow(0.62, dt);                   // long glide / drift
+      // ── SAILING the raft ── YOU work the wind. LEFT/RIGHT (mx) is the SHEET:
+      // pull the rope to swing the sail. The wind is the only engine — sheet the
+      // sail to CATCH it and you drive; sheet it wrong and it luffs (dead). You
+      // STEER by looking: the bow eases toward your gaze (a slow rudder). You
+      // can't sail straight into the wind — fall off, find the wind, trim, go.
+      const RAFT_ACCEL = 9.0, RAFT_MAXV = 11;
+      // the sheet — swing the sail with left/right; it's your throttle.
+      _sailTrim = Math.max(-1, Math.min(1, _sailTrim + mx * 1.7 * dt));
+      const boom = _sailTrim * 1.15;                      // boom angle off the centreline
+      // steer by gaze — the bow eases toward where the camera looks (a rudder)
+      const lookYaw = player.yaw + Math.PI;
+      raftYaw += Math.atan2(Math.sin(lookYaw - raftYaw), Math.cos(lookYaw - raftYaw)) * Math.min(1, dt * 0.7);
+      // apparent wind relative to the bow (windDir = where the wind blows TO)
+      const windRel = Math.atan2(Math.sin(windDir - raftYaw), Math.cos(windDir - raftYaw));
+      const ar = Math.abs(windRel);
+      // point of sail — you CANNOT point dead into the wind (ar≈π = the no-go zone)
+      const pos = ar > Math.PI * 0.80 ? Math.max(0, (Math.PI - ar) / (Math.PI * 0.20)) * 0.55
+                : ar < Math.PI * 0.25 ? 0.6 + (ar / (Math.PI * 0.25)) * 0.4         // running: a touch slower
+                : 1.0;                                                              // reach = fastest
+      // TRIM SKILL — the sail must be sheeted to the wind or it luffs (no drive).
+      // ideal boom: hauled in close-hauled, eased right out downwind, to the lee.
+      const idealBoom = -Math.sign(windRel || 1) * (ar / Math.PI) * 1.15;
+      const trimErr = Math.abs(Math.atan2(Math.sin(boom - idealBoom), Math.cos(boom - idealBoom)));
+      const catchW = Math.max(0, Math.cos(trimErr * 1.25));    // 1 = perfectly trimmed, 0 = luffing
+      _luffing = pos > 0.05 && catchW < 0.4;                   // flapping — spilling the wind
+      const drive = RAFT_ACCEL * windStr * pos * catchW;
+      canoeVX += Math.sin(raftYaw) * drive * dt;
+      canoeVZ += Math.cos(raftYaw) * drive * dt;
+      const drag = Math.pow(0.6, dt);                    // long glide / drift
       canoeVX *= drag; canoeVZ *= drag;
       const cspd = Math.hypot(canoeVX, canoeVZ);
       if (cspd > RAFT_MAXV) { canoeVX *= RAFT_MAXV / cspd; canoeVZ *= RAFT_MAXV / cspd; }
       const speed01 = Math.min(1, cspd / RAFT_MAXV);
-      // swing the sail to the LEE side (downwind of the mast), more open as it
-      // catches more wind — purely cosmetic; the pivot lives on the mesh.
+      _boatWake += (speed01 - _boatWake) * Math.min(1, dt * 1.5);   // wake/waves build with speed
+      // the sail ANSWERS THE ROPE: the boom swings to your trim (and shivers a
+      // little when it's luffing, so you can see you've spilled the wind).
       if (canoe._sailPivot) {
-        const lee = rel > 0 ? 1 : -1;
-        const target = lee * (0.25 + trim * 0.55);   // gentler swing — never sweeps across the bow view
-        canoe._sailPivot.rotation.y += (target - canoe._sailPivot.rotation.y) * Math.min(1, dt * 3);
+        const luffShiver = _luffing ? Math.sin(t * 22) * 0.06 : 0;
+        canoe._sailPivot.rotation.y += (boom + luffShiver - canoe._sailPivot.rotation.y) * Math.min(1, dt * 7);
       }
       // continuous sail/wind hiss + the occasional timber creak
       if (audio.setSail) audio.setSail(speed01, windStr);
@@ -7975,7 +7989,7 @@ function tickBody() {
       let cz = Math.max(-lim2, Math.min(lim2, player.z + canoeVZ * dt));
       const wy = heightAt(cx, cz);
       if (wy > WATER_Y - 0.12) {            // nosed into the shallows → step out onto land
-        inCanoe = false; canoeVX = 0; canoeVZ = 0; _raftLaunch = 0;
+        inCanoe = false; canoeVX = 0; canoeVZ = 0; _raftLaunch = 0; _boatWake = 0;
         _raftAirborne = false; _raftAirVy = 0;
         if (audio.setSail) audio.setSail(0, windStr);    // cut the sail hiss ashore
         player.x = cx; player.z = cz; player.y = wy; grounded = true; player.airY = wy;
@@ -8107,6 +8121,7 @@ function tickBody() {
       // walk-forward is (-sin,-cos). So the bow must point at player.yaw + PI to
       // head the way you walked in — otherwise the sail shoves you back ashore.
       raftYaw = player.yaw + Math.PI;
+      _sailTrim = 0; _boatWake = 0;
       // arm a clean LAUNCH GLIDE: ~10 yards straight off the bank, wind disabled,
       // no auto-disembark — you clear the shallows, then the sail takes over.
       _raftLaunch = 1.3;
@@ -8466,7 +8481,8 @@ function tickBody() {
   window._tickInfo = { f: (window._tickInfo?.f || 0) + 1, n: animals.length,
                        px: Math.round(player.x), pz: Math.round(player.z),
                        boat: inCanoe, launch: +_raftLaunch.toFixed(2), raftYaw: +raftYaw.toFixed(2),
-                       fov: +camera.fov.toFixed(1) };
+                       fov: +camera.fov.toFixed(1), trim: +_sailTrim.toFixed(2), luff: _luffing,
+                       wake: +_boatWake.toFixed(2), spd: +Math.hypot(canoeVX, canoeVZ).toFixed(1) };
   // scent + sanctuary — once per frame, every brain reads the same air
   scentM = started ? player.meat * 6 + (t < bloodedUntil ? 6 : 0) : 0;
   const atBase = started
