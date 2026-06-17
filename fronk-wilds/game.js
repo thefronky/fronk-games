@@ -5583,6 +5583,7 @@ let _sailFovT = 0;               // 0..1 eased "sailing view" zoom-out
 let _sailTrim = 0;               // -1..1 — the actual sail position (LAGS toward the target)
 let _sailTarget = 0;             // -1..1 — where the slider/keys want the sail; trim eases to it
 let _boatWake = 0;               // 0..1 eased boat speed — drives wave size + bow wake
+let _boatHeel = 0;               // eased sail-side-force lean (radians, leeward) — the "I'm powered" tell
 let _luffing = false;            // sail flapping / spilling wind (no drive)
 let _wakeFoamT = 0;              // bow-spray spawn cooldown
 let _lookHoldT = 0;             // >0 = you're actively looking around; pauses the boat-follow camera
@@ -8322,6 +8323,7 @@ function tickBody() {
     } else if (inCanoe && anchored) {
       // ── ANCHORED ── the boat holds still; you're fishing. No wind drive.
       canoeVX *= Math.pow(0.2, dt); canoeVZ *= Math.pow(0.2, dt);   // settle to a stop
+      _boatHeel += (0 - _boatHeel) * Math.min(1, dt * 1.5);         // stand back up — no sail load at anchor
       player.y = WATER_Y; grounded = true; player.airY = WATER_Y;
       player.x += canoeVX * dt; player.z += canoeVZ * dt;
       _boatWake += (0 - _boatWake) * Math.min(1, dt * 2);
@@ -8342,8 +8344,17 @@ function tickBody() {
       _sailTarget = Math.max(-1, Math.min(1, _sailTarget + mx * 1.1 * dt));   // A/D nudge the target
       _sailTrim += (_sailTarget - _sailTrim) * Math.min(1, dt * 2.6);          // the lag
       const boom = _sailTrim * 1.57;                      // boom swings a full ±90° (180° total)
-      // apparent wind relative to the bow (windDir = where the wind blows TO)
-      const windRel = Math.atan2(Math.sin(windDir - raftYaw), Math.cos(windDir - raftYaw));
+      // ── TRUE → APPARENT wind ── the wind the SAIL feels is the true wind minus
+      // the boat's own velocity. Accelerate and the wind swings forward (you must
+      // sheet in to hold the groove); slow down and it eases aft. The pennant still
+      // streams TRUE wind — the gap between flag and felt wind IS the skill cue.
+      const WIND_SPEED = 11;
+      const wtx = Math.sin(windDir) * windStr * WIND_SPEED, wtz = Math.cos(windDir) * windStr * WIND_SPEED;
+      const wax = wtx - canoeVX, waz = wtz - canoeVZ;
+      const appDir = Math.atan2(wax, waz);
+      const appStr = Math.min(1, Math.hypot(wax, waz) / WIND_SPEED);
+      // apparent wind relative to the bow
+      const windRel = Math.atan2(Math.sin(appDir - raftYaw), Math.cos(appDir - raftYaw));
       const ar = Math.abs(windRel);
       // point of sail — you CANNOT point dead into the wind (ar≈π = the no-go zone)
       const pos = ar > Math.PI * 0.80 ? Math.max(0, (Math.PI - ar) / (Math.PI * 0.20)) * 0.55
@@ -8358,10 +8369,15 @@ function tickBody() {
       _luffing = pos > 0.05 && catchW < 0.4;                   // flapping — spilling the wind
       // STEER with the sail's balance — perfect trim holds course, a little off
       // turns you. Looking around no longer touches the helm.
-      raftYaw += trimSigned * 1.0 * windStr * pos * dt;
-      const drive = RAFT_ACCEL * windStr * pos * catchW;
+      raftYaw += trimSigned * 1.0 * appStr * pos * dt;
+      const drive = RAFT_ACCEL * appStr * pos * catchW;
       canoeVX += Math.sin(raftYaw) * drive * dt;
       canoeVZ += Math.cos(raftYaw) * drive * dt;
+      // ── HEEL ── the sail's side-force leans the boat to leeward; it leans HARD
+      // when driving, stands up when you spill or luff. A free, no-HUD readout of
+      // how powered-up you are (and the golden-hour silhouette gets dynamic).
+      const heelTarget = Math.max(-0.38, Math.min(0.38, -Math.sin(windRel) * drive * 0.05));
+      _boatHeel += (heelTarget - _boatHeel) * Math.min(1, dt * 1.5);
       const drag = Math.pow(0.6, dt);                    // long glide / drift
       canoeVX *= drag; canoeVZ *= drag;
       const cspd = Math.hypot(canoeVX, canoeVZ);
@@ -8537,7 +8553,7 @@ function tickBody() {
       // walk-forward is (-sin,-cos). So the bow must point at player.yaw + PI to
       // head the way you walked in — otherwise the sail shoves you back ashore.
       raftYaw = player.yaw + Math.PI;
-      _sailTrim = 0; _sailTarget = 0; _boatWake = 0;
+      _sailTrim = 0; _sailTarget = 0; _boatWake = 0; _boatHeel = 0;
       // arm a clean LAUNCH GLIDE: ~10 yards straight off the bank, wind disabled,
       // no auto-disembark — you clear the shallows, then the sail takes over.
       _raftLaunch = 1.3;
@@ -8776,8 +8792,9 @@ function tickBody() {
       roll = Math.sin(t * 1.5) * 0.09 * sea + latSlope * 2.4 + spd * 0.05 * Math.sin(t * 3.4);
     }
     canoe.position.set(player.x, rideY, player.z);
-    canoe.rotation.set(pitch, raftYaw, roll);            // heading is the raft's own, not the camera's
-    _boatRoll = roll; _boatPitch = pitch;                // hand to the camera for the same rock
+    const heeledRoll = roll + _boatHeel;                 // steady sail lean layered under the wave rock
+    canoe.rotation.set(pitch, raftYaw, heeledRoll);      // heading is the raft's own, not the camera's
+    _boatRoll = heeledRoll; _boatPitch = pitch;          // hand to the camera for the same rock
     // masthead pennant streams DOWNWIND (world windDir), so you can read the
     // wind at a glance — the whole point of the sailing. (flag is a raft child,
     // so subtract raftYaw to land on the world direction, + a little flutter.)
