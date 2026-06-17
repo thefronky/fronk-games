@@ -634,8 +634,17 @@ const waterUniforms = { uTime: { value: 0 } };
        float fres = mix(0.06, 0.7, pow(1.0 - max(dot(V, N), 0.0), 5.0));       // Schlick sky reflection, now riding the slopes
        vec3 skyCol = mix(vec3(0.55,0.66,0.80), vec3(0.04,0.06,0.12), uNight);
        gl_FragColor.rgb = mix(gl_FragColor.rgb, skyCol, fres*0.4);
-       vec3 Hh = normalize(V + uSunDir);                                       // sun glint travels the swells now
-       gl_FragColor.rgb += vec3(1.0,0.85,0.6) * pow(max(dot(N, Hh), 0.0), 90.0) * (1.0 - uNight) * 0.85;`);
+       // ── the sun road ── one broad glittering path toward the sun. A wide soft
+       //    pool (low exponent) is the road body; crisp facet glints (high exponent)
+       //    sparkle where wave normals face the sun — both ride N, so the whole road
+       //    shimmers along the swells. Amber at golden hour → white when the sun is high.
+       float sunUp = max(uSunDir.y, 0.0);
+       vec3 Hh = normalize(V + uSunDir);
+       float nh = max(dot(N, Hh), 0.0);
+       float road = pow(nh, 13.0) * 0.34;            // broad soft body of the road
+       float glint = pow(nh, 70.0) * 0.9;            // crisp facet sparkle on aligned crests
+       vec3 sunCol = mix(vec3(1.0,0.52,0.26), vec3(1.0,0.93,0.76), sunUp);
+       gl_FragColor.rgb += sunCol * (road + glint) * (1.0 - uNight) * smoothstep(0.02, 0.16, sunUp);`);
   };
   // lake-local plane (a world-sized sheet pokes out past the terrain rim and
   // reads as a band on the horizon). Per-vertex DEPTH = how far the lakebed sits
@@ -659,22 +668,10 @@ const waterUniforms = { uTime: { value: 0 } };
   sh.rotation.x = -Math.PI / 2;
   sh.position.set(70, WATER_Y - 0.4, -90);
   scene.add(sh);
-  // sun glitter — additive sparkle points on the surface (bloom feeds
-  // on these at sunset)
-  const GN = 240, gp = new Float32Array(GN * 3);
-  for (let i = 0; i < GN; i++) {
-    gp[i * 3] = 70 + (Math.random() - 0.5) * 300;
-    gp[i * 3 + 1] = WATER_Y + 0.06;
-    gp[i * 3 + 2] = -90 + (Math.random() - 0.5) * 300;
-  }
-  const gg = new THREE.BufferGeometry();
-  gg.setAttribute('position', new THREE.BufferAttribute(gp, 3));
-  const glitter = new THREE.Points(gg, new THREE.PointsMaterial({
-    color: 0xffd9a4, size: 0.14, transparent: true, opacity: 0.5,
-    blending: THREE.AdditiveBlending, depthWrite: false }));
-  glitter.frustumCulled = false;
-  scene.add(glitter);
-  window._glitter = glitter;
+  // (the 240 additive sparkle Points were removed — they sat at fixed world
+  //  positions, ignored the sun, and read as scattered noise. The sun's
+  //  reflection is now a single broad "sun road" computed in the water shader,
+  //  riding the analytic wave normals so it shimmers along the swells.)
 }
 
 // ───────────────────────── wind-blown grass ─────────────────────────
@@ -8157,11 +8154,6 @@ function tickBody() {
   if (window._cloudMat) {
     window._cloudMat.color.setHex(0xf0dcc2).lerp(_CLOUD_NIGHT, night);
     window._cloudMat.opacity = 0.88 - night * 0.55;
-  }
-  if (window._glitter) {
-    const g = window._glitter;
-    g.material.opacity = (1 - night) * (0.3 + 0.25 * Math.sin(t * 2.3));
-    g.position.x = Math.sin(t * 0.4) * 0.8;   // shimmer drift
   }
   window._night = night;
 
