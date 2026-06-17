@@ -5491,9 +5491,7 @@ function beginIntro() {               // arm the wake-up for a fresh life
   setLids(0, 0);
   bow.position.set(0.34, -1.35, -0.62);   // off the bottom of the screen
   if (camera.fov !== 70) { camera.fov = 70; camera.updateProjectionMatrix(); }
-  // the breath of coming alive — a deep gasp that swells AS the eyes open
-  if (audio.wakeBreath) audio.wakeBreath();
-  else if (audio.breath) audio.breath();
+  // ONLY the cinematic music plays at the beginning — no breath, no sfx (per Fronk).
 }
 // ── you BLINK awake on the bed of roses ── no crater, no blast. Eyes flutter
 // open over a beat, the breath of coming-to, and all your functionality (HUD,
@@ -5501,9 +5499,8 @@ function beginIntro() {               // arm the wake-up for a fresh life
 function blinkAwake() {
   if (_eyelids) _eyelids.classList.add('waking');
   setLids(0, 0.5);                                 // shut, a soft warm glow
-  if (audio.wakeBreath) audio.wakeBreath();
-  if (audio.dawnChorus) audio.dawnChorus();        // you wake to birdsong + insects
-
+  // ONLY the cinematic music at the beginning — no breath, no dawn chorus, no
+  // sfx of any kind (per Fronk). The world's sounds come in once you're playing.
   setTimeout(() => setLids(-45, 0.3), 480);        // first flutter
   setTimeout(() => setLids(-12, 0.35), 820);       // a heavy second blink
   setTimeout(() => setLids(-100, 0), 1450);        // and you're awake
@@ -7731,9 +7728,10 @@ window._sim = (seconds) => {   // test hook: advance the world while the
 function tickBody() {
   const dt = simDt ?? Math.min(clock.getDelta(), 0.05);
   const t = clock.elapsedTime;
-  // no animal voices during the title / dive / wake cinematic — keeps a stray
-  // wolf howl (a buzzy procedural sawtooth) from jarring the quiet opening.
-  audio._cinematic = !started || intro || launching;
+  // no animal voices during the title / dive / wake cinematic OR the first few
+  // seconds after you wake — keeps a stray wolf howl (a buzzy procedural sawtooth)
+  // or any sfx from jarring the quiet, music-only opening.
+  audio._cinematic = !started || intro || launching || (_wakeT > 0 && t - _wakeT < 4);
   if (audio.pumpTitle) audio.pumpTitle(dt);   // keep the title theme alive (runs pre-game too)
   // ── the trip ── a mushroom turns the world strange: hue cycles, colors
   // swell, the picture breathes. Eases out over the last couple seconds.
