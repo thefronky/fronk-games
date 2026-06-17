@@ -5251,7 +5251,7 @@ const canoe = (() => {
   const logM = new THREE.MeshStandardMaterial({ color: 0x6a4427, roughness: 0.85, flatShading: true });
   const lashM = new THREE.MeshStandardMaterial({ color: 0x3a2414, roughness: 0.95 });
   const mastM = new THREE.MeshStandardMaterial({ color: 0x4f3320, roughness: 0.9, flatShading: true });
-  const sailM = new THREE.MeshStandardMaterial({ color: 0xcfc4ac, roughness: 0.95, side: THREE.DoubleSide });
+  const sailM = new THREE.MeshStandardMaterial({ color: 0xcfc4ac, roughness: 0.95, side: THREE.DoubleSide, transparent: true, opacity: 0.82 });
   const flagM = new THREE.MeshBasicMaterial({ color: 0xc2402c, side: THREE.DoubleSide });
   // a BIG lashed LOG RAFT — a walk-on platform (~5.6m x 9m): seven thick logs
   // fore-aft, three cross-lash spars, a TALL mast carrying a large square sail
@@ -5271,13 +5271,15 @@ const canoe = (() => {
     spar.rotation.z = Math.PI / 2; spar.position.set(0, R + 0.06, sz);
     g.add(spar);
   }
-  // a tall mast just forward of center
+  // a tall mast set WELL AFT — behind the helmsman, so the sail never blocks
+  // the forward view while you steer toward the bow (+z).
+  const MASTZ = -2.9;
   const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.17, 6.4, 8), mastM);
-  mast.position.set(0, R + 3.1, -0.7);
+  mast.position.set(0, R + 3.1, MASTZ);
   g.add(mast);
   // the sail rides a pivot (swings to the lee). A cross-yard + a big bowed sail.
   const sailPivot = new THREE.Group();
-  sailPivot.position.set(0, R + 3.1, -0.7);
+  sailPivot.position.set(0, R + 3.1, MASTZ);
   const yard = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 5.2, 6), mastM);
   yard.rotation.z = Math.PI / 2; yard.position.set(0, 2.1, 0); sailPivot.add(yard);
   const sail = new THREE.Mesh(new THREE.PlaneGeometry(4.8, 4.2, 8, 2), sailM);
@@ -5289,7 +5291,7 @@ const canoe = (() => {
   g.add(sailPivot);
   // masthead pennant — re-aimed downwind each frame in the loop (g._windFlag)
   const flag = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 0.4), flagM);
-  flag.position.set(0.55, R + 6.4, -0.7);
+  flag.position.set(0.55, R + 6.4, MASTZ);
   g.add(flag);
   g.traverse(o => { if (o.isMesh) o.castShadow = true; });
   g._sailPivot = sailPivot;     // game swings this to the lee side each frame
@@ -7955,7 +7957,7 @@ function tickBody() {
       // catches more wind — purely cosmetic; the pivot lives on the mesh.
       if (canoe._sailPivot) {
         const lee = rel > 0 ? 1 : -1;
-        const target = lee * (0.3 + trim * 0.9);
+        const target = lee * (0.25 + trim * 0.55);   // gentler swing — never sweeps across the bow view
         canoe._sailPivot.rotation.y += (target - canoe._sailPivot.rotation.y) * Math.min(1, dt * 3);
       }
       // continuous sail/wind hiss + the occasional timber creak
