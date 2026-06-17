@@ -158,7 +158,9 @@ export class AudioEngine {
     windLp.frequency.value = 480; windLp.Q.value = 0.4;
     const windHp = C.createBiquadFilter(); windHp.type = 'highpass';
     windHp.frequency.value = 90;
-    windSrc.connect(windLp).connect(windHp).connect(this.windGain)
+    this._bedNoise = {};
+    this._bedNoise.wind = C.createGain();          // noise level — faded out once the sample bed loads
+    windSrc.connect(windLp).connect(windHp).connect(this._bedNoise.wind).connect(this.windGain)
       .connect(this.master);
     this._windLp = windLp;
 
@@ -166,7 +168,8 @@ export class AudioEngine {
     this.waterGain = C.createGain(); this.waterGain.gain.value = 0;
     const ws = this._noiseLoop();
     const wf = C.createBiquadFilter(); wf.type = 'lowpass'; wf.frequency.value = 600;
-    ws.connect(wf).connect(this.waterGain).connect(this.master);
+    this._bedNoise.water = C.createGain();
+    ws.connect(wf).connect(this._bedNoise.water).connect(this.waterGain).connect(this.master);
 
     // ── rain bed ── a soft hiss for a passing shower; gain driven from update()
     // by s.rain (0..1). Bandpassed noise — higher than wind, airier than water.
@@ -174,7 +177,8 @@ export class AudioEngine {
     const rs = this._noiseLoop();
     const rhp = C.createBiquadFilter(); rhp.type = 'highpass'; rhp.frequency.value = 600;
     const rlp = C.createBiquadFilter(); rlp.type = 'lowpass'; rlp.frequency.value = 4200;
-    rs.connect(rhp).connect(rlp).connect(this.rainGain).connect(this.master);
+    this._bedNoise.rain = C.createGain();
+    rs.connect(rhp).connect(rlp).connect(this._bedNoise.rain).connect(this.rainGain).connect(this.master);
 
     // ── fire bed ── a low roaring rumble for burning trees; gain rides s.fire
     // (how much is ablaze / how near). Heavily lowpassed so it reads as a fire
@@ -184,7 +188,8 @@ export class AudioEngine {
     const fs = this._noiseLoop();
     const flp = C.createBiquadFilter(); flp.type = 'lowpass'; flp.frequency.value = 380; flp.Q.value = 0.6;
     const flp2 = C.createBiquadFilter(); flp2.type = 'lowpass'; flp2.frequency.value = 900;
-    fs.connect(flp2).connect(flp).connect(this.fireGain).connect(this.master);
+    this._bedNoise.fire = C.createGain();
+    fs.connect(flp2).connect(flp).connect(this._bedNoise.fire).connect(this.fireGain).connect(this.master);
     this._fireCrackleT = 0;
 
     // ── danger drone (predators) — detuned three-voice cluster, plus a
@@ -250,6 +255,27 @@ export class AudioEngine {
         if (!r.ok) return;
         this._sfx[name] = await C.decodeAudioData(await r.arrayBuffer());
         this._sfxReady = true;
+      } catch (e) {}
+    });
+    // ── ambience BEDS ── loop the real recordings into the existing bed gains
+    // (still driven by update()), and crossfade the synth noise out. If a bed
+    // fails to load, its noise stays up — never silent.
+    const beds = [
+      { file: 'bed_wind',  gain: this.windGain,  noise: this._bedNoise.wind,  mk: 0.85 },
+      { file: 'bed_water', gain: this.waterGain, noise: this._bedNoise.water, mk: 1.0 },
+      { file: 'bed_rain',  gain: this.rainGain,  noise: this._bedNoise.rain,  mk: 1.0 },
+      { file: 'bed_fire',  gain: this.fireGain,  noise: this._bedNoise.fire,  mk: 1.1 },
+    ];
+    beds.forEach(async (b) => {
+      try {
+        const r = await fetch('sfx/' + b.file + '.mp3');
+        if (!r.ok) return;
+        const buf = await C.decodeAudioData(await r.arrayBuffer());
+        const src = C.createBufferSource(); src.buffer = buf; src.loop = true;
+        const mk = C.createGain(); mk.gain.value = b.mk;
+        src.connect(mk).connect(b.gain);
+        src.start();
+        b.noise.gain.setTargetAtTime(0, C.currentTime, 0.8);   // crossfade synth → recording
       } catch (e) {}
     });
   }

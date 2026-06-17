@@ -44,6 +44,11 @@ const MANIFEST = [
   { name: 'breath',       n: 2, dur: 1.6, prompt: 'a single human exhale, tired heavy breath out through the nose, close, calm' },
   { name: 'thud',         n: 1, dur: 0.9, prompt: 'a heavy body blow gut punch, dull winded impact, short' },
   { name: 'fire_catch',   n: 1, dur: 1.4, prompt: 'a whoosh as a fire suddenly catches and ignites, flames flaring up' },
+  // ── seamless ambience BEDS (looped in-engine; long clips for smooth loops) ──
+  { name: 'bed_wind',  n: 1, dur: 16, influence: 0.3, prompt: 'gentle steady wind blowing through a meadow and trees, soft continuous breeze, calm ambience' },
+  { name: 'bed_water', n: 1, dur: 16, influence: 0.3, prompt: 'calm lake water lapping gently at a shoreline, soft continuous ripples, peaceful ambience' },
+  { name: 'bed_rain',  n: 1, dur: 16, influence: 0.3, prompt: 'steady soft rainfall on grass and leaves, gentle continuous rain ambience, no thunder' },
+  { name: 'bed_fire',  n: 1, dur: 16, influence: 0.3, prompt: 'a large campfire burning steadily, continuous crackling roar of flames, close ambience' },
 ];
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
