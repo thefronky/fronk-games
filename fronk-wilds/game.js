@@ -5449,6 +5449,7 @@ let _boatRoll = 0, _boatPitch = 0;   // boat rock, handed from the canoe to the 
 let raftYaw = 0;                 // the raft's own heading (decoupled from the camera)
 let windDir = Math.PI * 0.35;    // where the wind blows TO, in world radians
 let windStr = 0.7;               // 0..1 wind strength — drifts slowly each frame
+let _gust = 0;                   // 0..1 fast gust ripple — flutters the pennant, surges the sail
 let _raftAirborne = false, _raftAirVy = 0;   // wave-jump: launched off a steep face
 let _raftCreakT = 0;             // occasional timber-creak cooldown
 let _raftLaunch = 0;             // >0 = the launch glide: a clean push straight off the bank
@@ -7797,7 +7798,12 @@ function tickBody() {
   // good point of sail isn't a fixed setting — you read it and re-trim. Cheap:
   // two slow sines, no allocation, bounded.
   windDir += Math.sin(t * 0.013) * 0.04 * dt;
-  windStr = 0.55 + 0.4 * (0.5 + 0.5 * Math.sin(t * 0.021 + 1.7));
+  // wind has LAYERS: a slow base, a faster gust ripple, and occasional strong
+  // puffs that surge you. The pennant + sail react so you can read it coming.
+  const windBase = 0.5 + 0.28 * (0.5 + 0.5 * Math.sin(t * 0.021 + 1.7));
+  _gust = 0.5 + 0.5 * Math.sin(t * 0.5 + Math.sin(t * 0.17) * 3.0);     // ripples every few seconds
+  const puff = Math.max(0, Math.sin(t * 0.11) - 0.55) * 1.2;            // a rare strong gust
+  windStr = Math.min(1, windBase + _gust * 0.2 + puff);
   // the trees only move on the trip — strongest on that first wide-eyed L1,
   // eased in/out so it swells on rather than popping. (uTrip=0 → rigid.)
   // trees come alive FIRST on the come-up (rides _tripTreeEnv, the early envelope)
@@ -8444,7 +8450,7 @@ function tickBody() {
     // masthead pennant streams DOWNWIND (world windDir), so you can read the
     // wind at a glance — the whole point of the sailing. (flag is a raft child,
     // so subtract raftYaw to land on the world direction, + a little flutter.)
-    if (canoe._windFlag) canoe._windFlag.rotation.y = (windDir - raftYaw) + Math.sin(t * 6) * 0.12;
+    if (canoe._windFlag) canoe._windFlag.rotation.y = (windDir - raftYaw) + Math.sin(t * 6) * (0.07 + _gust * 0.2);
   }
   if (inCanoe !== _wasCanoe) { _wasCanoe = inCanoe;
     document.body.classList.toggle('canoe', inCanoe); }
