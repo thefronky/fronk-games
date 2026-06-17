@@ -5164,6 +5164,8 @@ let windDir = Math.PI * 0.35;    // where the wind blows TO, in world radians
 let windStr = 0.7;               // 0..1 wind strength — drifts slowly each frame
 let _raftAirborne = false, _raftAirVy = 0;   // wave-jump: launched off a steep face
 let _raftCreakT = 0;             // occasional timber-creak cooldown
+let _raftLaunch = 0;             // >0 = the launch glide: a clean push straight off the bank
+let _sailFovT = 0;               // 0..1 eased "sailing view" zoom-out
 
 // ── the wake-up: a ~3.5s cinematic intro that plays on enter and on
 // every respawn. Driven entirely by introT on the dt loop (no setTimeout),
@@ -7708,7 +7710,23 @@ function tickBody() {
     const sin = Math.sin(player.yaw), cos = Math.cos(player.yaw);
     let nx = player.x + (-sin * mz + cos * mx) * sp * dt;
     let nz = player.z + (-cos * mz - sin * mx) * sp * dt;
-    if (inCanoe) {
+    if (inCanoe && _raftLaunch > 0) {
+      // ── LAUNCH GLIDE ── a guaranteed clean push straight off the bank (~10
+      // yards). The wind is OFF and you can't beach — you slide out into open
+      // water first, THEN the sail takes the helm. Helm still nudges the bow so
+      // you can aim where you're heading out.
+      _raftLaunch -= dt;
+      raftYaw -= mx * 0.8 * dt;
+      const lspd = 7.0;
+      canoeVX = Math.sin(raftYaw) * lspd; canoeVZ = Math.cos(raftYaw) * lspd;
+      const cx = player.x + canoeVX * dt, cz = player.z + canoeVZ * dt;
+      player.x = cx; player.z = cz; player.y = WATER_Y; grounded = true; player.airY = WATER_Y;
+      if (audio.setSail) audio.setSail(0.55, windStr);
+      _raftCreakT -= dt;
+      if (_raftCreakT <= 0) { _raftCreakT = 2.4 + Math.random() * 3.5; if (audio.raftCreak) audio.raftCreak(); }
+      if (canoe._sailPivot) canoe._sailPivot.rotation.y += (0.6 - canoe._sailPivot.rotation.y) * Math.min(1, dt * 3);
+      _moveLvl = 0.55;
+    } else if (inCanoe) {
       // ── SAILING the raft ── hold LEFT/RIGHT (mx) to tack the heading; the
       // sail does the pushing. Thrust depends on your point of sail: a broad
       // reach (sailing across/with the wind) is fast, sailing straight INTO
@@ -7748,7 +7766,7 @@ function tickBody() {
       let cz = Math.max(-lim2, Math.min(lim2, player.z + canoeVZ * dt));
       const wy = heightAt(cx, cz);
       if (wy > WATER_Y - 0.12) {            // nosed into the shallows → step out onto land
-        inCanoe = false; canoeVX = 0; canoeVZ = 0;
+        inCanoe = false; canoeVX = 0; canoeVZ = 0; _raftLaunch = 0;
         _raftAirborne = false; _raftAirVy = 0;
         if (audio.setSail) audio.setSail(0, windStr);    // cut the sail hiss ashore
         player.x = cx; player.z = cz; player.y = wy; grounded = true; player.airY = wy;
@@ -7876,12 +7894,14 @@ function tickBody() {
     if (ny <= WATER_Y - 0.4 && stickMag > 0.02 && grounded && player.y < WATER_Y + 2.5) {
       inCanoe = true;
       if (audio.themeSting) audio.themeSting('sting_boat', 0.85);   // setting off — adventure lift
-      const sinY = Math.sin(player.yaw), cosY = Math.cos(player.yaw);
-      // a STRONG shove straight off the bank toward open water, so the sail
-      // can't immediately drag you back ashore — you clear the shallows first,
-      // then the wind takes over. (You walked in facing the water.)
-      canoeVX = -sinY * 6.5; canoeVZ = -cosY * 6.5;
-      raftYaw = player.yaw;            // shove off pointing where you were facing
+      // The raft's thrust/bow use (+sin,+cos) for "forward", but the player's
+      // walk-forward is (-sin,-cos). So the bow must point at player.yaw + PI to
+      // head the way you walked in — otherwise the sail shoves you back ashore.
+      raftYaw = player.yaw + Math.PI;
+      // arm a clean LAUNCH GLIDE: ~10 yards straight off the bank, wind disabled,
+      // no auto-disembark — you clear the shallows, then the sail takes over.
+      _raftLaunch = 1.3;
+      canoeVX = Math.sin(raftYaw) * 7.0; canoeVZ = Math.cos(raftYaw) * 7.0;
       player.x = nx; player.z = nz; player.y = WATER_Y;
     }
     }  // end !inCanoe walk branch
@@ -7942,7 +7962,10 @@ function tickBody() {
     bobPhase += dt * (mx || mz ? 7.5 : 1.6);
     bow.position.y += Math.sin(bobPhase) * (mx || mz ? 0.012 : 0.004);
     bow.position.x += Math.cos(bobPhase * 0.5) * (mx || mz ? 0.006 : 0.002);
-    let targetFov = 70 - e * 4.5;   // gentle sighting focus — not a lockout
+    // sailing pulls the view WIDER (eased) so you can read the wind and steer —
+    // it makes the raft feel like its own little sailing game, not a walk on water.
+    _sailFovT += ((inCanoe ? 1 : 0) - _sailFovT) * Math.min(1, dt * 2.5);
+    let targetFov = 70 - e * 4.5 + _sailFovT * 14;   // gentle sighting focus + sail zoom-out
     // kill-feel: lethal hit = brief 0.96 punch-in, easing back out
     if (fovPunchT > 0) targetFov *= 0.96 + 0.04 * (1 - fovPunchT / PUNCH_DUR);
     if (Math.abs(camera.fov - targetFov) > 0.05) {
@@ -8232,7 +8255,9 @@ function tickBody() {
   sun.position.set(player.x - 180, player.y + 95, player.z - 60);
 
   window._tickInfo = { f: (window._tickInfo?.f || 0) + 1, n: animals.length,
-                       px: Math.round(player.x), pz: Math.round(player.z) };
+                       px: Math.round(player.x), pz: Math.round(player.z),
+                       boat: inCanoe, launch: +_raftLaunch.toFixed(2), raftYaw: +raftYaw.toFixed(2),
+                       fov: +camera.fov.toFixed(1) };
   // scent + sanctuary — once per frame, every brain reads the same air
   scentM = started ? player.meat * 6 + (t < bloodedUntil ? 6 : 0) : 0;
   const atBase = started
