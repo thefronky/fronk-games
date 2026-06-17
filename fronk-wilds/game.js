@@ -3762,9 +3762,22 @@ function buildSharkMesh() {
   // blunt snout cone forward (+z)
   const snout = new THREE.Mesh(new THREE.ConeGeometry(0.85, 2.2, 6), _sharkMat);
   snout.rotation.x = Math.PI / 2; snout.position.set(0, 0.05, 4.4); g.add(snout);
-  // the gaping maw — a dark slab under the snout
-  const maw = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.5, 0.9), _sharkMaw);
-  maw.position.set(0, -0.5, 3.9); g.add(maw);
+  // a dark throat void so an OPEN mouth reads as a maw, not a gap
+  const throat = new THREE.Mesh(new THREE.BoxGeometry(1.05, 0.7, 1.6), _sharkMaw);
+  throat.position.set(0, -0.05, 3.9); g.add(throat);
+  // the hinged LOWER JAW — drops open on the strike. Pivots at its rear edge.
+  const jaw = new THREE.Group(); jaw.position.set(0, -0.35, 3.3); g.add(jaw);
+  const jawMesh = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.4, 1.9), _sharkMat);
+  jawMesh.position.set(0, -0.12, 0.95); jaw.add(jawMesh);
+  // teeth — white cones lining the upper lip and the lower jaw
+  const toothMat = new THREE.MeshStandardMaterial({ color: 0xf2efe6, roughness: 0.5 });
+  for (let i = 0; i < 7; i++) {
+    const tx = -0.55 + i * 0.18;
+    const ut = new THREE.Mesh(new THREE.ConeGeometry(0.075, 0.32, 4), toothMat);
+    ut.rotation.x = Math.PI; ut.position.set(tx, -0.18, 4.2); g.add(ut);   // upper, point down
+    const lt = new THREE.Mesh(new THREE.ConeGeometry(0.075, 0.3, 4), toothMat);
+    lt.position.set(tx, 0.08, 1.7); jaw.add(lt);                            // lower, point up
+  }
   // the iconic TALL dorsal fin — this is the only part that shows above water
   const fin = new THREE.Mesh(new THREE.ConeGeometry(0.7, 2.2, 4), _sharkMat);
   fin.rotation.x = -0.25; fin.position.set(0, 1.5, -0.3); fin.castShadow = true; g.add(fin);
@@ -3778,7 +3791,7 @@ function buildSharkMesh() {
     pec.scale.set(1, 0.3, 1); pec.rotation.z = sx * 1.5; pec.rotation.y = sx * 0.4;
     pec.position.set(sx * 1.1, -0.4, 1.6); g.add(pec);
   }
-  g.userData.shark = { tailPiv };
+  g.userData.shark = { tailPiv, jaw };
   return g;
 }
 // ── the shark system ── HUGE (~2x the raft), RARE and stealthy. They wander the
@@ -3788,7 +3801,7 @@ function buildSharkMesh() {
 // the music fades — a near-miss, not (usually) a bite. Then a cooldown.
 const SHARKS = [];
 const SHARK_CENTER = { x: 70, z: -90 };   // the deepest part of the lake
-const SHARK_SCALE = 5.2;                  // MASSIVE — far bigger than the whole raft
+const SHARK_SCALE = 6.6;                  // a sea-monster — dwarfs the whole raft
 function spawnSharks() {
   for (let i = 0; i < 2; i++) {           // sparse — rarely more than one in view
     const obj = buildSharkMesh(); obj.scale.setScalar(SHARK_SCALE);
@@ -3816,7 +3829,11 @@ function sharkUpdate(dt) {
   if (onWater && !scareActive && _sharkInWaterT > _sharkOnset && _sharkScareCd <= 0) {
     let best = null, bd = 1e9;            // the nearest shark commits to the Jaws SCARE
     for (const s of SHARKS) { const d = Math.hypot(s.obj.position.x - player.x, s.obj.position.z - player.z); if (d < bd) { bd = d; best = s; } }
-    if (best) { best.state = 'circle'; best.circleT = 15; }
+    if (best) { best.state = 'circle'; best.circleT = 15;
+      // you SPOT it surfacing — a distant monster groan + the camera turns to it
+      if (audio.sharkRoar) audio.sharkRoar(best.obj.position.x, best.obj.position.z, 0.7);
+      cineLook(best.obj.position.x, WATER_Y + 1.5, best.obj.position.z, 1.4, 0.85);
+    }
   }
   // RANDOM ATTACK — besides the set-piece circle scare, a shark will just GO for
   // you out of nowhere now and then (more the longer you linger): a fast
@@ -3825,8 +3842,13 @@ function sharkUpdate(dt) {
   if (onWater && !scareActive && _sharkInWaterT > 6 && _sharkLungeCd <= 0) {
     let best = null, bd = 1e9;
     for (const s of SHARKS) { if (s.state !== 'patrol') continue; const d = Math.hypot(s.obj.position.x - player.x, s.obj.position.z - player.z); if (d < bd) { bd = d; best = s; } }
-    if (best && bd < 100) { best.state = 'lunge'; best.lungeT = 2.6; best.biteCd = 0; _sharkLungeCd = 14 + Math.random() * 20;
-      if (audio.sharkSfx) audio.sharkSfx('shark_splash', best.obj.position.x, best.obj.position.z, { gain: 0.8 }); }
+    if (best && bd < 100) { best.state = 'lunge'; best.lungeT = 2.8; best.biteCd = 0; _sharkLungeCd = 16 + Math.random() * 22;
+      // the monster BELLOWS as it commits, the camera SNAPS to it (Gears-style),
+      // and a stinger hits — so you always know it's coming and where.
+      if (audio.sharkRoar) audio.sharkRoar(best.obj.position.x, best.obj.position.z, 1.0);
+      if (audio.themeSting) audio.themeSting('sting_escape', 0.9);
+      cineLook(best.obj.position.x, WATER_Y + 3, best.obj.position.z, 1.7, 1.0);
+    }
   }
   const finTip = 2.6 * SHARK_SCALE;
   const upY = WATER_Y - (finTip - 0.6);  // fin breaks the surface
@@ -3852,9 +3874,14 @@ function sharkUpdate(dt) {
       s.dir = Math.atan2(player.x - p.x, player.z - p.z);
       s.obj.rotation.y = lerpAngle(s.obj.rotation.y, s.dir, Math.min(1, dt * 6));  // turn hard onto you
       dread = Math.max(dread, 0.85);
-      if (dist < 6.5 && s.biteCd <= 0) {
-        s.biteCd = 99; hurtPlayer(38); camShakeT = SHAKE_DUR * 2.5;
+      if (dist < 7.0 && s.biteCd <= 0) {
+        s.biteCd = 99; camShakeT = SHAKE_DUR * 3; kickT = KICK_DUR;
+        const took = biteBoatLog();                  // it TEARS A LOG off the raft (no HP damage)
+        if (audio.sharkRoar) audio.sharkRoar(p.x, p.z, 1.2);
         if (audio.sharkSfx) audio.sharkSfx('shark_lunge', p.x, p.z, { gain: 1.2 });
+        if (audio.themeSting) audio.themeSting('sting_escape', 0.95);
+        cineLook(p.x, WATER_Y + 3, p.z, 1.2, 1.0);
+        toast(took ? 'The shark tore a log off the raft!' : 'The shark slammed the boat!', 2600);
         s.state = 'dive'; s.diveT = 8;
       } else if (s.lungeT <= 0) {                    // missed — it dives off
         s.state = 'dive'; s.diveT = 8;
@@ -3879,7 +3906,15 @@ function sharkUpdate(dt) {
     s._subY += (tgtY - s._subY) * Math.min(1, dt * 1.4);
     p.y = s._subY + Math.sin(s.tailPh) * 0.05;
     const sd = s.obj.userData.shark;
-    if (sd) { s.tailPh += dt * (s.state === 'circle' ? 9 : 4); sd.tailPiv.rotation.y = Math.sin(s.tailPh) * 0.45; }
+    if (sd) {
+      s.tailPh += dt * (s.state === 'lunge' ? 13 : s.state === 'circle' ? 9 : 4);
+      sd.tailPiv.rotation.y = Math.sin(s.tailPh) * 0.45;
+      // jaws GAPE WIDE on the strike (and a little while circling), snap shut otherwise
+      if (sd.jaw) {
+        const gape = s.state === 'lunge' ? 0.85 : s.state === 'circle' ? 0.18 : 0;
+        sd.jaw.rotation.x += (gape - sd.jaw.rotation.x) * Math.min(1, dt * 8);
+      }
+    }
   }
   if (audio.sharkDread) audio.sharkDread(dread);
 }
@@ -5388,12 +5423,14 @@ const canoe = (() => {
   // a good ~5.5m ahead so it reads as part of the boat, not a wall on your face.
   // Logs are 'z' (fore-aft), x = beam.
   const L = 30, R = 0.5, N = 11;   // a long vessel — much longer deck
+  const logMeshes = [];
   for (let i = 0; i < N; i++) {
     const log = new THREE.Mesh(new THREE.CylinderGeometry(R, R * 0.93, L, 8), logM);
     log.rotation.x = Math.PI / 2;                       // lay it flat, running fore-aft
     log.position.set((i - (N - 1) / 2) * (R * 2.02), 0, 0);
-    g.add(log);
+    g.add(log); logMeshes.push(log);
   }
+  g._logs = logMeshes;   // the shark bites these off, one per strike
   const W = N * R * 2.02;
   const sparGeo = new THREE.CylinderGeometry(0.11, 0.11, W + 0.3, 6);
   for (const sz of [-L * 0.4, -L * 0.13, L * 0.16, L * 0.42]) {
@@ -5509,6 +5546,10 @@ let _luffing = false;            // sail flapping / spilling wind (no drive)
 let _wakeFoamT = 0;              // bow-spray spawn cooldown
 let _lookHoldT = 0;             // >0 = you're actively looking around; pauses the boat-follow camera
 let anchored = false;          // anchor dropped → boat holds still; you fish with the bow
+let _cineT = 0, _cineX = 0, _cineY = 0, _cineZ = 0, _cineStrength = 1;   // cinematic auto-look target
+function cineLook(x, y, z, dur, strength) {   // snap the camera's attention to a world point (Gears-style)
+  _cineX = x; _cineY = y; _cineZ = z; _cineT = dur; _cineStrength = strength == null ? 1 : strength;
+}
 let _fishLine = null;          // the line from the bow to a cast fishing arrow
 window._anchored = () => anchored;   // debug/test hook
 
@@ -6829,6 +6870,17 @@ function toggleAnchor() {
 }
 window._toggleAnchor = toggleAnchor;   // test/UI hook
 
+// the shark bites a log clean off the raft — the deck shrinks from the edges in.
+// Returns true if a log was taken (won't strip below 3 logs — you can't sink).
+function biteBoatLog() {
+  if (typeof canoe === 'undefined' || !canoe || !canoe._logs) return false;
+  const live = canoe._logs.filter(l => l.visible);
+  if (live.length <= 3) return false;
+  live.sort((a, b) => Math.abs(b.position.x) - Math.abs(a.position.x));   // outermost first
+  live[0].visible = false;
+  return true;
+}
+
 function loose() {
   // a real press always looses a shot — even a quick tap (raiseT confirms the
   // bow came up). Only a true no-draw is ignored. Floor the power so a fast
@@ -7844,13 +7896,24 @@ function tickBody() {
   if (audio.foleyBus) audio.foleyBus.gain.value = audio._cinematic ? 0 : 1.15;
   if (audio.spatialBus) audio.spatialBus.gain.value = audio._cinematic ? 0 : 1.0;
   if (_lookHoldT > 0) _lookHoldT -= dt;
-  // ── boat-follow camera ── while sailing, the view eases back to face the bow
-  // (where you're heading) once you stop looking around — your head naturally
-  // settles forward. Drag to look freely; it re-locks ~1.4s after you let go.
-  if (inCanoe && started && _lookHoldT <= 0 && !drawing) {
-    const want = raftYaw + Math.PI;                 // camera-forward aligned with the bow
+  // ── CINEMATIC auto-look ── a big moment (a shark surfacing far off, a lunge)
+  // grabs the camera and turns your head to face it, hard at first then settling
+  // — Gears-of-War "look at THAT". Overrides everything; releases after _cineT.
+  if (_cineT > 0 && started && !drawing) {
+    _cineT -= dt;
+    const dx = _cineX - player.x, dz = _cineZ - player.z, hd = Math.hypot(dx, dz) || 1;
+    const wantYaw = Math.atan2(dx, dz) + Math.PI;            // camera-forward toward the target
+    const wantPitch = Math.atan2((_cineY - (player.y + EYE)), hd);
+    const e = Math.min(1, dt * 7 * _cineStrength);
+    player.yaw += Math.atan2(Math.sin(wantYaw - player.yaw), Math.cos(wantYaw - player.yaw)) * e;
+    player.pitch += (Math.max(-0.6, Math.min(0.4, wantPitch)) - player.pitch) * e;
+    _lookHoldT = 0.6;                                        // brief settle before boat-follow resumes
+  } else if (inCanoe && started && _lookHoldT <= 0 && !drawing) {
+    // ── boat-follow camera ── while sailing, the view eases back to face the bow
+    // (where you're heading) once you stop looking around — your head settles forward.
+    const want = raftYaw + Math.PI;
     player.yaw += Math.atan2(Math.sin(want - player.yaw), Math.cos(want - player.yaw)) * Math.min(1, dt * 1.3);
-    player.pitch += (-0.02 - player.pitch) * Math.min(1, dt * 0.8);   // settle to a near-level gaze
+    player.pitch += (-0.02 - player.pitch) * Math.min(1, dt * 0.8);
   }
   if (audio.pumpTitle) audio.pumpTitle(dt);   // keep the title theme alive (runs pre-game too)
   // ── the trip ── a mushroom turns the world strange: hue cycles, colors

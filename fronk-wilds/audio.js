@@ -413,6 +413,16 @@ export class AudioEngine {
     this._playAt('bear_growl', x, z, { gain: 0.6, n: 2, rate: 0.48, ref: 10, max: 160, rolloff: 0.85 });
   }
 
+  // a SEA-MONSTER roar — the warning that a shark is about to strike, and the
+  // bellow when it does. Bigger/longer than the gator: bear_growl pitched to the
+  // floor (0.42/0.34) layered over a thrash splash + lunge surge. Reuses samples.
+  sharkRoar(x, z, vol = 1.0) {
+    if (!this.started || this.muted) return;
+    this._playAt('bear_growl', x, z, { gain: 1.2 * vol, n: 2, rate: 0.42, ref: 12, max: 200, rolloff: 0.6 });
+    this._playAt('bear_growl', x, z, { gain: 0.8 * vol, n: 2, rate: 0.34, ref: 12, max: 200, rolloff: 0.6 });
+    this._playAt('shark_splash', x, z, { gain: 0.9 * vol, n: 2, ref: 10, max: 180, rolloff: 0.7 });
+  }
+
   // play a foley sample (non-spatial) through the foley bus. `n` picks a random
   // variation (base_1..base_n); rate jitter keeps repeats from feeling robotic.
   // Returns true if a sample played (caller skips its procedural fallback).
