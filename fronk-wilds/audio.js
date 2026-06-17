@@ -44,6 +44,8 @@ export class AudioEngine {
     this._padVoices = [];
     this._sfx = {};                    // ElevenLabs foley sample bank (loaded in start)
     this._sfxReady = false;
+    this._music = {};                  // ElevenLabs music tracks (title, trip)
+    this._titleH = null; this._tripH = null; this._wantTitle = false;
     this._ground = 'grass';            // footstep material (setGround)
     this._stepL = false;               // alternating step pan
     this._gustWait = 12 + Math.random() * 24;   // wind-gust state machine
@@ -278,6 +280,45 @@ export class AudioEngine {
         b.noise.gain.setTargetAtTime(0, C.currentTime, 0.8);   // crossfade synth → recording
       } catch (e) {}
     });
+    // ── MUSIC tracks ── title + trip. The daytime ambient stays procedural.
+    ['title', 'trip'].forEach(async (key) => {
+      try {
+        const r = await fetch('sfx/music_' + key + '.mp3');
+        if (!r.ok) return;
+        this._music[key] = await C.decodeAudioData(await r.arrayBuffer());
+        // if the title was already asked for before the track finished loading,
+        // start it now and fade the procedural theme out from under it.
+        if (key === 'title' && this._wantTitle && !this._titleH) {
+          this._titleH = this._startTrack('title', { gain: 1.0, fade: 2.5 });
+          if (this._title) {
+            const tt = C.currentTime; this.titleBus.gain.cancelScheduledValues(tt);
+            this.titleBus.gain.setValueAtTime(Math.max(0.0001, this.titleBus.gain.value), tt);
+            this.titleBus.gain.exponentialRampToValueAtTime(0.0001, tt + 2.5);
+            this._title = null;                 // stop scheduling procedural bars
+          }
+        }
+      } catch (e) {}
+    });
+  }
+
+  // play a music track on its own gain → master (+ a little verb), looped.
+  _startTrack(key, { gain = 1.0, fade = 2.5, loop = true } = {}) {
+    const buf = this._music[key]; if (!buf) return null;
+    const C = this.ctx, t = C.currentTime;
+    const src = C.createBufferSource(); src.buffer = buf; src.loop = loop;
+    const g = C.createGain(); g.gain.value = 0.0001;
+    src.connect(g); g.connect(this.master); g.connect(this.verb);
+    try { src.start(); } catch (e) { return null; }
+    g.gain.exponentialRampToValueAtTime(gain, t + fade);
+    return { src, g };
+  }
+  _fadeTrack(h, fade = 2.5) {
+    if (!h) return;
+    const C = this.ctx, t = C.currentTime;
+    h.g.gain.cancelScheduledValues(t);
+    h.g.gain.setValueAtTime(Math.max(0.0001, h.g.gain.value), t);
+    h.g.gain.exponentialRampToValueAtTime(0.0001, t + fade);
+    const s = h.src; setTimeout(() => { try { s.stop(); } catch (e) {} }, fade * 1000 + 200);
   }
 
   // play a foley sample (non-spatial) through the foley bus. `n` picks a random
@@ -898,7 +939,9 @@ export class AudioEngine {
   // synthesized, original, copyright-clean. Scheduled bar-by-bar from
   // update() so it keeps building until the dive fades it out.
   titleTheme() {
-    if (!this.started || this._title) return;
+    if (!this.started || this._title || this._titleH) return;
+    if (this._music.title) { this._titleH = this._startTrack('title', { gain: 1.0, fade: 2.5 }); return; }
+    this._wantTitle = true;            // not loaded yet → start it on load (procedural plays meanwhile)
     const t = this.ctx.currentTime;
     this.titleBus.gain.cancelScheduledValues(t);
     this.titleBus.gain.setValueAtTime(0.0001, t);
@@ -917,6 +960,7 @@ export class AudioEngine {
     if (this._title.fading && t > this._title.stopAt) this._title = null;
   }
   fadeTitle(sec = 4) {
+    if (this._titleH) { this._fadeTrack(this._titleH, Math.min(sec, 3)); this._titleH = null; this._wantTitle = false; }
     if (!this._title) return;
     const t = this.ctx.currentTime;
     this.titleBus.gain.cancelScheduledValues(t);
@@ -1066,6 +1110,11 @@ export class AudioEngine {
   // Heavy reverb (tripBus). Starts/fades with the trip.
   tripMusic(on) {
     if (!this.started) return;
+    if (this._music.trip) {                 // real track — procedural trip stays dormant
+      if (on) { if (!this._tripH) this._tripH = this._startTrack('trip', { gain: 0.85, fade: 2.5 }); }
+      else if (this._tripH) { this._fadeTrack(this._tripH, 2.5); this._tripH = null; }
+      return;
+    }
     const C = this.ctx, t = C.currentTime;
     if (on) {
       if (this._trip) return;
