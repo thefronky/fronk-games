@@ -153,29 +153,38 @@ scene.background = new THREE.Color(0xd89a55);
   pmrem.dispose(); tex.dispose();
 }
 
-// post-processing — bloom makes sun/fire/fireflies/the Door GLOW.
-// DISABLED on touch devices: mobile Safari renders the composer
-// chain black (Fronk's phone, 2026-06-12). ?bloom=1 forces it on.
-const USE_POST = !IS_TOUCH
-  || new URLSearchParams(location.search).get('bloom') === '1';
+// post-processing — bloom makes sun/fire/fireflies/the Door GLOW. Historically
+// DISABLED on touch (mobile Safari rendered the composer chain black, 2026-06-12).
+// Now ENABLED everywhere with the iOS fix (explicit HalfFloat RT + half-res bloom)
+// AND a runtime auto-fallback: if a frame reads back black, we drop the composer
+// and render direct — so a black screen can never ship. ?bloom=0 forces it off.
+let USE_POST = new URLSearchParams(location.search).get('bloom') !== '0';
 scene.fog = new THREE.Fog(0xd89a55, 60, 340);
 
 const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.1, 1200);
-// composer + bloom allocate several full-screen render targets at
-// construction — skip entirely on mobile (USE_POST=false) to save
-// GPU memory on iOS Safari
 let composer = null, bloomPass = null;
-if (USE_POST) {
-  composer = new EffectComposer(renderer);
+let _postCheck = 0, _postBlack = 0;   // black-frame auto-fallback counters
+function buildComposer() {
+  const pr = Math.min(devicePixelRatio, CFG.px);
+  // explicit HALF-FLOAT target — the fix for iOS Safari's black composer (it
+  // can't render to the default target type there). Linear intermediate; the
+  // OutputPass does the final tonemap + sRGB so we don't double-convert.
+  const rt = new THREE.WebGLRenderTarget(
+    Math.max(2, Math.floor(innerWidth * pr)), Math.max(2, Math.floor(innerHeight * pr)),
+    { type: THREE.HalfFloatType });
+  composer = new EffectComposer(renderer, rt);
+  composer.setPixelRatio(pr);
+  composer.setSize(innerWidth, innerHeight);
   composer.addPass(new RenderPass(scene, camera));
   bloomPass = new UnrealBloomPass(
-    new THREE.Vector2(innerWidth, innerHeight),
+    new THREE.Vector2(innerWidth * 0.5, innerHeight * 0.5),   // HALF-res — the dominant fill cost, halved
     0.38,   // strength — restrained; the light should feel withheld
     0.65,   // radius
     0.85);  // threshold — only genuinely bright things bloom
   composer.addPass(bloomPass);
   composer.addPass(new OutputPass());
 }
+if (USE_POST) buildComposer();
 
 // golden hour — Fronk's signature light. A full day/night cycle runs
 // on top of it: golden hour is "home base", night brings stars and
@@ -9054,11 +9063,24 @@ function tickBody() {
       cs.grp.rotation.y += dt * 0.04;
     }
   }
-  if (USE_POST) {
+  if (USE_POST && composer) {
     // night needs a softer bloom threshold so fireflies/stars breathe
     bloomPass.threshold = 0.85 - (window._night || 0) * 0.38;
     bloomPass.strength = 0.38 + (window._night || 0) * 0.34;
     composer.render();
+    // ── black-frame auto-fallback ── on the first handful of bright started
+    // frames, sample the center pixel; if the composer renders BLACK (the iOS
+    // Safari bug) several frames running, drop it and render direct. Guarantees
+    // we never ship a black screen, on any device, whatever the root cause.
+    if (_postCheck < 40 && started && !intro && !(window._night > 0.5)) {
+      _postCheck++;
+      try {
+        const gl = renderer.getContext(), px = new Uint8Array(4);
+        gl.readPixels((renderer.domElement.width >> 1), (renderer.domElement.height >> 1), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+        if (px[0] + px[1] + px[2] < 6) { if (++_postBlack > 6) { USE_POST = false; composer = null; bloomPass = null; } }
+        else _postBlack = 0;
+      } catch (e) {}
+    }
   } else {
     renderer.render(scene, camera);
   }
