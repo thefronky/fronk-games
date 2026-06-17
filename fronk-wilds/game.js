@@ -61,7 +61,8 @@ const MENAGERIE = {
   // ── predator / territorial ──
   Wolf:  { n: 3, speed: 3.2, gallop: 8.8,  hp: 2, flee: 0,  r: 1.0,
            keen: 1.6,  aggroBias: 0.45, scale: 0.8,
-           hunts: true, aggroR: 38, dmg: 22, packR: 80 },
+           hunts: true, aggroR: 38, dmg: 22, packR: 80,
+           preysOn: ['Deer', 'Stag'] },   // the pack runs prey down PAST you
            // circles before committing; after dark the whole pack answers
   // Bull REMOVED — too big to hit cleanly, too aggressive. (The bear still
   // borrows the Bull rig via PREFAB_FILE below, so the model still loads.)
@@ -3794,6 +3795,15 @@ function animalUpdate(a, dt) {
       * (a.cfg.hunts && !a.isCryptid && night > 0.4 ? 1.3 : 1);
     if (a.cfg.hunts) trigger += scentM;   // what you carry, carries
     if (fireNear) trigger *= 0.5;         // the fire disagrees
+    // ── predation ── a pack runs prey down. Only when YOU aren't close: the
+    // chase sweeps PAST the player, never targets them. Point-blank, the
+    // normal player-aggro below takes over instead.
+    if (a.cfg.preysOn && !a.aggro && !a.scavTarget && !(a.scavT > 0)
+        && dist > (a.cfg.aggroR || 32) * 0.8 && huntUpdate(a, dt, dist)) {
+      a.obj.rotation.y = lerpAngle(a.obj.rotation.y, a.dir, Math.min(1, dt * 6));
+      applyGait(a, a._moved, dt); a._moved = false;
+      return;                              // the live hunt has it; skip player-aggro
+    }
     if (a.aggro && dist > trigger * 2.2) {    // lost you
       a.aggro = false; a.warned = false; a.circleT = 0; a.packBias = 0;
       if (a.state === 'warn' || a.state === 'stare') { a.state = 'idle'; a.t = 1; }
@@ -4133,6 +4143,94 @@ function packCall(w) {
     o.packBias = side * 0.7;                // approach from a DIFFERENT angle
     side = -side;
   }
+}
+
+// ── the hunt ── a wolf with cfg.preysOn (and no interest in you yet) runs
+// down LIVE prey. Throttled (~1.2s) it acquires the nearest prey of a preyed
+// species in a wide radius, then gallops it down on a.dir+stepAnimal; the prey
+// flees (and spooks its herd, so 3-4 deer scatter the same general way). A
+// shared CHASE STAMINA (a.chaseStam) drains while running — spent, the wolf
+// PANTS, slows, and PEELS OFF on a bearing away from both prey AND player,
+// ending the hunt. Returns true while it owns the frame. Cheap: one bounded
+// scan only on the throttle tick, no per-frame allocation.
+function huntUpdate(a, dt, distToPlayer) {
+  a.chaseStam = a.chaseStam ?? 1;
+  a._huntScan = (a._huntScan ?? 0) - dt;
+  // (re)acquire the nearest live prey on the throttle tick or if ours is gone
+  let prey = a.huntTarget;
+  if (prey && (prey.dead || animals.indexOf(prey) < 0)) prey = a.huntTarget = null;
+  if (!prey && a._huntScan <= 0) {
+    a._huntScan = 1.2;
+    const HR = (a.cfg.aggroR || 32) * 2.2, HR2 = HR * HR;   // a wide hunting radius
+    const p = a.obj.position;
+    let best = null, bd = HR2;
+    for (const o of animals) {
+      if (o.dead || !a.cfg.preysOn.includes(o.name)) continue;
+      const ddx = o.obj.position.x - p.x, ddz = o.obj.position.z - p.z;
+      const d2 = ddx * ddx + ddz * ddz;
+      if (d2 < bd) { bd = d2; best = o; }
+    }
+    if (best) {
+      a.huntTarget = prey = best;
+      best.state = 'flee'; best.t = 4 + Math.random() * 2.5;   // it bolts
+      best.dir = Math.atan2(best.obj.position.x - p.x, best.obj.position.z - p.z)
+        + (Math.random() - 0.5) * 0.7;
+      spookHerd(best);                          // the herd scatters with it
+      if (Math.random() < 0.5) packHunt(a, best);   // sometimes rally the pack
+    } else { a._huntScan = 1.2; return false; }     // nothing worth chasing
+  }
+  if (!prey) return false;
+  const p = a.obj.position, tp = prey.obj.position;
+  const pdx = tp.x - p.x, pdz = tp.z - p.z;
+  const pd = Math.hypot(pdx, pdz);
+  // chase costs wind; coasting (no prey near) would recover it, but a live
+  // chase keeps it draining until the wolf gases out
+  a.chaseStam = Math.max(0, a.chaseStam - 0.085 * dt);
+  if (a.chaseStam <= 0.12) {                   // spent — pant, slow, PEEL OFF
+    if (audio.animalCall) audio.animalCall('pant', p.x, p.z, 0.6);
+    // a bearing away from BOTH the prey and the player — never toward you
+    const awayPrey = Math.atan2(-pdx, -pdz);
+    const awayYou = Math.atan2(p.x - player.x, p.z - player.z);
+    a.dir = lerpAngle(awayPrey, awayYou, 0.5);
+    setAnim(a, 'Walk'); stepAnimal(a, a.cfg.speed, dt);
+    a.huntTarget = null; a._huntScan = 4 + Math.random() * 3;   // rest before hunting again
+    a.chaseStam = 0.6;                          // catches some breath as it breaks off
+    return true;
+  }
+  // CATCH — within both radii: the kill
+  if (pd < a.cfg.r + prey.cfg.r + 0.6) {
+    if (Math.random() < 0.25 && audio.animalCall) audio.animalCall('snarl', p.x, p.z, 0.6);
+    killAnimal(prey, true);                     // ran it down — a suffered death
+    a.huntTarget = null; a._huntScan = 3 + Math.random() * 3;
+    a.chaseStam = Math.min(1, a.chaseStam + 0.3);   // a feed steadies it
+    return true;
+  }
+  // steer + gallop after it
+  a.dir = lerpAngle(a.dir, Math.atan2(pdx, pdz), Math.min(1, dt * 4));
+  setAnim(a, 'Gallop');
+  stepAnimal(a, a.cfg.gallop, dt);
+  return true;
+}
+
+// rally 1-2 nearby wolves onto the same prey, each its own approach bearing,
+// and answer with a howl. Cheap bounded scan; scalars only.
+function packHunt(w, prey) {
+  const pr = (w.cfg.packR || 80), pr2 = pr * pr;
+  const p = w.obj.position;
+  let joined = 0, side = 1;
+  for (const o of animals) {
+    if (joined >= 2) break;
+    if (o === w || o.name !== 'Wolf' || o.dead || o.aggro
+        || o.huntTarget || o.scavTarget || o.scavT > 0) continue;
+    const ddx = o.obj.position.x - p.x, ddz = o.obj.position.z - p.z;
+    if (ddx * ddx + ddz * ddz > pr2) continue;
+    o.huntTarget = prey; o.chaseStam = o.chaseStam ?? 1;
+    o._huntScan = 1.2;
+    o.dir = Math.atan2(prey.obj.position.x - o.obj.position.x,
+                       prey.obj.position.z - o.obj.position.z) + side * 0.6;
+    side = -side; joined++;
+  }
+  if (audio.animalCall) audio.animalCall('howl', p.x, p.z, 0.7);
 }
 
 // scavenger detour — a wolf claimed by a rotting carcass walks to it,

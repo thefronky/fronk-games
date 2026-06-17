@@ -904,6 +904,12 @@ export class AudioEngine {
   // a missing sample just returns false.
   animalCall(species, x, z, vol = 0.6) {
     if (!this.started || this.muted) return false;
+    // ── predation voices ── pant/howl/snarl during a pack hunt. Sample-first
+    // (wolf_pant/wolf_howl/wolf_snarl if loaded), else a procedural fallback.
+    if (species === 'pant' || species === 'howl' || species === 'snarl') {
+      if (this._playAt('wolf_' + species, x, z, { gain: vol, n: 2, ref: 14, max: 170, rolloff: 0.85 })) return true;
+      return this._wolfVoice(species, x, z, vol);
+    }
     let base, rate = 1;
     switch (species) {
       case 'Deer':  base = 'deer_call'; break;
@@ -915,6 +921,57 @@ export class AudioEngine {
       default: return false;
     }
     return this._playAt(base, x, z, { gain: vol, n: 2, rate, ref: 14, max: 150, rolloff: 0.9 });
+  }
+
+  // procedural wolf voices for the hunt. pant = breathy rhythmic huffs (tired);
+  // howl = a long rising-then-falling tone (the rally); snarl = a short rough
+  // growl. Spatialized like the bear voices. Original synth, copyright-clean.
+  _wolfVoice(kind, x, z, vol = 0.6) {
+    const C = this.ctx; if (!C) return false;
+    const t0 = C.currentTime;
+    const out = C.createGain(); out.gain.value = vol;
+    const pan = (x !== undefined) ? this._panner(x, z) : null;
+    if (pan) { pan.refDistance = 14; pan.maxDistance = 170; pan.rolloffFactor = 0.85;
+      out.connect(pan); pan.connect(this.spatialBus); }
+    else out.connect(this.master);
+    if (kind === 'pant') {
+      for (let i = 0; i < 5; i++) {                       // quick breathy huffs
+        const t = t0 + i * 0.17;
+        const n = C.createBufferSource(); n.buffer = this._shotNoise;
+        const bp = C.createBiquadFilter(); bp.type = 'bandpass';
+        bp.frequency.value = i % 2 ? 1500 : 900; bp.Q.value = 0.8;
+        const g = C.createGain();
+        g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.5, t + 0.03);
+        g.gain.exponentialRampToValueAtTime(0.001, t + 0.13);
+        n.connect(bp).connect(g).connect(out); n.start(t, Math.random() * 0.3, 0.15);
+      }
+    } else if (kind === 'howl') {
+      const o = C.createOscillator(); o.type = 'sawtooth';
+      o.frequency.setValueAtTime(280, t0);
+      o.frequency.exponentialRampToValueAtTime(560, t0 + 0.5);    // rise
+      o.frequency.setValueAtTime(560, t0 + 1.1);
+      o.frequency.exponentialRampToValueAtTime(330, t0 + 1.7);    // fall away
+      const bp = C.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 900; bp.Q.value = 4;
+      const g = C.createGain();
+      g.gain.setValueAtTime(0, t0); g.gain.linearRampToValueAtTime(0.45, t0 + 0.25);
+      g.gain.setValueAtTime(0.45, t0 + 1.3);
+      g.gain.exponentialRampToValueAtTime(0.001, t0 + 1.8);
+      o.connect(bp).connect(g).connect(out); o.start(t0); o.stop(t0 + 1.85);
+    } else {                                               // snarl — short rough growl
+      const dur = 0.5;
+      const o = C.createOscillator(); o.type = 'sawtooth'; o.frequency.value = 110;
+      o.frequency.linearRampToValueAtTime(150, t0 + dur);
+      const bp = C.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 700; bp.Q.value = 3;
+      const g = C.createGain();
+      g.gain.setValueAtTime(0, t0); g.gain.linearRampToValueAtTime(0.4, t0 + 0.04);
+      g.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
+      // a rattle LFO roughens it
+      const lfo = C.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = 28;
+      const lg = C.createGain(); lg.gain.value = 0.3; lfo.connect(lg).connect(g.gain);
+      o.connect(bp).connect(g).connect(out); o.start(t0); o.stop(t0 + dur + 0.05);
+      lfo.start(t0); lfo.stop(t0 + dur + 0.05);
+    }
+    return true;
   }
 
   // the breath-in of waking — a soft rising inhale of filtered noise
