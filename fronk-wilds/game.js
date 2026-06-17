@@ -51,7 +51,7 @@ const MENAGERIE = {
            // hard, not hopeless: stalk quiet to ~16m, stand still to ~8m.
   Stag:  { n: 4, speed: 2.5, gallop: 8.3, hp: 5, flee: 17, r: 0.95,
            keen: 1.05, aggroBias: 0.30, rear: 0.70, scale: 0.52, hpJit: true },
-  Fox:   { n: 20, speed: 3.2, gallop: 8.8, hp: 1, flee: 11, r: 0.5,
+  Fox:   { n: 8, speed: 3.2, gallop: 8.8, hp: 1, flee: 11, r: 0.5,
            keen: 1.25, aggroBias: 0.05, rear: 0.2, scale: 0.45, darty: true },  // little critters — LOTS, tiny, JUKE when fleeing but approachable enough to chase down — fun to hunt
   Cow:   { n: 1, speed: 1.8, gallop: 6.2,  hp: 8, flee: 13, r: 1.6,
            keen: 0.5, aggroBias: 0.05, rear: 0.2, gait: 'sway', scale: 0.74, hpJit: true }, // was tree-tall (made the player feel tiny) — sized to a real cow
@@ -73,7 +73,7 @@ const MENAGERIE = {
   // ── the swarm ── little Flood-ish scuttlers that FOLLOW and LEAP at you.
   // Weak (a nip), but they come in numbers. Arrows barely faze them — FIRE is
   // the answer: a fire-arrow or a tree fire wipes them. Not OP.
-  Spider:{ n: 3, speed: 3.4, gallop: 6, hp: 3, flee: 0, r: 0.45,
+  Spider:{ n: 3, speed: 3.4, gallop: 6, hp: 1, flee: 0, r: 0.45,
            keen: 1.0, aggroBias: 0.7, scale: 0.5, spiderish: true,
            hunts: true, aggroR: 16, dmg: 3 },   // RARE, weak — a creepy find, not a swarm at your feet
   // ── the ambush ── submerged gators pinned to the lake. They never roam:
@@ -7761,8 +7761,10 @@ function tickBody() {
       const rad = tr.inst ? (tr.r * 0.45 + 0.4) : (tr.r + 0.35);
       const d = Math.hypot(nx - tr.x, nz - tr.z);
       if (d < rad) {
-        const push = (rad - d);
-        nx += (nx - tr.x) / (d || 1) * push; nz += (nz - tr.z) / (d || 1) * push;
+        // HARD wall — snap to the edge, don't soft-nudge (a soft push lets you
+        // creep through by just holding forward). Clamps you out for good.
+        const inv = d || 1;
+        nx = tr.x + (nx - tr.x) / inv * rad; nz = tr.z + (nz - tr.z) / inv * rad;
       }
     }
     // ── step-on props: clamber onto low surfaces, block tall ones ──
@@ -7779,8 +7781,10 @@ function tickBody() {
       if (sp2.top <= feetY + STEP_REACH) {
         if (sp2.top > stepGround) stepGround = sp2.top;   // clamber on
       } else {
-        const push = (sp2.r + 0.5 - d);                   // too tall — block
-        nx += (nx - sp2.x) / (d || 1) * push; nz += (nz - sp2.z) / (d || 1) * push;
+        // too tall — HARD block: snap to the edge so holding forward can't
+        // shove you through the log/stone.
+        const inv = d || 1, R = sp2.r + 0.5;
+        nx = sp2.x + (nx - sp2.x) / inv * R; nz = sp2.z + (nz - sp2.z) / inv * R;
       }
     }
     // ── mushroom trip: tree CANOPIES become landable surfaces. Jump up and
