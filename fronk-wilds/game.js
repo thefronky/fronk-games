@@ -7148,6 +7148,7 @@ function arrowUpdate(dt) {
 // bow viewmodel — a real recurve: curved limbs, leather grip, a
 // nocked arrow that appears as you draw, a string that pulls back
 const bow = new THREE.Group();
+const sheetHand = new THREE.Group();   // first-person gloved hand on the sail rope (sailing)
 let bowString1, bowString2, nockedArrow, drawHand;
 {
   // procedural wood grain — warm streaked figure painted to a canvas,
@@ -7283,6 +7284,29 @@ let bowString1, bowString2, nockedArrow, drawHand;
   bow.rotation.set(0.05, -0.55, 0.21);   // canted at rest, archer-style
   bow.visible = false;            // hidden on the title screen
   camera.add(bow);
+
+  // ── the SHEET HAND ── shown only while sailing: the same black leather glove,
+  // now hauling the rope (the sheet) that runs up to the sail. Pull left/right
+  // and the hand drags the rope across — that's how you swing the sail. On the camera.
+  const gloveM2 = new THREE.MeshStandardMaterial({ color: 0x161412, roughness: 0.62, metalness: 0.04 });
+  const sleeveM2 = new THREE.MeshStandardMaterial({ color: 0x23201b, roughness: 0.95 });
+  const ropeM2 = new THREE.MeshStandardMaterial({ color: 0xc7ad77, roughness: 1 });
+  const fist = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.075, 0.06), gloveM2); sheetHand.add(fist);
+  for (let i = 0; i < 4; i++) {                       // curled fingers gripping the rope
+    const f = new THREE.Mesh(new THREE.BoxGeometry(0.016, 0.052, 0.022), gloveM2);
+    f.position.set(-0.026 + i * 0.017, 0.024, 0.03); f.rotation.x = -0.95; fist.add(f);
+  }
+  const thumb2 = new THREE.Mesh(new THREE.BoxGeometry(0.018, 0.042, 0.018), gloveM2);
+  thumb2.position.set(0.042, 0.004, 0.018); thumb2.rotation.z = 0.6; fist.add(thumb2);
+  const sleeve2 = new THREE.Mesh(new THREE.CylinderGeometry(0.036, 0.052, 0.36, 8), sleeveM2);
+  sleeve2.rotation.x = Math.PI / 2; sleeve2.position.set(0.012, -0.02, 0.24); sheetHand.add(sleeve2);
+  // the rope/sheet — runs from the fist UP and FORWARD toward the sail
+  const rope = new THREE.Mesh(new THREE.CylinderGeometry(0.013, 0.013, 1.3, 5), ropeM2);
+  rope.position.set(-0.02, 0.62, -0.28); rope.rotation.x = -0.42; sheetHand.add(rope);
+  sheetHand.position.set(0.3, -0.36, -0.58);
+  sheetHand.rotation.set(0.15, -0.25, 0);
+  sheetHand.visible = false;
+  camera.add(sheetHand);
   scene.add(camera);
 }
 
@@ -8410,6 +8434,19 @@ function tickBody() {
   // camera. JET/CRASH: drive fast up a steep wave face and the raft launches
   // off the crest, hangs, then slams down — a camera punch + a big splash.
   canoe.visible = inCanoe && started;
+  // ── the sheet hand ── while sailing, swap the bow for the gloved hand on the
+  // rope; it hauls left/right with your trim so you SEE yourself working the sail.
+  const _sailing = inCanoe && started && _raftLaunch <= 0;
+  if (sheetHand.visible !== _sailing) sheetHand.visible = _sailing;
+  if (_sailing) {
+    if (bow.visible) bow.visible = false;                 // can't shoot while working the sheet
+    sheetHand.position.x = 0.3 + _sailTrim * 0.16;        // pull the rope across
+    sheetHand.position.y = -0.36 + (_boatPitch || 0) * 0.4;
+    sheetHand.rotation.z = -_sailTrim * 0.4 + (_boatRoll || 0) * 0.5;
+    sheetHand.rotation.y = -0.25 - _sailTrim * 0.25;
+  } else if (started && !intro && !dead && !launching && !bow.visible) {
+    bow.visible = true;                                   // restore the bow after stepping ashore
+  }
   if (canoe.visible) {
     const cspd = Math.hypot(canoeVX, canoeVZ);
     const spd = Math.min(1, cspd / 11);
