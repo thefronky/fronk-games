@@ -3551,13 +3551,61 @@ function killSpider(a) {
   if (a.dead) return;
   a.dead = true; a.eaten = true; a.t = 1.0;   // vermin — no meat, vanishes fast
   a.obj.rotation.z = 1.4;
+  if (a._thread) { scene.remove(a._thread); a._thread = null; }   // cut the silk
   score[a.name] = (score[a.name] || 0) + 1;
   if (audio.impact) audio.impact('flesh', 0.35);
 }
 window._killSpider = killSpider;
 // follow + LEAP. Weak nip on contact. Fire (a fire-arrow or a tree blaze) kills.
+// a fine silk thread (scene-space so the spider's own scale doesn't distort it)
+// strung from a canopy anchor down to the hanging spider. Stretched each frame.
+function _spiderThread() {
+  const t = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 1, 4),
+    new THREE.MeshBasicMaterial({ color: 0xe8eded, transparent: true, opacity: 0.4 }));
+  t.castShadow = false; scene.add(t); return t;
+}
+function updateSpiderThread(a) {
+  const t = a._thread; if (!t) return;
+  const sy = a.obj.position.y, len = Math.max(0.02, a._hangAnchorY - sy);
+  t.position.set(a._hangX, sy + len / 2, a._hangZ);
+  t.scale.y = len; t.visible = true;
+}
+
 function spiderUpdate(a, dt, dx, dz, dist) {
   a.attackCd -= dt;
+  // ── web-DROP ambush ── it hangs from a canopy thread, swaying, until you pass
+  // beneath; then it plunges straight down on the silk and lands at your feet.
+  if (a._webState === 'hang') {
+    a._webBob = (a._webBob || 0) + dt;
+    a.obj.position.set(
+      a._hangX + Math.sin(a._webBob * 0.8) * 0.05,
+      a._hangAnchorY - a._hangLen + Math.sin(a._webBob * 1.6) * 0.04,
+      a._hangZ + Math.cos(a._webBob * 0.7) * 0.05);
+    a.dir = Math.atan2(dx, dz);
+    a.obj.rotation.y = lerpAngle(a.obj.rotation.y, a.dir, Math.min(1, dt * 4));
+    updateSpiderThread(a);
+    const hd = Math.hypot(player.x - a._hangX, player.z - a._hangZ);
+    if (hd < 6.5 && Math.abs(player.y - heightAt(a._hangX, a._hangZ)) < 6) {
+      a._webState = 'drop'; a._dropVy = 1.5;                       // it lets go
+      if (audio.themeSting) audio.themeSting('sting_escape', 0.95); // the sudden scare
+    }
+    spiderAnim(a, dt, false);
+    return;
+  }
+  if (a._webState === 'drop') {
+    a._dropVy += 24 * dt;                                          // accelerates down the silk
+    a.obj.position.y -= a._dropVy * dt;
+    a.dir = Math.atan2(dx, dz);
+    a.obj.rotation.y = lerpAngle(a.obj.rotation.y, a.dir, Math.min(1, dt * 4));
+    const gy = heightAt(a._hangX, a._hangZ);
+    if (a.obj.position.y <= gy) {                                  // it hits the ground in front of you
+      a.obj.position.y = gy; a._webState = 'ground';
+      if (a._thread) { scene.remove(a._thread); a._thread = null; }
+      camShakeT = Math.max(camShakeT, SHAKE_DUR * 0.6);
+    } else { updateSpiderThread(a); }
+    spiderAnim(a, dt, true);
+    return;
+  }
   // caught in a fire → it burns
   for (const f of TREEFIRES) {
     if (Math.hypot(a.obj.position.x - f.tr.x, a.obj.position.z - f.tr.z) < 3.6) { killSpider(a); return; }
@@ -3892,6 +3940,23 @@ function spawn(name, near) {
     gaitRoll: 0,                                         // current rotation.z, decays to 0
     sizeJit,
   };
+  // ── the web ambush ── most spiders lie in wait hanging from a canopy thread
+  // over a nearby tree, ready to drop when you wander beneath (see spiderUpdate).
+  if (cfg.spiderish && Math.random() < 0.6) {
+    let best = null, bd = 22 * 22;
+    for (const tr of TREES) {
+      if (!tr.inst || tr.top === undefined) continue;     // canopy trees only
+      const ddx = tr.x - x, ddz = tr.z - z, d = ddx * ddx + ddz * ddz;
+      if (d < bd) { bd = d; best = tr; }
+    }
+    if (best) {
+      a._webState = 'hang'; a._hangX = best.x; a._hangZ = best.z;
+      a._hangAnchorY = best.top - 0.4;                     // tucked just under the leaves
+      a._hangLen = 1.4 + Math.random() * 1.2;             // how far it dangles below
+      a._thread = _spiderThread();
+      a.obj.position.set(best.x, a._hangAnchorY - a._hangLen, best.z);
+    }
+  }
   setAnim(a, Math.random() < 0.5 ? 'Idle' : 'Eating');
   animals.push(a);
   return a;
