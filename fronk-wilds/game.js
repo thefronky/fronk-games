@@ -4121,6 +4121,8 @@ function animalUpdate(a, dt) {
       a.state = 'attack'; a.aggro = true;
       if (a.attackCd <= 0 && meleeReach()) {       // can't bite you up a tree
         setAnim(a, 'Attack', true); a.attackCd = 1.5;
+        if (a.cfg.hunts && !a.isCryptid && audio.animalCall)   // a snarl on the bite
+          audio.animalCall('snarl', a.obj.position.x, a.obj.position.z, 0.95);
         hurtPlayer(a.cfg.dmg || 22);
         setTimeout(() => { if (!a.dead) a.cur = null; }, 700);
       }
@@ -4156,17 +4158,43 @@ function animalUpdate(a, dt) {
         // wolves run a touch hotter every night you survive (cap +15%)
         const haste = a.name === 'Wolf'
           ? 1 + Math.min(0.15, 0.05 * (window._nights || 0)) : 1;
+        // ── stalk from cover ── a wolf reads the ground (day or night): bold and
+        // quick while a tree/bush hides it, but it SLINKS low and slow when it's
+        // out in the open and you're looking straight at it. dx/dz point wolf→you.
+        const stalker = a.cfg.hunts && !a.isCryptid;
+        const hidden = stalker && dist < 60 && losBlocked(a);
+        const seen = stalker && !hidden && dist < 34
+          && (Math.sin(player.yaw) * dx + Math.cos(player.yaw) * dz) / (dist || 1) > 0.5;
+        // audible menace — a low snarl on a loose cadence while it works you,
+        // louder as it closes. Held silent when frozen in the open under your
+        // gaze (so a covered approach stays a surprise, an exposed one growls).
+        if (stalker && !(seen && dist > 7)) {
+          a._snarlCd = (a._snarlCd ?? (1.2 + Math.random() * 2)) - dt;
+          if (a._snarlCd <= 0) {
+            a._snarlCd = 2.2 + Math.random() * 2.8;
+            if (audio.animalCall) audio.animalCall('snarl',
+              a.obj.position.x, a.obj.position.z, dist < 12 ? 0.7 : 0.5);
+          }
+        }
         if (a.circleT > 0 && dist > 8 && dist < trigger * 1.5) {
           // the circling pass — flank-walk, spiraling slowly inward
           a.circleT -= dt;
+          // sometimes it DOESN'T commit — by day a lone wolf often thinks better
+          // of it and keeps circling/watching a while longer before closing in.
+          if (a.circleT <= 0 && night < 0.4 && Math.random() < 0.4) {
+            a.circleT = 2.5 + Math.random() * 3; a.circleDir *= Math.random() < 0.4 ? -1 : 1;
+          }
           a.dir = Math.atan2(dx, dz) + a.circleDir * 1.25;
           setAnim(a, 'Walk');
-          stepAnimal(a, a.cfg.speed * 1.3 * haste, dt);
+          let cs = a.cfg.speed * 1.3 * haste;
+          if (seen) cs *= 0.35;            // caught in the open, watched → slink slow
+          else if (hidden) cs *= 1.3;      // covered → press the advantage
+          stepAnimal(a, cs, dt);
         } else {
           // committed. Wolves prefer the side you AREN'T looking at —
           // if you can see it coming, it angles for your back instead.
           let ax = dx, az = dz;
-          if (a.cfg.hunts && !a.isCryptid && dist > 7 && dist < 36
+          if (stalker && dist > 7 && dist < 36
               && Math.sin(player.yaw) * dx + Math.cos(player.yaw) * dz > 0) {
             ax += Math.sin(player.yaw) * 6; az += Math.cos(player.yaw) * 6;
           }
@@ -4174,8 +4202,10 @@ function animalUpdate(a, dt) {
           a.dir = Math.atan2(ax, az) + drift
             + (a.packBias && dist > 11 ? a.packBias : 0);
           const fast = dist < (a.isCryptid ? 30 : 17);
+          let sp = (fast ? a.cfg.gallop : a.cfg.speed) * haste;
+          if (seen && !fast) sp *= 0.5;    // creep when watched, until the final rush
           setAnim(a, fast ? 'Gallop' : 'Walk');
-          stepAnimal(a, (fast ? a.cfg.gallop : a.cfg.speed) * haste, dt);
+          stepAnimal(a, sp, dt);
         }
       }
     } else wander(a, dt);
@@ -4348,7 +4378,7 @@ function bearUpdate(a, dt, dx, dz, dist) {
     // is it in your view cone? dx/dz point bear→player, so bear→YOU from
     // your eye is (-dx,-dz); player faces it when forward·(-dx,-dz) > 0.55
     const inView = !hidden && dist < 34
-      && -(Math.sin(player.yaw) * dx + Math.cos(player.yaw) * dz) / (dist || 1) > 0.55;
+      && (Math.sin(player.yaw) * dx + Math.cos(player.yaw) * dz) / (dist || 1) > 0.55;
     if (inView) {
       setAnim(a, 'Idle');                                // caught looking — hold dead still
       a._snapCd = 0.6 + Math.random() * 0.6;            // no twig-snaps while frozen
