@@ -7731,6 +7731,9 @@ window._sim = (seconds) => {   // test hook: advance the world while the
 function tickBody() {
   const dt = simDt ?? Math.min(clock.getDelta(), 0.05);
   const t = clock.elapsedTime;
+  // no animal voices during the title / dive / wake cinematic — keeps a stray
+  // wolf howl (a buzzy procedural sawtooth) from jarring the quiet opening.
+  audio._cinematic = !started || intro || launching;
   if (audio.pumpTitle) audio.pumpTitle(dt);   // keep the title theme alive (runs pre-game too)
   // ── the trip ── a mushroom turns the world strange: hue cycles, colors
   // swell, the picture breathes. Eases out over the last couple seconds.

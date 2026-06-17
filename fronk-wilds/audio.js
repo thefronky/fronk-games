@@ -956,6 +956,7 @@ export class AudioEngine {
   // a missing sample just returns false.
   animalCall(species, x, z, vol = 0.6) {
     if (!this.started || this.muted) return false;
+    if (this._cinematic) return false;   // no animal voices during the intro/dive/wake (kills the jarring opening howl)
     // ── predation voices ── pant/howl/snarl during a pack hunt. Sample-first
     // (wolf_pant/wolf_howl/wolf_snarl if loaded), else a procedural fallback.
     if (species === 'pant' || species === 'howl' || species === 'snarl') {
