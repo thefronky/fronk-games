@@ -24,9 +24,9 @@ const WATER_Y = 2.1;          // lake level
 const EYE = 3.6;   // stand TALL — 2.3 then 2.85 still read short against the world's scale; this lifts the eyeline to a clear 6-foot-plus stance over the field
 const CFG = IS_TOUCH
   ? { grass: 30000, trees: 2200, bushes: 380, rocks: 150, px: 2, shadow: 1536, segs: 230,
-      flowers: 2200, tufts: 1400, mushrooms: 260, bedFlowers: 1300 }
+      flowers: 2600, tufts: 1700, mushrooms: 260, bedFlowers: 1300 }
   : { grass: 74000, trees: 4500, bushes: 620, rocks: 260, px: 2.5, shadow: 3072, segs: 360,
-      flowers: 4000, tufts: 2600, mushrooms: 420, bedFlowers: 1900 };
+      flowers: 4800, tufts: 3100, mushrooms: 420, bedFlowers: 1900 };
 
 // ── THE MENAGERIE ─────────────────────────────────────────────────
 // Field meanings:
@@ -2414,6 +2414,25 @@ function buildBerry() {
   }
   return g;
 }
+// a low fruit-shrub — leafy dome with a few hanging fruits. Player-edible
+// like a berry; also a 'forage' goal for grazing prey.
+const _fruitLeafMat = new THREE.MeshStandardMaterial({ color: 0x2c4d1f, roughness: 1 });
+const _fruitMat = new THREE.MeshStandardMaterial({ color: 0xd98018, roughness: 0.5,
+  emissive: 0x3a1c04, emissiveIntensity: 0.35 });
+function buildFruit() {
+  const g = new THREE.Group();
+  for (let i = 0; i < 4; i++) {
+    const b = new THREE.Mesh(new THREE.IcosahedronGeometry(0.4, 0), _fruitLeafMat);
+    b.position.set((Math.random() - 0.5) * 0.8, 0.4 + Math.random() * 0.35, (Math.random() - 0.5) * 0.8);
+    b.scale.y = 0.85; g.add(b);
+  }
+  for (let i = 0; i < 5; i++) {
+    const d = new THREE.Mesh(new THREE.IcosahedronGeometry(0.12, 0), _fruitMat);
+    const a = Math.random() * Math.PI * 2, rr = Math.random() * 0.6;
+    d.position.set(Math.cos(a) * rr, 0.25 + Math.random() * 0.35, Math.sin(a) * rr); g.add(d);
+  }
+  return g;
+}
 // shared across every mushroom — no per-cluster allocations, and NO point
 // lights (those tanked the framerate at 20 of them). The cap's strong
 // emissive reads as "special" on its own.
@@ -2447,8 +2466,82 @@ function buildPsyMush() {
       made++;
     }
   };
-  place(IS_TOUCH ? 14 : 20, buildBerry, 'berry');
+  place(IS_TOUCH ? 30 : 48, buildBerry, 'berry');    // abundance — a world that feeds its herds
+  place(IS_TOUCH ? 16 : 20, buildFruit, 'fruit');    // low fruit-shrubs — grazing draws + player food
   place(IS_TOUCH ? 22 : 30, buildPsyMush, 'mush');   // plenty — the world floods with them once you trip
+}
+
+// ── ANIMAL GOALS ── purpose, not just random drift. A handful of fixed
+// destinations the herds steer toward: dirt burrows (foxes sniff) and
+// shoreline water spots (horses drink). Built once; never per-frame.
+const BURROWS = [], WATERSPOTS = [];
+{
+  // small dirt-hole meshes scattered on dry land — a dark ring + sunk floor
+  const holeMat = new THREE.MeshStandardMaterial({ color: 0x2a1d10, roughness: 1 });
+  const ringMat = new THREE.MeshStandardMaterial({ color: 0x4a3520, roughness: 1 });
+  let made = 0, tries = 0;
+  while (made < 7 && tries++ < 7 * 60) {
+    const x = (Math.random() - 0.5) * WORLD * 0.72, z = (Math.random() - 0.5) * WORLD * 0.72;
+    const y = heightAt(x, z);
+    if (y < WATER_Y + 1.5 || y > 22) continue;
+    if (Math.hypot(x, z - 26) < 45) continue;            // not on the doorstep
+    const g = new THREE.Group();
+    const ring = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.85, 0.18, 10), ringMat);
+    ring.position.y = 0.05; g.add(ring);
+    const hole = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.3, 0.3, 10), holeMat);
+    hole.position.y = -0.04; g.add(hole);
+    g.position.set(x, y, z); scene.add(g);
+    BURROWS.push({ x, z });
+    made++;
+  }
+  // ~4 shoreline points ringing the lake centroid (70, -90)
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2 + 0.4;
+    // walk outward from the centre until we find the first dry-ish shore
+    let sx = 70, sz = -90;
+    for (let r = 20; r < 90; r += 4) {
+      const px = 70 + Math.cos(a) * r, pz = -90 + Math.sin(a) * r;
+      if (heightAt(px, pz) > WATER_Y + 0.3) { sx = px; sz = pz; break; }
+    }
+    WATERSPOTS.push({ x: sx, z: sz });
+  }
+}
+
+// nearest entry of a list to point p (skips taken FORAGE); jitter spreads
+// the pick a touch so a herd doesn't stack on one exact spot.
+function nearestOf(list, p, jitter) {
+  let best = null, bd = 1e9;
+  for (const e of list) {
+    if (e.taken) continue;
+    const j = jitter ? (Math.random() - 0.5) * jitter : 0;
+    const dx = e.x - p.x, dz = e.z - p.z;
+    const d = dx * dx + dz * dz + j;
+    if (d < bd) { bd = d; best = e; }
+  }
+  return best;
+}
+
+// give a non-predator a destination. Sets a.goal = {kind, x, z, ref?}.
+function chooseGoal(a) {
+  const p = a.obj.position;
+  if (a.name === 'Horse') {
+    // pick a water spot it didn't JUST visit
+    let pool = WATERSPOTS;
+    if (a._lastWater && WATERSPOTS.length > 1) pool = WATERSPOTS.filter(w => w !== a._lastWater);
+    const w = nearestOf(pool, p, 600) || nearestOf(WATERSPOTS, p, 600);
+    if (w) { a.goal = { kind: 'drink', x: w.x, z: w.z, ref: w }; return; }
+  } else if (a.name === 'Fox') {
+    const b = nearestOf(BURROWS, p, 400);
+    if (b) { a.goal = { kind: 'sniff', x: b.x, z: b.z, ref: b }; return; }
+  }
+  // Deer/Stag/Cow (and any fallback): forage the nearest untaken berry/fruit
+  let best = null, bd = 1e9;
+  for (const f of FORAGE) {
+    if (f.taken || f._claimed || (f.kind !== 'berry' && f.kind !== 'fruit')) continue;
+    const dx = f.x - p.x, dz = f.z - p.z, d = dx * dx + dz * dz;
+    if (d < bd) { bd = d; best = f; }
+  }
+  if (best) { best._claimed = true; a.goal = { kind: 'forage', x: best.x, z: best.z, ref: best }; }
 }
 
 // ── the lights ── pale wisps that only show in the deep dark, drifting
@@ -3482,6 +3575,9 @@ function spawn(name, near) {
   // species base, or a horse ends up as soft as a deer (the one-shot-horse bug).
   if (cfg.hpJit) hp = Math.max(1, cfg.hp * (0.85 + Math.random() * 0.30));
   const hearJit = 0.85 + Math.random() * 0.30;          // 0.85–1.15
+  // ── nerves ── how jumpy THIS individual is. Wide spread: some graze
+  // calm with you near, others bolt at a shadow. Folds into spook ranges.
+  const paranoia = Math.max(0, Math.min(1, 0.5 + (Math.random() - 0.5) * 1.3));
   // per-gait playback tempo: cow plods, horse is quick, bear is heavy — ±5%
   const gaitTs = (cfg.gait === 'sway' ? 0.85 : cfg.gait === 'smooth' ? 1.15
                  : cfg.gait === 'bound' ? 0.9 : 1) * (0.95 + Math.random() * 0.1);
@@ -3489,7 +3585,7 @@ function spawn(name, near) {
     name, cfg, obj, mixer, acts, cur: null,
     state: 'idle', t: Math.random() * 4, dir: Math.random() * Math.PI * 2,
     hp, dead: false, attackCd: 0,
-    aggression, hearJit, gaitTs,
+    aggression, hearJit, gaitTs, paranoia,
     gaitPhase: Math.random() * Math.PI * 2,             // desyncs sway/bob across a herd
     gaitRoll: 0,                                         // current rotation.z, decays to 0
     sizeJit,
@@ -3581,6 +3677,8 @@ function losBlocked(a) {
 function spookRadius(a, dist) {
   const keen = (a.cfg.keen || 1) * (a.hearJit || 1);
   let r = a.cfg.flee * (0.4 + noise01 * keen);
+  // nerves: a calm one lets you in ~35% closer, a jumpy one bolts ~35% sooner
+  r *= 0.65 + (a.paranoia ?? 0.5) * 0.70;
   if (dist < 60 && losBlocked(a)) r *= 0.42;       // cover buys you closer
   return Math.max(r, noiseLevel === 2 ? 20 : 7);
 }
@@ -3836,7 +3934,12 @@ function animalUpdate(a, dt) {
         a.state = 'flee'; a.t = 3 + Math.random() * 2.5;
         a.dir = Math.atan2(-dx, -dz) + (Math.random() - 0.5) * 0.7;
         spookHerd(a);
-      } else if (a.t <= 0) { a.state = 'idle'; a.t = 1.5 + Math.random() * 2; }  // back to grazing
+      } else if (a.t <= 0) {
+        // nerves decide how it stands down: a calm one (paranoia<0.45) drops
+        // its head and keeps feeding; a jumpy one stays up and glancy a beat
+        if ((a.paranoia ?? 0.5) < 0.45) { a.state = 'eat'; a.t = 3 + Math.random() * 4; }
+        else { a.state = 'idle'; a.t = 0.8 + Math.random() * 1.2; }
+      }
     } else if (dist < panicRadius(a) || dist < spookRadius(a, dist)) {
       // crowded hard AND bold AND able to kick → it may turn and fight
       // instead of running. A stag/horse that's had enough rears up.
@@ -3852,9 +3955,10 @@ function animalUpdate(a, dt) {
         a.dir = Math.atan2(-dx, -dz) + (Math.random() - 0.5) * 0.7;
         spookHerd(a);                     // one spooks, the herd spooks
       }
-    } else if (dist < spookRadius(a, dist) + 9) {
+    } else if (dist < spookRadius(a, dist) + 9 + (a.paranoia ?? 0.5) * 8) {
       // the notable outer ring — a clear ~10-step band where it lifts its
-      // head and stares before the inner ring makes it run
+      // head and stares before the inner ring makes it run. A jumpy one
+      // catches you sooner (wider band); a calm one lets you drift closer.
       a.state = 'alert'; a.t = 1.8 + Math.random() * 2.0;   // it stares a good beat
     } else wander(a, dt);
   }
@@ -4077,12 +4181,41 @@ function spookHerd(a) {
 }
 
 function wander(a, dt) {
+  const prey = !(a.cfg.hunts || a.cfg.territorial || a.cfg.bearish);
+  // ── PURPOSE ── a calm non-predator walks toward a goal (drink/sniff/forage)
+  // instead of drifting at random. Picks one if it has none; on arrival it
+  // settles into a head-down 'eat' beat, then clears the goal.
+  if (prey) {
+    if (a.state !== 'eat' && !a.goal) chooseGoal(a);
+    if (a.goal) {
+      const p = a.obj.position;
+      const gdx = a.goal.x - p.x, gdz = a.goal.z - p.z;
+      const gd = Math.hypot(gdx, gdz);
+      const arrive = a.goal.kind === 'drink' ? 3.0 : 2.2;
+      if (gd > arrive) {                          // still travelling — steer + walk
+        a.dir = lerpAngle(a.dir, Math.atan2(gdx, gdz), Math.min(1, dt * 3));
+        setAnim(a, 'Walk'); stepAnimal(a, a.cfg.speed, dt);
+        // give up on a goal we can't reach (deflected at water/wall) after a while
+        a._goalT = (a._goalT ?? 14) - dt;
+        if (a._goalT <= 0) { if (a.goal.ref) a.goal.ref._claimed = false; a.goal = null; a._goalT = 14; }
+        return;
+      }
+      // arrived — head down. Drinking lingers; foraging may eat the berry.
+      a.state = 'eat'; setAnim(a, 'Eating');
+      a.t = a.goal.kind === 'drink' ? 5 + Math.random() * 4 : 3 + Math.random() * 3;
+      if (a.goal.kind === 'drink') a._lastWater = a.goal.ref;
+      if (a.goal.kind === 'forage' && a.goal.ref && Math.random() < 0.6) {
+        a.goal.ref.taken = true; a.goal.ref.mesh.visible = false;   // consumed
+      } else if (a.goal.ref) { a.goal.ref._claimed = false; }       // leave it for others
+      a._goalT = 14; a.goal = null;
+      return;
+    }
+  }
   a.t -= dt;
   if (a.t <= 0) {
     const roll = Math.random();
     // prey mostly GRAZE — a calm meadow you have to sneak up on. Predators
     // roam more. (eat is long; walking is the rarer, shorter beat.)
-    const prey = !(a.cfg.hunts || a.cfg.territorial || a.cfg.bearish);
     if (prey) {
       a.state = roll < 0.28 ? 'idle' : roll < 0.78 ? 'eat' : 'walk';
       a.t = a.state === 'eat' ? 5 + Math.random() * 6 : 2.5 + Math.random() * 4;
@@ -4295,6 +4428,8 @@ function gutCarcass(a) {
 window._kill = (a) => killAnimal(a);   // debug/test hook
 function killAnimal(a, suffered = false) {
   a.dead = true; a.t = 75;   // carcasses linger — long enough for scavengers
+  if (a.goal && a.goal.ref) a.goal.ref._claimed = false;   // free its errand for the herd
+  a.goal = null;
   if (a._flame) { a.obj.remove(a._flame); a._flame = null; }   // the fire goes out with it
   a.suffered = suffered || !!a.bleeding || a.state === 'wounded';
   setAnim(a, 'Death', true);
@@ -5088,12 +5223,12 @@ function forageUpdate(t) {
     // you must be on the SAME plane as the plant — no eating a cap from 400ft
     // up in the clouds just because you're over it horizontally
     if (Math.abs(player.y - (f.mesh.position.y || 0)) > 3.2) continue;
-    if (f.kind === 'berry') {
+    if (f.kind === 'berry' || f.kind === 'fruit') {
       if (d > 2.0) continue;
       f.taken = true; f.mesh.visible = false;
       player.lastAte = t; if (player.hp < 100) { player.hp = Math.min(100, player.hp + 12); renderHP(); }
       if (audio.impact) audio.impact('flesh', 0.5);
-      toast('Berries.', 1400);
+      toast(f.kind === 'fruit' ? 'Fruit.' : 'Berries.', 1400);
     } else {                                    // the glowing mushroom — needs a deliberate tap
       if (d < 2.6 && (!mush || d < mush._d)) { mush = f; mush._d = d; }
     }
