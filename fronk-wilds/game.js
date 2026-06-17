@@ -579,7 +579,10 @@ const waterUniforms = { uTime: { value: 0 } };
     sh.vertexShader = 'uniform float uTime;\nattribute float depth;\nvarying float vDepth;\nvarying vec3 vWP;\n'
       + sh.vertexShader.replace('#include <begin_vertex>',
       `#include <begin_vertex>
-       transformed.z += sin(position.x*0.22 + uTime*1.7)*0.14 + cos(position.y*0.31 + uTime*1.3)*0.11;
+       float wd = clamp((depth-0.4)*0.6, 0.0, 1.0);   // calm at the bank, big swell offshore
+       transformed.z += (sin(position.x*0.12 + position.y*0.05 + uTime*1.45)*0.30   // long primary roller
+                       + sin(position.x*0.22 + uTime*1.7)*0.12
+                       + cos(position.y*0.31 + uTime*1.3)*0.10) * wd;
        vDepth = depth;
        vWP = (modelMatrix * vec4(position, 1.0)).xyz;`);
     sh.fragmentShader = `uniform float uTime; uniform vec3 uSunDir; uniform float uNight;
@@ -5388,14 +5391,17 @@ scene.add(canoe);
 function waveAt(x, z, t) {
   const depth = Math.max(0, WATER_Y - heightAt(x, z));   // how deep below the surface
   const o = Math.max(0, Math.min(1, (depth - 0.6) / 5));  // ~0 at the bank, 1 far out
-  const amp = o * (0.55 + _boatWake * 0.7);               // the swell builds as you get underway
-  // two crossing swells, different headings/wavelengths/speeds
-  const k1 = 0.16, p1 = (x * 0.7 + z * 0.71) * k1 + t * 1.1;
-  const k2 = 0.11, p2 = (x * -0.6 + z * 0.8) * k2 + t * 0.8;
-  const h = (Math.sin(p1) * 0.62 + Math.sin(p2) * 0.38) * amp;
+  const amp = o * (0.85 + _boatWake * 1.0);               // bigger swell, builds as you get underway
+  // PRIMARY directional swell — long rollers marching in the wind direction. This
+  // is the dominant motion; the two crossing swells below just add chop/texture.
+  const wx = Math.sin(windDir), wz = Math.cos(windDir);
+  const kp = 0.085, pp = (x * wx + z * wz) * kp - t * 1.5;
+  const k1 = 0.16, p1 = (x * 0.7 + z * 0.71) * k1 + t * 1.7;
+  const k2 = 0.11, p2 = (x * -0.6 + z * 0.8) * k2 + t * 1.3;
+  const h = (Math.sin(pp) * 0.9 + Math.sin(p1) * 0.34 + Math.sin(p2) * 0.26) * amp;
   // analytic slope (∂h/∂x, ∂h/∂z) → drives the raft's pitch & roll
-  const gx = (Math.cos(p1) * 0.62 * 0.7 * k1 + Math.cos(p2) * 0.38 * -0.6 * k2) * amp;
-  const gz = (Math.cos(p1) * 0.62 * 0.71 * k1 + Math.cos(p2) * 0.38 * 0.8 * k2) * amp;
+  const gx = (Math.cos(pp) * 0.9 * wx * kp + Math.cos(p1) * 0.34 * 0.7 * k1 + Math.cos(p2) * 0.26 * -0.6 * k2) * amp;
+  const gz = (Math.cos(pp) * 0.9 * wz * kp + Math.cos(p1) * 0.34 * 0.71 * k1 + Math.cos(p2) * 0.26 * 0.8 * k2) * amp;
   return { h, gx, gz, o };
 }
 
@@ -8425,9 +8431,12 @@ function tickBody() {
         } else if (audio.waveSlap) audio.waveSlap(spd);
       }
     } else {
-      // riding the surface: idle rock + the wave's own tilt (more offshore)
-      pitch = Math.sin(t * 1.3 + 0.7) * 0.025 + fwdSlope * 1.6 + spd * 0.04;
-      roll = Math.sin(t * 1.7) * 0.05 * (0.4 + wv.o) + latSlope * 1.6 + spd * 0.04 * Math.sin(t * 3.4);
+      // riding the surface: idle rock + the wave's own tilt (more offshore). The
+      // raft heaves into the swell — pitch with the fore-aft slope, roll with the
+      // beam slope, plus a gentle wallow that grows with the sea state (wv.o).
+      const sea = 0.5 + wv.o;
+      pitch = Math.sin(t * 1.15 + 0.7) * 0.05 * sea + fwdSlope * 2.4 + spd * 0.04;
+      roll = Math.sin(t * 1.5) * 0.09 * sea + latSlope * 2.4 + spd * 0.05 * Math.sin(t * 3.4);
     }
     canoe.position.set(player.x, rideY, player.z);
     canoe.rotation.set(pitch, raftYaw, roll);            // heading is the raft's own, not the camera's
