@@ -576,17 +576,19 @@ const waterUniforms = { uTime: { value: 0 } };
     sh.uniforms.uTime = waterUniforms.uTime;
     sh.uniforms.uSunDir = skyUniforms.sunDir;     // shared live uniforms — free
     sh.uniforms.uNight = skyUniforms.night;
-    sh.vertexShader = 'uniform float uTime;\nattribute float depth;\nvarying float vDepth;\nvarying vec3 vWP;\n'
+    sh.vertexShader = 'uniform float uTime;\nattribute float depth;\nvarying float vDepth;\nvarying vec3 vWP;\nvarying float vWave;\n'
       + sh.vertexShader.replace('#include <begin_vertex>',
       `#include <begin_vertex>
        float wd = clamp((depth-0.4)*0.6, 0.0, 1.0);   // calm at the bank, big swell offshore
-       transformed.z += (sin(position.x*0.12 + position.y*0.05 + uTime*1.45)*0.30   // long primary roller
-                       + sin(position.x*0.22 + uTime*1.7)*0.12
-                       + cos(position.y*0.31 + uTime*1.3)*0.10) * wd;
+       float wave = sin(position.x*0.12 + position.y*0.05 + uTime*1.45)*0.30   // long primary roller
+                  + sin(position.x*0.22 + uTime*1.7)*0.12
+                  + cos(position.y*0.31 + uTime*1.3)*0.10;
+       transformed.z += wave * wd;
+       vWave = wave * wd;                              // hand the crest height to the fragment (whitecaps)
        vDepth = depth;
        vWP = (modelMatrix * vec4(position, 1.0)).xyz;`);
     sh.fragmentShader = `uniform float uTime; uniform vec3 uSunDir; uniform float uNight;
-      varying float vDepth; varying vec3 vWP;
+      varying float vDepth; varying vec3 vWP; varying float vWave;
       float wh31(vec3 p){ return fract(sin(dot(p, vec3(127.1,311.7,74.7)))*43758.5453); }
       float wvn(vec3 p){ vec3 i=floor(p),f=fract(p); f=f*f*(3.0-2.0*f);
         return mix(mix(mix(wh31(i),wh31(i+vec3(1,0,0)),f.x),mix(wh31(i+vec3(0,1,0)),wh31(i+vec3(1,1,0)),f.x),f.y),
@@ -601,7 +603,12 @@ const waterUniforms = { uTime: { value: 0 } };
        float foam = smoothstep(0.7, 0.06, vDepth) * step(0.05, vDepth)
                     * (0.5 + 0.5*sin(vDepth*9.0 - uTime*2.2))
                     * smoothstep(0.5, 0.95, wfbm(vWP*0.7 + vec3(uTime*0.3)));
-       diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.90,0.95,0.98), clamp(foam,0.0,1.0)*0.8);`)
+       diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.90,0.95,0.98), clamp(foam,0.0,1.0)*0.8);
+       // WHITECAPS — foam flecks breaking on the crests of the offshore swell, so
+       // the open water reads alive. Only where the wave is near its peak AND deep.
+       float cap = smoothstep(0.20, 0.34, vWave) * smoothstep(2.0, 4.0, vDepth)
+                   * smoothstep(0.55, 0.92, wfbm(vWP*1.3 + vec3(uTime*0.5)));
+       diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.93,0.96,0.99), clamp(cap,0.0,1.0)*0.7);`)
       .replace('#include <dithering_fragment>',
       `#include <dithering_fragment>
        vec3 V = normalize(cameraPosition - vWP);
