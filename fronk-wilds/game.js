@@ -76,6 +76,12 @@ const MENAGERIE = {
   Spider:{ n: 3, speed: 3.4, gallop: 6, hp: 3, flee: 0, r: 0.45,
            keen: 1.0, aggroBias: 0.7, scale: 0.5, spiderish: true,
            hunts: true, aggroR: 16, dmg: 3 },   // RARE, weak — a creepy find, not a swarm at your feet
+  // ── the ambush ── submerged gators pinned to the lake. They never roam:
+  // they lurk at the waterline (only eyes/snout above) and SNAP at the player
+  // or any Horse that wanders within reach. A bite is rare but brutal.
+  Gator: { n: 3, speed: 0, gallop: 0, hp: 6, r: 1.3,
+           keen: 1.0, scale: 1.0, gatorish: true,
+           snapR: 5.5, snapKill: 0.20, dmg: 34, hpJit: true },   // lurks in the shallows at (70,-90)
 };
 // SPECIES aliases MENAGERIE so every a.cfg.* reference keeps working.
 const SPECIES = MENAGERIE;
@@ -3314,8 +3320,8 @@ const PREFAB_FILE = { Bear: 'Bull' };
 
 async function loadAnimals() {
   const names = Object.keys(SPECIES);
-  // procedural creatures (spider) have no .glb — don't try to load one
-  const glbNames = names.filter(n => !SPECIES[n].spiderish);
+  // procedural creatures (spider, gator) have no .glb — don't try to load one
+  const glbNames = names.filter(n => !SPECIES[n].spiderish && !SPECIES[n].gatorish);
   const files = [...new Set(glbNames.map(n => PREFAB_FILE[n] || n))];
   await Promise.all(files.map(f => new Promise((res, rej) =>
     loader.load(`assets/animals/${f}.glb`, g => { prefabs[f] = g; res(); }, undefined, rej))));
@@ -3512,6 +3518,87 @@ function spiderUpdate(a, dt, dx, dz, dist) {
   spiderAnim(a, dt, moved);
 }
 
+// ════ THE GATORS ════ submerged ambush predators. Procedural, dark, low-poly.
+// They pin to the waterline (mostly under) and SNAP at the player or a Horse
+// that strays within snapR. A bite is rare (snapKill) but takes a big chunk.
+const _gatorMat = new THREE.MeshStandardMaterial({ color: 0x16241a, roughness: 0.85, flatShading: true });
+const _gatorEyeMat = new THREE.MeshStandardMaterial({ color: 0xc7ff3a, emissive: 0xa8e02a, emissiveIntensity: 2.2, roughness: 0.3 });
+function buildGatorMesh() {
+  const g = new THREE.Group();
+  // long, low body
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.42, 2.2), _gatorMat);
+  body.position.set(0, 0, 0); body.castShadow = true; g.add(body);
+  // tapering tail (two segments behind)
+  const tail1 = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.34, 1.1), _gatorMat);
+  tail1.position.set(0, -0.02, -1.55); g.add(tail1);
+  const tail2 = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.24, 1.0), _gatorMat);
+  tail2.position.set(0, -0.04, -2.5); g.add(tail2);
+  // snout reaching forward; the lower jaw is a pivot so it can gape
+  const snout = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.3, 1.0), _gatorMat);
+  snout.position.set(0, 0.04, 1.55); snout.castShadow = true; g.add(snout);
+  const jaw = new THREE.Group(); jaw.position.set(0, -0.08, 1.1); g.add(jaw);
+  const jawMesh = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.18, 0.9), _gatorMat);
+  jawMesh.position.set(0, -0.05, 0.45); jaw.add(jawMesh);
+  // two glowing eyes set high on the skull — what you see above the water
+  for (const sx of [-1, 1]) {
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.09, 6, 5), _gatorEyeMat);
+    eye.position.set(sx * 0.22, 0.24, 1.0); g.add(eye);
+  }
+  // back scutes — a row of ridges down the spine
+  for (let i = 0; i < 5; i++) {
+    const scute = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.18, 4), _gatorMat);
+    scute.position.set(0, 0.28, 0.8 - i * 0.5); g.add(scute);
+  }
+  g.userData.gator = { jaw };
+  return g;
+}
+// pinned to the waterline; faces the nearest of player OR any Horse in range,
+// and SNAPs (gapes the jaw + audio) when something crosses snapR. Never roams,
+// so it never calls stepAnimal (which would reject it out of the water).
+function gatorUpdate(a, dt, dx, dz, dist) {
+  a.attackCd -= dt;
+  const p = a.obj.position;
+  // pin the body to the waterline — mostly submerged, only eyes/snout above
+  p.y = WATER_Y - 0.28;
+  // nearest target: the player, OR any Horse within range (scan throttled)
+  let tx = player.x, tz = player.z, td = dist, tgt = null;
+  a._scanT = (a._scanT ?? 0) - dt;
+  if (a._scanT <= 0) {
+    a._scanT = 0.4; a._horse = null; let hd = a.cfg.snapR * a.cfg.snapR;
+    for (const o of animals) {                      // bounded: 3 gators × 0.4s
+      if (o === a || o.dead || o.name !== 'Horse') continue;
+      const hx = o.obj.position.x - p.x, hz = o.obj.position.z - p.z;
+      const d2 = hx * hx + hz * hz;
+      if (d2 < hd) { hd = d2; a._horse = o; }
+    }
+  }
+  const h = a._horse;
+  if (h && !h.dead) {
+    const hx = h.obj.position.x - p.x, hz = h.obj.position.z - p.z;
+    const hdist = Math.hypot(hx, hz);
+    if (hdist < td) { tx = h.obj.position.x; tz = h.obj.position.z; td = hdist; tgt = h; }
+  }
+  // face the target
+  a.dir = Math.atan2(tx - p.x, tz - p.z);
+  a.obj.rotation.y = lerpAngle(a.obj.rotation.y, a.dir, Math.min(1, dt * 3));
+  // gape the jaw briefly after a snap, then ease it shut again
+  const gt = a.obj.userData.gator;
+  if (gt) {
+    a._gape = Math.max(0, (a._gape || 0) - dt * 3);
+    gt.jaw.rotation.x = a._gape * 0.7;
+  }
+  // SNAP when something crosses snapR and the bite is ready
+  if (td < a.cfg.snapR && a.attackCd <= 0) {
+    a.attackCd = 2.2; a._gape = 1.0;
+    if (audio.snapAt) audio.snapAt(p.x, p.z, player, 1.0);
+    if (Math.random() < a.cfg.snapKill) {           // ~20% to connect
+      if (tgt) { killAnimal(tgt); }                 // a horse dragged under
+      else { hurtPlayer(a.cfg.dmg); camShakeT = SHAKE_DUR * 2; }
+    }
+    // a miss just resubmerges — the eyes slide back under (handled by the pin)
+  }
+}
+
 function spawn(name, near) {
   const cfg = SPECIES[name], prefab = prefabs[name];
   // ── per-individual LOOK ── a herd should read as individuals, not clones.
@@ -3519,6 +3606,8 @@ function spawn(name, near) {
   let obj;
   if (cfg.spiderish) {
     obj = buildSpiderMesh();
+  } else if (cfg.gatorish) {
+    obj = buildGatorMesh();
   } else if (cfg.bearish) {
     // a purpose-built procedural bear (dark, humped, scary), not a tinted bull
     const bc = new THREE.Color(cfg.tint || 0x2a1d12).multiplyScalar(shade);
@@ -3538,7 +3627,17 @@ function spawn(name, near) {
     });
   }
   let x, z, y, tries = 0;
-  do {
+  if (cfg.gatorish) {
+    // gators lurk submerged in the shallow lake around (70,-90) — the generic
+    // land placement below rejects water, so site them on the waterline here
+    // and skip it. gatorUpdate pins p.y every frame, so y only needs to be sane.
+    x = 70; z = -90; y = WATER_Y - 0.28;
+    for (let tr = 0; tr < 40; tr++) {
+      const ang = Math.random() * Math.PI * 2, rr = 6 + Math.random() * 18;
+      const gx = 70 + Math.cos(ang) * rr, gz = -90 + Math.sin(ang) * rr;
+      if (heightAt(gx, gz) < WATER_Y - 0.1) { x = gx; z = gz; break; }  // genuine lake water
+    }
+  } else do {
     if (near && tries < 40) {           // herd member — settle near the anchor
       x = near.x + (Math.random() - 0.5) * 18;
       z = near.z + (Math.random() - 0.5) * 18;
@@ -3560,7 +3659,7 @@ function spawn(name, near) {
   scene.add(obj);
   const mixer = new THREE.AnimationMixer(obj);
   const acts = {};
-  if (!cfg.bearish && !cfg.spiderish) {     // procedural creatures are animated in code, not by clips
+  if (!cfg.bearish && !cfg.spiderish && !cfg.gatorish) {     // procedural creatures are animated in code, not by clips
     for (const frag of ['Idle', 'Idle_2', 'Eating', 'Walk', 'Gallop', 'Death',
                         'HitReact_Left', 'Attack', 'Attack_Kick']) {
       const clip = clipOf(prefab, frag);
@@ -3779,6 +3878,10 @@ function animalUpdate(a, dt) {
 
   if (a.cfg.spiderish) {                        // ── the swarm: follow + leap
     spiderUpdate(a, dt, dx, dz, dist);
+    return;
+  }
+  if (a.cfg.gatorish) {                         // ── the ambush: lurk + snap
+    gatorUpdate(a, dt, dx, dz, dist);
     return;
   }
   if (a.cfg.bearish) {                         // ── the bear has its own brain
