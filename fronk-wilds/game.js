@@ -2527,9 +2527,10 @@ const BURROWS = [], WATERSPOTS = [];
     BURROWS.push({ x, z });
     made++;
   }
-  // ~4 shoreline points ringing the lake centroid (70, -90)
-  for (let i = 0; i < 4; i++) {
-    const a = (i / 4) * Math.PI * 2 + 0.4;
+  // ~10 shoreline points ringing the lake centroid (70, -90). Horses rotate
+  // through them to drink; gators stake out a hidden subset (see spawn()).
+  for (let i = 0; i < 10; i++) {
+    const a = (i / 10) * Math.PI * 2 + 0.4;
     // walk outward from the centre until we find the first dry-ish shore
     let sx = 70, sz = -90;
     for (let r = 20; r < 90; r += 4) {
@@ -3706,7 +3707,7 @@ spawnSharks();   // the lake already exists (built at module load) — stock it 
 // They pin to the waterline (mostly under) and SNAP at the player or a Horse
 // that strays within snapR. A bite is rare (snapKill) but takes a big chunk.
 const _gatorMat = new THREE.MeshStandardMaterial({ color: 0x16241a, roughness: 0.85, flatShading: true });
-const _gatorEyeMat = new THREE.MeshStandardMaterial({ color: 0xc7ff3a, emissive: 0xa8e02a, emissiveIntensity: 2.2, roughness: 0.3 });
+const _gatorEyeMat = new THREE.MeshStandardMaterial({ color: 0x97c233, emissive: 0x6f9a1f, emissiveIntensity: 1.2, roughness: 0.4 });
 function buildGatorMesh() {
   const g = new THREE.Group();
   // long, low body
@@ -3725,8 +3726,8 @@ function buildGatorMesh() {
   jawMesh.position.set(0, -0.05, 0.45); jaw.add(jawMesh);
   // two glowing eyes set high on the skull — what you see above the water
   for (const sx of [-1, 1]) {
-    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.09, 6, 5), _gatorEyeMat);
-    eye.position.set(sx * 0.22, 0.24, 1.0); g.add(eye);
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.07, 6, 5), _gatorEyeMat);
+    eye.position.set(sx * 0.22, 0.2, 1.0); g.add(eye);
   }
   // back scutes — a row of ridges down the spine
   for (let i = 0; i < 5; i++) {
@@ -3743,7 +3744,7 @@ function gatorUpdate(a, dt, dx, dz, dist) {
   a.attackCd -= dt;
   const p = a.obj.position;
   // pin the body to the waterline — mostly submerged, only eyes/snout above
-  p.y = WATER_Y - 0.28;
+  p.y = WATER_Y - 0.34;
   // nearest target: the player, OR any Horse within range (scan throttled)
   let tx = player.x, tz = player.z, td = dist, tgt = null;
   a._scanT = (a._scanT ?? 0) - dt;
@@ -3774,7 +3775,8 @@ function gatorUpdate(a, dt, dx, dz, dist) {
   // SNAP when something crosses snapR and the bite is ready
   if (td < a.cfg.snapR && a.attackCd <= 0) {
     a.attackCd = 2.2; a._gape = 1.0;
-    if (audio.snapAt) audio.snapAt(p.x, p.z, player, 1.0);
+    if (audio.gatorAttack) audio.gatorAttack(p.x, p.z);
+    else if (audio.snapAt) audio.snapAt(p.x, p.z, player, 1.0);
     if (Math.random() < a.cfg.snapKill) {           // ~20% to connect
       if (tgt) { killAnimal(tgt); }                 // a horse dragged under
       else { hurtPlayer(a.cfg.dmg); camShakeT = SHAKE_DUR * 2; }
@@ -3812,14 +3814,27 @@ function spawn(name, near) {
   }
   let x, z, y, tries = 0;
   if (cfg.gatorish) {
-    // gators lurk submerged in the shallow lake around (70,-90) — the generic
-    // land placement below rejects water, so site them on the waterline here
-    // and skip it. gatorUpdate pins p.y every frame, so y only needs to be sane.
+    // THE AMBUSH: each gator stakes out a hidden waterspot (a subset of the 10),
+    // sitting a few metres offshore in real water — exactly where horses come to
+    // drink. The land placement below rejects water, so we site it here and skip.
+    // gatorUpdate pins p.y every frame, so y only needs to be sane.
     x = 70; z = -90; y = WATER_Y - 0.28;
-    for (let tr = 0; tr < 40; tr++) {
-      const ang = Math.random() * Math.PI * 2, rr = 6 + Math.random() * 18;
-      const gx = 70 + Math.cos(ang) * rr, gz = -90 + Math.sin(ang) * rr;
-      if (heightAt(gx, gz) < WATER_Y - 0.1) { x = gx; z = gz; break; }  // genuine lake water
+    const free = WATERSPOTS.filter(w => !w._guarded);
+    const spot = free.length ? free[Math.floor(Math.random() * free.length)] : null;
+    if (spot) {
+      spot._guarded = true;
+      // step from the shore spot toward the lake centre until we hit real water
+      const tox = 70 - spot.x, toz = -90 - spot.z, tl = Math.hypot(tox, toz) || 1;
+      for (let r = 1.5; r < 32; r += 1.5) {
+        const px = spot.x + (tox / tl) * r, pz = spot.z + (toz / tl) * r;
+        if (heightAt(px, pz) < WATER_Y - 0.2) { x = px; z = pz; break; }
+      }
+    } else {
+      for (let tr = 0; tr < 40; tr++) {      // fallback: random lake interior
+        const ang = Math.random() * Math.PI * 2, rr = 6 + Math.random() * 18;
+        const gx = 70 + Math.cos(ang) * rr, gz = -90 + Math.sin(ang) * rr;
+        if (heightAt(gx, gz) < WATER_Y - 0.1) { x = gx; z = gz; break; }
+      }
     }
   } else do {
     if (near && tries < 40) {           // herd member — settle near the anchor

@@ -400,6 +400,15 @@ export class AudioEngine {
     return this._playAt(base, x, z, { gain: 1, n, ref: 12, max: 150, rolloff: 0.85, ...opts });
   }
 
+  // a sudden, LOUD gator strike: an explosive water lunge + thrash splash, with
+  // a short guttural growl layered under for menace. Reuses existing samples.
+  gatorAttack(x, z) {
+    if (!this.started || this.muted) return;
+    this._playAt('shark_lunge', x, z, { gain: 1.4, ref: 9, max: 150, rolloff: 0.8 });
+    this._playAt('shark_splash', x, z, { gain: 1.1, n: 2, ref: 9, max: 150, rolloff: 0.85 });
+    this._playAt('bear_growl', x, z, { gain: 0.7, n: 2, rate: 1.25, ref: 10, max: 120, rolloff: 0.9 });
+  }
+
   // play a foley sample (non-spatial) through the foley bus. `n` picks a random
   // variation (base_1..base_n); rate jitter keeps repeats from feeling robotic.
   // Returns true if a sample played (caller skips its procedural fallback).
