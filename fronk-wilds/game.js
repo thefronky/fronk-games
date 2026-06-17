@@ -7292,9 +7292,11 @@ let bowString1, bowString2, nockedArrow, drawHand;
   // ── the SHEET HAND ── shown only while sailing: the same black leather glove,
   // now hauling the rope (the sheet) that runs up to the sail. Pull left/right
   // and the hand drags the rope across — that's how you swing the sail. On the camera.
-  const gloveM2 = new THREE.MeshStandardMaterial({ color: 0x161412, roughness: 0.62, metalness: 0.04 });
-  const sleeveM2 = new THREE.MeshStandardMaterial({ color: 0x23201b, roughness: 0.95 });
-  const ropeM2 = new THREE.MeshStandardMaterial({ color: 0xc7ad77, roughness: 1 });
+  // brighter worn-leather brown (was near-black 0x161412) so the hand reads against
+  // the bright water instead of silhouetting; a touch of emissive lifts it in shade.
+  const gloveM2 = new THREE.MeshStandardMaterial({ color: 0x5a4630, emissive: 0x1a130b, roughness: 0.7, metalness: 0.04 });
+  const sleeveM2 = new THREE.MeshStandardMaterial({ color: 0x4a3c2a, emissive: 0x140f08, roughness: 0.95 });
+  const ropeM2 = new THREE.MeshStandardMaterial({ color: 0xe3cf9c, emissive: 0x3a3018, roughness: 1 });
   const fist = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.075, 0.06), gloveM2); sheetHand.add(fist);
   for (let i = 0; i < 4; i++) {                       // curled fingers gripping the rope
     const f = new THREE.Mesh(new THREE.BoxGeometry(0.016, 0.052, 0.022), gloveM2);
@@ -7307,8 +7309,9 @@ let bowString1, bowString2, nockedArrow, drawHand;
   // the rope/sheet — runs from the fist UP and FORWARD toward the sail
   const rope = new THREE.Mesh(new THREE.CylinderGeometry(0.013, 0.013, 1.3, 5), ropeM2);
   rope.position.set(-0.02, 0.62, -0.28); rope.rotation.x = -0.42; sheetHand.add(rope);
-  sheetHand.position.set(0.3, -0.36, -0.58);
+  sheetHand.position.set(0.34, -0.34, -0.54);
   sheetHand.rotation.set(0.15, -0.25, 0);
+  sheetHand.scale.setScalar(1.2);        // a touch bigger so it clearly reads as a gripping hand
   sheetHand.visible = false;
   camera.add(sheetHand);
   scene.add(camera);
