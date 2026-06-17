@@ -3367,6 +3367,23 @@ async function loadAnimals() {
       }
     } else for (let i = 0; i < SPECIES[n].n; i++) spawn(n);
   }
+  // ── Stage D: the feeding tableau ── sometimes you crest a rise to find a
+  // bear already hunched over a deer it killed, opened and eating. ~60% of loads.
+  if (Math.random() < 0.6) {
+    const bear = animals.find(a => a.cfg.bearish && !a.dead && !a._tableau);
+    if (bear) {
+      const bp = bear.obj.position;
+      const deer = spawn('Deer', bp);
+      deer.obj.position.set(bp.x, heightAt(bp.x, bp.z), bp.z);   // at its feet
+      deer.dead = true; deer.t = 1e9; deer.eaten = true;         // persistent, claimed
+      setAnim(deer, 'Death', true);
+      gutCarcass(deer);                                          // opened body + blood pool
+      bear.state = 'eat'; bear._tableau = deer;
+      bear.dir = Math.atan2(deer.obj.position.x - bp.x, deer.obj.position.z - bp.z);
+      setAnim(bear, 'Eating');
+      bloodyMuzzle(bear);
+    }
+  }
 }
 
 // ── the bear ── built from primitives (no CC0 animated bear asset exists),
@@ -3423,8 +3440,15 @@ function buildBearMesh(tint) {
     }
     legs.push(piv);
   }
-  g.userData.bear = { headPiv, legs, tilt: 0 };
+  g.userData.bear = { headPiv, legs, tilt: 0, muzzle: [snout, jaw] };
   return g;
+}
+// a fresh kill paints the snout/jaw — the head boxes forward of the eyes.
+const _bloodMuzzleMat = new THREE.MeshStandardMaterial({ color: 0x3a0805, roughness: 0.4,
+  emissive: 0x1a0302, emissiveIntensity: 0.3 });
+function bloodyMuzzle(a) {
+  const b = a.obj.userData.bear; if (!b || !b.muzzle) return;
+  for (const m of b.muzzle) m.material = _bloodMuzzleMat;
 }
 // procedural bear animation: leg swing while moving, head bob, and a
 // rise/lean when it rears or charges. Driven each frame from its state.
@@ -3437,11 +3461,18 @@ function bearAnim(a, dt, moving) {
     const ph = (i === 0 || i === 3) ? s : -s;       // diagonal gait
     b.legs[i].rotation.x = ph * swing;
   }
-  b.headPiv.rotation.x = moving ? s * 0.06 : Math.sin(a.gaitPhase * 0.3) * 0.04;  // bob / breathe
-  // rear up on hind legs when rearing; lean low + forward when charging
+  // feeding: head buried low in the carcass, small rhythmic tugs as it pulls
+  // meat; otherwise the normal walk-bob / idle-breathe.
+  if (a.state === 'eat')
+    b.headPiv.rotation.x = 0.7 + Math.abs(Math.sin(a.gaitPhase * 1.6)) * 0.18;  // hunched, munching
+  else
+    b.headPiv.rotation.x = moving ? s * 0.06 : Math.sin(a.gaitPhase * 0.3) * 0.04;  // bob / breathe
+  // rear up on hind legs when rearing; lean low + forward when charging; a
+  // feeding bear hunches forward over the kill.
   let tilt = 0, lift = 0;
   if (a.state === 'rear') { tilt = -0.7; lift = 0.5; }
   else if (a.state === 'charge') { tilt = 0.12; }
+  else if (a.state === 'eat') { tilt = 0.22; }                  // shoulders dropped over the deer
   b.tilt += (tilt - b.tilt) * Math.min(1, dt * 6);
   a.obj.rotation.x = b.tilt;
   a.obj.position.y = heightAt(a.obj.position.x, a.obj.position.z)
@@ -4088,6 +4119,24 @@ function animalUpdate(a, dt) {
 // a close shot enrages it (a.aggro → charge). Loses you well out.
 function bearUpdate(a, dt, dx, dz, dist) {
   a.attackCd -= dt;
+  // ── the feeding tableau ── while you keep your distance it stays hunched
+  // over the deer it killed, munching. Close in and it abandons the kill to
+  // defend it — drops back into the normal (angry) bear brain below.
+  // a shot or a close approach overrides the tableau — same guards the wary/
+  // stalk/rear blocks use, so a provoked bear is never snapped back to munching.
+  if (a._tableau && (a.aggro || a.confused
+      || a.state === 'rear' || a.state === 'charge')) {
+    a._tableau = null;
+  }
+  if (a._tableau) {
+    if (dist > 16) {
+      a.state = 'eat';
+      const cp = a._tableau.obj.position;
+      a.dir = Math.atan2(cp.x - a.obj.position.x, cp.z - a.obj.position.z);  // faces the carcass
+      return;
+    }
+    a._tableau = null;                                  // you got close — now it's a problem
+  }
   const provokeR = 6 + (1 - a.aggression) * 6;          // bold bear: ~6m, shy: ~12m
   const loseR = (a.cfg.aggroR || 22) + 26;
   const night = window._night || 0;
@@ -6199,6 +6248,7 @@ function arrowUpdate(dt) {
           // an arrow into a bear: a close shot enrages it (charge); a far,
           // impressive shot only baffles it — it rears, then lumbers off.
           const dxB = ap.x - player.x, dzB = ap.z - player.z;
+          an._tableau = null;                          // a shot ends the feeding tableau outright
           if (flightD > 40) {
             an.confused = true; an.rearAfter = 'retreat';
             enterBearRear(an, -dxB, -dzB);
