@@ -1501,6 +1501,9 @@ export class AudioEngine {
       this._sailNode = src; this._sailGain = g;
     }
     this._sailGain.gain.setTargetAtTime(0.0001 + lvl * 0.5, t, 0.25);   // smooth ramp, never clicks
+    // the rush RISES in pitch with speed — half of perceived sense-of-speed for free
+    const sp = Math.max(0, Math.min(1, speed01));
+    if (this._sailNode.playbackRate) this._sailNode.playbackRate.setTargetAtTime(0.9 + 0.25 * sp, t, 0.3);
   }
   raftCreak() {                     // occasional timber/rope groan while afloat
     if (!this.started || this.muted) return;
