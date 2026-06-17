@@ -3549,6 +3549,133 @@ function spiderUpdate(a, dt, dx, dz, dist) {
   spiderAnim(a, dt, moved);
 }
 
+// ════ THE SHARKS ════ oversized, Jaws-style. Procedural, low-poly, LONGER
+// than the canoe. They patrol the deepest lake water with only the dorsal
+// fin breaking the surface; once you're out on the water long enough one
+// commits and runs you down faster than you can paddle.
+const _sharkMat = new THREE.MeshStandardMaterial({ color: 0x33424b, roughness: 0.7, flatShading: true });
+const _sharkBelly = new THREE.MeshStandardMaterial({ color: 0xb9c2c4, roughness: 0.7, flatShading: true });
+const _sharkMaw = new THREE.MeshStandardMaterial({ color: 0x140707, roughness: 0.5 });
+function buildSharkMesh() {
+  const g = new THREE.Group();
+  // long tapered body — a stretched, pinched box reads as a streamlined hull.
+  // ~9m nose-to-tail, longer than the dugout canoe.
+  const body = new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.7, 7.0), _sharkMat);
+  body.position.set(0, 0, 0); body.castShadow = true; g.add(body);
+  // pale belly slab tucked under the body
+  const belly = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.5, 6.0), _sharkBelly);
+  belly.position.set(0, -0.75, 0.2); g.add(belly);
+  // blunt snout cone forward (+z)
+  const snout = new THREE.Mesh(new THREE.ConeGeometry(0.85, 2.2, 6), _sharkMat);
+  snout.rotation.x = Math.PI / 2; snout.position.set(0, 0.05, 4.4); g.add(snout);
+  // the gaping maw — a dark slab under the snout
+  const maw = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.5, 0.9), _sharkMaw);
+  maw.position.set(0, -0.5, 3.9); g.add(maw);
+  // the iconic TALL dorsal fin — this is the only part that shows above water
+  const fin = new THREE.Mesh(new THREE.ConeGeometry(0.7, 2.2, 4), _sharkMat);
+  fin.rotation.x = -0.25; fin.position.set(0, 1.5, -0.3); fin.castShadow = true; g.add(fin);
+  // swept tail fluke (-z), a tall vertical blade
+  const tailPiv = new THREE.Group(); tailPiv.position.set(0, 0, -3.4); g.add(tailPiv);
+  const tail = new THREE.Mesh(new THREE.ConeGeometry(1.0, 2.6, 4), _sharkMat);
+  tail.scale.set(0.4, 1, 1); tail.position.set(0, 0.2, -1.0); tail.rotation.x = -1.2; tailPiv.add(tail);
+  // pectoral fins out either side
+  for (const sx of [-1, 1]) {
+    const pec = new THREE.Mesh(new THREE.ConeGeometry(0.5, 1.8, 4), _sharkMat);
+    pec.scale.set(1, 0.3, 1); pec.rotation.z = sx * 1.5; pec.rotation.y = sx * 0.4;
+    pec.position.set(sx * 1.1, -0.4, 1.6); g.add(pec);
+  }
+  g.userData.shark = { tailPiv };
+  return g;
+}
+// ── the shark system ── 2-3 patrollers in the deepest water (centroid ~70,-90).
+// Each shows only its dorsal fin (body sunk below WATER_Y). When you've been on
+// the water past its randomized commit timer, the nearest one HUNTS, converging
+// faster than the canoe; reaching you bites. On land they give up + submerge.
+const SHARKS = [];
+const SHARK_CENTER = { x: 70, z: -90 };   // the deepest part of the lake
+const SHARK_SPEED = 7.4;                  // > canoe MAXV (4.6) — you can't outrun it
+const SHARK_PATROL = 4.4;                 // lazy cruising speed while idle
+function spawnSharks() {
+  const n = 2 + (Math.random() < 0.5 ? 1 : 0);   // 2 or 3
+  for (let i = 0; i < n; i++) {
+    const obj = buildSharkMesh();
+    const a = (i / n) * Math.PI * 2 + Math.random();
+    const r = 18 + Math.random() * 16;
+    obj.position.set(SHARK_CENTER.x + Math.cos(a) * r, WATER_Y, SHARK_CENTER.z + Math.sin(a) * r);
+    obj.rotation.y = a;
+    scene.add(obj);
+    SHARKS.push({
+      obj, dir: a, vy: 0, hunting: false, biteCd: 0,
+      patrolPh: Math.random() * 6.283,
+      commit: 30 + Math.random() * 30,    // seconds in the water before this one commits
+      tailPh: Math.random() * 6.283,
+    });
+  }
+}
+let _sharkInWaterT = 0;        // how long the player has been out on the water (resets on land)
+function sharkUpdate(dt) {
+  if (!SHARKS.length) return;
+  // are you on the water at all? in the canoe or down in deep water counts;
+  // standing on land does not. The commit timer runs only while you're afloat.
+  const onWater = inCanoe || (player.y < WATER_Y + 0.5
+    && Math.hypot(player.x - SHARK_CENTER.x, player.z - SHARK_CENTER.z) < 150);
+  if (onWater) _sharkInWaterT += dt; else _sharkInWaterT = 0;
+  let nearestProx = 0, nearestPursue = null, nearestD = 1e9;
+  for (const s of SHARKS) {
+    const p = s.obj.position;
+    const dx = player.x - p.x, dz = player.z - p.z;
+    const dist = Math.hypot(dx, dz);
+    s.biteCd -= dt;
+    // commit only after you've been afloat past this shark's timer; give up the
+    // instant you're back on land (it loses interest and sinks back to patrol).
+    s.hunting = onWater && _sharkInWaterT > s.commit && dist < 110;
+    let speed;
+    if (s.hunting) {
+      s.dir = Math.atan2(dx, dz);             // converge straight on the player
+      speed = SHARK_SPEED;
+      if (dist < nearestD) { nearestD = dist; nearestPursue = s; }
+      // proximity bed: 0 far (110m) → 1 close (8m)
+      const prox = Math.max(0, Math.min(1, (110 - dist) / 102));
+      if (prox > nearestProx) nearestProx = prox;
+      // reached you → a lunge bite (debounced by biteCd)
+      if (dist < 3.2 && s.biteCd <= 0) {
+        s.biteCd = 1.6;
+        hurtPlayer(38);
+        if (audio.sharkSfx) { audio.sharkSfx('shark_lunge', p.x, p.z); audio.sharkSfx('shark_splash', p.x, p.z); }
+      }
+    } else {
+      // lazy patrol: a slow circle around the deep centre
+      s.patrolPh += dt * 0.12;
+      const tx = SHARK_CENTER.x + Math.cos(s.patrolPh) * 26;
+      const tz = SHARK_CENTER.z + Math.sin(s.patrolPh) * 26;
+      s.dir = Math.atan2(tx - p.x, tz - p.z);
+      speed = SHARK_PATROL;
+    }
+    // steer + swim
+    s.obj.rotation.y = lerpAngle(s.obj.rotation.y, s.dir, Math.min(1, dt * 2.2));
+    p.x += Math.sin(s.obj.rotation.y) * speed * dt;
+    p.z += Math.cos(s.obj.rotation.y) * speed * dt;
+    // sink the body so only ~0.5m of dorsal fin (peak ~+2.6 local) shows above
+    // the surface; a faint bob keeps it alive. fin tip sits just over WATER_Y.
+    p.y = WATER_Y - 2.1 + Math.sin(s.patrolPh * 2 + s.tailPh) * 0.05;
+    // tail sweep — faster when hunting
+    const sd = s.obj.userData.shark;
+    if (sd) { s.tailPh += dt * (s.hunting ? 9 : 4); sd.tailPiv.rotation.y = Math.sin(s.tailPh) * 0.45; }
+  }
+  // drive the Jaws bed off the nearest hunting shark; a periodic splash as it
+  // closes in (the fin cutting the surface). Silent when nothing is pursuing.
+  if (audio.sharkDread) audio.sharkDread(nearestProx);
+  if (nearestPursue && nearestD < 26) {
+    nearestPursue._splashCd = (nearestPursue._splashCd ?? 0) - dt;
+    if (nearestPursue._splashCd <= 0) {
+      nearestPursue._splashCd = 0.9 + Math.random() * 0.6;
+      const pp = nearestPursue.obj.position;
+      if (audio.sharkSfx) audio.sharkSfx('shark_splash', pp.x, pp.z, { gain: 0.7 });
+    }
+  }
+}
+spawnSharks();   // the lake already exists (built at module load) — stock it once
+
 // ════ THE GATORS ════ submerged ambush predators. Procedural, dark, low-poly.
 // They pin to the waterline (mostly under) and SNAP at the player or a Horse
 // that strays within snapR. A bite is rare (snapKill) but takes a big chunk.
@@ -7787,6 +7914,7 @@ function tickBody() {
       }
     }
   }
+  sharkUpdate(wdt);               // the lake patrollers — fin on the surface, Jaws bed
   arrowUpdate(wdt);
   treeFireUpdate(dt);              // burning trees climb, spread, then fall
   trailUpdate(dt);                 // rocket-fuel embers fade

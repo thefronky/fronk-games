@@ -289,7 +289,7 @@ export class AudioEngine {
     // 'base' track REPLACES the old procedural ambient (pads/melody/jaw-harp),
     // which read as 8-bit/chiptune — once it loads we mute the synth musicBus
     // and loop the recorded underscore instead.
-    ['title', 'trip', 'base'].forEach(async (key) => {
+    ['title', 'trip', 'base', 'shark'].forEach(async (key) => {
       try {
         const r = await fetch('sfx/music_' + key + '.mp3');
         if (!r.ok) return;
@@ -358,6 +358,34 @@ export class AudioEngine {
     h.g.gain.setValueAtTime(Math.max(0.0001, h.g.gain.value), t);
     h.g.gain.exponentialRampToValueAtTime(0.0001, t + fade);
     const s = h.src; setTimeout(() => { try { s.stop(); } catch (e) {} }, fade * 1000 + 200);
+  }
+
+  // ── the Jaws bed ── a looped dread track that swells as the nearest
+  // hunting shark closes. prox 0..1 (0 = no threat). Lazily starts the
+  // 'shark' track on first proximity, drives its gain + playbackRate, and
+  // fades it out + nulls the handle when the threat is gone (prox == 0).
+  sharkDread(prox) {
+    if (!this.started) return;
+    if (!this._music.shark) return;            // track not loaded → no bed
+    const C = this.ctx;
+    if (prox <= 0) {
+      if (this._sharkH) { this._fadeTrack(this._sharkH, 2); this._sharkH = null; }
+      return;
+    }
+    if (!this._sharkH) this._sharkH = this._startTrack('shark', { gain: 0.0001, fade: 0.2 });
+    if (!this._sharkH) return;
+    const t = C.currentTime;
+    const gain = 0.18 + prox * 0.62;           // ~0.18 far → ~0.8 close
+    const rate = 0.92 + prox * 0.20;           // ~0.92 far → ~1.12 close
+    this._sharkH.g.gain.setTargetAtTime(gain, t, 0.25);
+    this._sharkH.src.playbackRate.setTargetAtTime(rate, t, 0.4);
+  }
+
+  // a positioned shark foley hit — splash (2 variations) or the lunge.
+  sharkSfx(base, x, z, opts = {}) {
+    if (!this.started || this.muted) return false;
+    const n = base === 'shark_splash' ? 2 : 1;
+    return this._playAt(base, x, z, { gain: 1, n, ref: 12, max: 150, rolloff: 0.85, ...opts });
   }
 
   // play a foley sample (non-spatial) through the foley bus. `n` picks a random
