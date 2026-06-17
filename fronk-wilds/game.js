@@ -432,9 +432,14 @@ function heightAt(x, z) {
     a -= Math.max(0, 1 - dv / 90) * 26 * (0.4 + tt * 0.6);
   }
 
-  // central lake basin
-  const d = Math.hypot(x - 70, z + 90) / 130;
-  a -= Math.max(0, 1 - d * d) * 17;
+  // central lake — a BIG open SEA now (was a ~130 pond): widened + deepened so
+  // you can really sail without bumping the shore. Reaches out toward the rim.
+  const d = Math.hypot(x - 70, z + 90) / 230;
+  a -= Math.max(0, 1 - d * d) * 30;
+  // keep the spawn meadow + home a dry shore standing above the enlarged sea,
+  // so you still wake on land (not in the water) — a raised peninsula by origin.
+  const ds = Math.hypot(x - 0, z - 26);
+  a += Math.max(0, 1 - ds / 95) * 38;
 
   // climbable rocky outcrops — added LAST so a perch always sits
   // proud of whatever terrain it rests on (raw x,z, not warped, so
@@ -5343,14 +5348,14 @@ const canoe = (() => {
   const logM = new THREE.MeshStandardMaterial({ color: 0x6a4427, roughness: 0.85, flatShading: true });
   const lashM = new THREE.MeshStandardMaterial({ color: 0x3a2414, roughness: 0.95 });
   const mastM = new THREE.MeshStandardMaterial({ color: 0x4f3320, roughness: 0.9, flatShading: true });
-  const sailM = new THREE.MeshStandardMaterial({ color: 0xcfc4ac, roughness: 0.95, side: THREE.DoubleSide });
+  const sailM = new THREE.MeshStandardMaterial({ color: 0xcfc4ac, roughness: 0.95, side: THREE.DoubleSide, transparent: true, opacity: 0.8 });
   const flagM = new THREE.MeshBasicMaterial({ color: 0xc2402c, side: THREE.DoubleSide });
   // a BIG lashed LOG RAFT — a wide walk-on deck (~8m x 16m): nine thick logs
   // fore-aft, cross-lash spars, a TALL mast set WAY up toward the bow carrying a
   // square sail, and a masthead WIND PENNANT. You stand amidships; the sail is
   // a good ~5.5m ahead so it reads as part of the boat, not a wall on your face.
   // Logs are 'z' (fore-aft), x = beam.
-  const L = 16, R = 0.45, N = 9;
+  const L = 22, R = 0.5, N = 11;   // bigger vessel — longer + wider deck
   for (let i = 0; i < N; i++) {
     const log = new THREE.Mesh(new THREE.CylinderGeometry(R, R * 0.93, L, 8), logM);
     log.rotation.x = Math.PI / 2;                       // lay it flat, running fore-aft
@@ -5366,18 +5371,18 @@ const canoe = (() => {
   }
   // mast set WAY forward (toward the bow) — the sail sits well ahead of the
   // helmsman, a small slice of the view, trimmed out to the lee as you sail.
-  const MASTZ = 5.5;
-  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.2, 7.6, 8), mastM);
-  mast.position.set(0, R + 3.7, MASTZ);
+  const MASTZ = 7.5;
+  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.22, 8.6, 8), mastM);
+  mast.position.set(0, R + 4.2, MASTZ);
   g.add(mast);
   // the sail rides a pivot (swings to the lee). A cross-yard + a big bowed sail.
   const sailPivot = new THREE.Group();
-  sailPivot.position.set(0, R + 3.7, MASTZ);
-  const yard = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 5.8, 6), mastM);
-  yard.rotation.z = Math.PI / 2; yard.position.set(0, 2.5, 0); sailPivot.add(yard);
-  const sail = new THREE.Mesh(new THREE.PlaneGeometry(5.4, 4.8, 8, 2), sailM);
+  sailPivot.position.set(0, R + 4.2, MASTZ);
+  const yard = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 6.6, 6), mastM);
+  yard.rotation.z = Math.PI / 2; yard.position.set(0, 2.8, 0); sailPivot.add(yard);
+  const sail = new THREE.Mesh(new THREE.PlaneGeometry(6.2, 5.4, 8, 2), sailM);
   const sp = sail.geometry.attributes.position;
-  for (let i = 0; i < sp.count; i++) { const u = sp.getX(i) / 2.7; sp.setZ(i, (1 - u * u) * 0.8); }
+  for (let i = 0; i < sp.count; i++) { const u = sp.getX(i) / 3.1; sp.setZ(i, (1 - u * u) * 0.9); }
   sp.needsUpdate = true; sail.geometry.computeVertexNormals();
   sail.position.set(0, 0.1, 0);                          // centered on the mast, up near the bow
   sailPivot.add(sail);
