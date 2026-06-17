@@ -45,17 +45,17 @@ const CFG = IS_TOUCH
 //   scale/tint = render overrides (bear: 1.8 scale, dark-brown 0x3a2616)
 const MENAGERIE = {
   // ── prey ──
-  Deer:  { n: 16, speed: 2.7, gallop: 8.6, hp: 2, flee: 19, r: 0.7,
+  Deer:  { n: 16, speed: 2.7, gallop: 8.6, hp: 3, flee: 19, r: 0.7,
            keen: 1.2, aggroBias: 0.10, rear: 0.45, scale: 0.42, hpJit: true },
            // the staple: EVERYWHERE — wary, but a patient stalk earns the shot.
            // hard, not hopeless: stalk quiet to ~16m, stand still to ~8m.
-  Stag:  { n: 4, speed: 2.5, gallop: 8.3, hp: 3, flee: 17, r: 0.95,
+  Stag:  { n: 4, speed: 2.5, gallop: 8.3, hp: 5, flee: 17, r: 0.95,
            keen: 1.05, aggroBias: 0.30, rear: 0.70, scale: 0.52, hpJit: true },
   Fox:   { n: 20, speed: 3.2, gallop: 8.8, hp: 1, flee: 11, r: 0.5,
            keen: 1.25, aggroBias: 0.05, rear: 0.2, scale: 0.45, darty: true },  // little critters — LOTS, tiny, JUKE when fleeing but approachable enough to chase down — fun to hunt
-  Cow:   { n: 1, speed: 1.8, gallop: 6.2,  hp: 3, flee: 13, r: 1.6,
-           keen: 0.5, aggroBias: 0.05, rear: 0.2, gait: 'sway', scale: 1.22, hpJit: true }, // RARE now — rarer than bears
-  Horse: { n: 2, speed: 3.0, gallop: 11.5, hp: 9, flee: 20, r: 1.6,
+  Cow:   { n: 1, speed: 1.8, gallop: 6.2,  hp: 8, flee: 13, r: 1.6,
+           keen: 0.5, aggroBias: 0.05, rear: 0.2, gait: 'sway', scale: 0.74, hpJit: true }, // was tree-tall (made the player feel tiny) — sized to a real cow
+  Horse: { n: 2, speed: 3.0, gallop: 11.5, hp: 10, flee: 20, r: 1.6,
            keen: 1.2, aggroBias: 0.25, rear: 0.65, gait: 'smooth',
            hpJit: true, tanky: true, scale: 1.3 },        // 8-10 hits, impressive bolt
   // ── predator / territorial ──
@@ -68,7 +68,7 @@ const MENAGERIE = {
   Bear:  { n: 3, speed: 3.4, gallop: 12.6, hp: 11, flee: 0,  r: 1.85,
            keen: 1.0,  aggroBias: 0.85,
            hpJit: true, gait: 'bound', bearish: true,
-           aggroR: 34, dmg: 52, scale: 1.4, tint: 0x140d08, nightStalk: true },  // RARE, ~10-12 hits; bigger, darker, FASTER, hits harder — actually scary
+           aggroR: 34, dmg: 52, scale: 1.6, tint: 0x140d08, nightStalk: true },  // RARE, ~10-12 hits; bigger, darker, FASTER, hits harder — actually scary
   // ── the swarm ── little Flood-ish scuttlers that FOLLOW and LEAP at you.
   // Weak (a nip), but they come in numbers. Arrows barely faze them — FIRE is
   // the answer: a fire-arrow or a tree fire wipes them. Not OP.
@@ -3478,7 +3478,9 @@ function spawn(name, near) {
     cfg.aggroBias + (Math.random() - 0.5) * 0.5));      // ±0.25 around the bias
   // wide hp band for the tanky ones: horse 8-10, bear 6-8
   let hp = cfg.hp;
-  if (cfg.hpJit) hp = (cfg.bearish ? 6 : 8) + Math.round(Math.random() * 2 - 1) + 1;
+  // hpJit just adds a small ±15% per-individual band — it must NOT discard the
+  // species base, or a horse ends up as soft as a deer (the one-shot-horse bug).
+  if (cfg.hpJit) hp = Math.max(1, cfg.hp * (0.85 + Math.random() * 0.30));
   const hearJit = 0.85 + Math.random() * 0.30;          // 0.85–1.15
   // per-gait playback tempo: cow plods, horse is quick, bear is heavy — ±5%
   const gaitTs = (cfg.gait === 'sway' ? 0.85 : cfg.gait === 'smooth' ? 1.15
@@ -3622,7 +3624,12 @@ function animalUpdate(a, dt) {
         if (firstTake) {
           gutCarcass(a);                          // opened up, blood all around
           if (a._stuck) { player.arrows = Math.min(ARROW_MAX, player.arrows + a._stuck);
-            a._stuck = 0; renderNotes(); }        // your arrows come back with the meat
+            a._stuck = 0; renderNotes();          // your arrows come back with the meat —
+            for (let k = a.obj.children.length - 1; k >= 0; k--) {   // and leave the body with you
+              const c = a.obj.children[k];
+              if (c.userData && c.userData.stuckArrow) a.obj.remove(c);
+            }
+          }
         }
         if (!saidBlooded) {
           saidBlooded = true;
@@ -4444,19 +4451,33 @@ function cryptidUpdate(night) {
 // ── canoe: a low-poly dugout that appears when you're on water ──
 const canoe = (() => {
   const g = new THREE.Group();
-  const woodM = new THREE.MeshStandardMaterial({ color: 0x5a3a22, roughness: 0.85 });
-  const inM = new THREE.MeshStandardMaterial({ color: 0x3c2616, roughness: 1 });
-  // hull: a long box tapered to points fore & aft (scale the ends in)
-  const hull = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.34, 3.0), woodM);
+  const woodM = new THREE.MeshStandardMaterial({ color: 0x6a4427, roughness: 0.8, flatShading: true });
+  const inM = new THREE.MeshStandardMaterial({ color: 0x47301b, roughness: 1, flatShading: true });
+  const trimM = new THREE.MeshStandardMaterial({ color: 0x3a2414, roughness: 0.9 });
+  // a real rowboat — long, beamy, with raised gunwales you see OVER the edge of
+  // (so sharks read past the rail), tapered to points fore & aft.
+  const L = 4.8, W = 1.6, H = 0.66;
+  const hull = new THREE.Mesh(new THREE.BoxGeometry(W, H, L, 1, 1, 7), woodM);
   const vp = hull.geometry.attributes.position;
   for (let i = 0; i < vp.count; i++) {
-    const z = vp.getZ(i), taper = 1 - Math.min(1, Math.abs(z) / 1.5) * 0.86;
+    const z = vp.getZ(i), taper = 1 - Math.pow(Math.min(1, Math.abs(z) / (L / 2)), 1.4) * 0.92;
     vp.setX(i, vp.getX(i) * taper);
+    if (vp.getY(i) < 0) vp.setY(i, vp.getY(i) * (0.62 + 0.38 * taper));   // rounded keel
   }
   vp.needsUpdate = true; hull.geometry.computeVertexNormals();
-  const well = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.2, 2.0), inM);
-  well.position.y = 0.12;
-  g.add(hull, well);
+  hull.position.y = -0.06;
+  const well = new THREE.Mesh(new THREE.BoxGeometry(W * 0.72, 0.36, L * 0.78), inM);
+  well.position.y = 0.2;
+  // gunwale rails — the raised sides
+  const railGeo = new THREE.BoxGeometry(0.11, 0.13, L * 0.9);
+  const rl = new THREE.Mesh(railGeo, trimM); rl.position.set(-W * 0.46, 0.36, 0);
+  const rr = new THREE.Mesh(railGeo, trimM); rr.position.set(W * 0.46, 0.36, 0);
+  // two cross-benches (thwarts)
+  const benchGeo = new THREE.BoxGeometry(W * 0.82, 0.08, 0.36);
+  const b1 = new THREE.Mesh(benchGeo, trimM); b1.position.set(0, 0.38, -0.75);
+  const b2 = new THREE.Mesh(benchGeo, trimM); b2.position.set(0, 0.38, 0.95);
+  g.add(hull, well, rl, rr, b1, b2);
+  g.traverse(o => { if (o.isMesh) o.castShadow = true; });
   g.visible = false;
   return g;
 })();
@@ -4499,6 +4520,7 @@ window._tripOnset = () => _tripOnset;  // debug/test hook
 window._uTrip = () => tripUniforms.uTrip.value;   // debug/test hook
 let playerVy = 0, grounded = true, jumpQ = false;
 let inCanoe = false, canoeVX = 0, canoeVZ = 0, _wasCanoe = false;
+let _boatRoll = 0, _boatPitch = 0;   // boat rock, handed from the canoe to the camera
 // the canoe is a real boat: you push it with the move stick like walking,
 // but it carries momentum — slow to build, drifts and slides to a stop.
 
@@ -5803,11 +5825,18 @@ function arrowUpdate(dt) {
         } else if (an.cfg.hunts || an.cfg.territorial) {
           an.hp -= cleanKill ? 999 : (a.power > 0.55 ? 2 : 1);
         } else {
-          // prey: a head/clean shot drops it; a finishing shot on an
-          // already-wounded one drops it; otherwise it chips real HP so
-          // a couple of solid hits put it down — no 8-shot foxes.
-          an.hp -= (cleanKill || an.state === 'wounded') ? 999
-                   : (a.power > 0.55 ? 1 : 0.5);
+          // prey: damage scales by ZONE and draw, against size-scaled HP, so a
+          // horse is NOT one-shottable unless it's a true heart shot at near-full
+          // draw. A finishing hit on an already-wounded animal always drops it;
+          // gut/leg deal little but the wound bleeds it out over time.
+          if (an.state === 'wounded') {
+            an.hp = 0;
+          } else {
+            const dmgByZone = { vitals: 5, leg: 1, hind: 1.2, gut: 1.5 };
+            let dmg = (dmgByZone[zone] || 1.5) * (0.55 + 0.9 * a.power);
+            if (cleanKill && zone === 'vitals' && a.power > 0.9) dmg = 999;   // perfect heart shot
+            an.hp -= dmg;
+          }
         }
         // kill-feel: flesh always answers — a puff of blood at the wound
         bloodPuff(a.m.position.x, a.m.position.y, a.m.position.z);
@@ -5872,6 +5901,7 @@ function arrowUpdate(dt) {
           const vl = Math.hypot(a.v.x, a.v.y, a.v.z) || 1;
           a.m.position.addScaledVector(a.v, -0.30 / vl);  // fletching proud of the hide
           if (a.m.userData.streak) { a.m.remove(a.m.userData.streak); a.m.userData.streak = null; }
+          a.m.userData.stuckArrow = true;   // so harvest can pull it back out of the body
           an.obj.attach(a.m);     // carcass cleanup removes obj + arrows together
         } else scene.remove(a.m);
         arrows.splice(i, 1); hit = true; break;
@@ -5930,7 +5960,12 @@ function arrowUpdate(dt) {
       if (tr.x < Math.min(sx, px) - trunkR || tr.x > Math.max(sx, px) + trunkR ||
           tr.z < Math.min(sz, pz) - trunkR || tr.z > Math.max(sz, pz) + trunkR) continue;
       let t = ((tr.x - sx) * dxs + (tr.z - sz) * dzs) / segLen2;
-      t = Math.max(0, Math.min(1, t));
+      // the trunk must be FORWARD of the muzzle and the arrow APPROACHING it —
+      // otherwise standing next to a trunk and shooting AWAY catches it on frame
+      // one (the old clamp snapped t to the start point, still inside trunkR),
+      // and threading a gap snagged trunks the arrow only passes alongside.
+      if (t <= 0) continue;                              // trunk is beside/behind the muzzle
+      t = Math.min(1, t);
       const cxp = sx + dxs * t, czp = sz + dzs * t;
       if (Math.hypot(tr.x - cxp, tr.z - czp) >= trunkR) continue;
       const cyp = a._py + (py - a._py) * t;             // arrow height at closest approach
@@ -7130,10 +7165,19 @@ function tickBody() {
     });
   }
 
-  // canoe: float the hull under you, swap the controls
+  // canoe: float the hull under you, swap the controls. It ROCKS like a real
+  // boat — a constant idle roll/pitch on the water, heavier the faster you push,
+  // plus a slow vertical bob. Never glassy-smooth.
   canoe.visible = inCanoe && started;
-  if (canoe.visible) { canoe.position.set(player.x, WATER_Y - 0.16, player.z);
-    canoe.rotation.y = player.yaw; }
+  if (canoe.visible) {
+    const spd = Math.min(1, Math.hypot(canoeVX, canoeVZ) / 4.6);
+    const roll = Math.sin(t * 1.7) * 0.06 + Math.sin(t * 2.9 + 1.3) * 0.03 + spd * 0.05 * Math.sin(t * 3.4);
+    const pitch = Math.sin(t * 1.3 + 0.7) * 0.035 + spd * 0.06;        // noses down as it drives
+    const bob = Math.sin(t * 1.5) * 0.05 + Math.sin(t * 2.3 + 2.1) * 0.03;
+    canoe.position.set(player.x, WATER_Y - 0.16 + bob, player.z);
+    canoe.rotation.set(pitch, player.yaw, roll);
+    _boatRoll = roll; _boatPitch = pitch + bob * 0.3;   // hand to the camera for the same rock
+  }
   if (inCanoe !== _wasCanoe) { _wasCanoe = inCanoe;
     document.body.classList.toggle('canoe', inCanoe); }
 
@@ -7247,6 +7291,8 @@ function tickBody() {
       + (Math.sin(t * 1.7) + 0.5 * Math.sin(t * 4.3)) * swayA;
     camera.rotation.x = player.pitch
       + (Math.cos(t * 2.3) * 0.8 + Math.sin(t * 5.1) * 0.4) * swayA;
+    // in the boat the whole view ROCKS with the hull — roll + a little pitch
+    if (inCanoe) { camera.rotation.z = _boatRoll * 0.8; camera.rotation.x += _boatPitch * 0.5; }
     // kill-feel: release kick (pitch up, decays 120ms) + near-miss rattle
     if (kickT > 0) camera.rotation.x += 0.012 * (kickT / KICK_DUR);
     if (camShakeT > 0) {

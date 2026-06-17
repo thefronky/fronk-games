@@ -19,13 +19,15 @@ const only = process.argv.slice(2).filter(a => !a.startsWith('--'));
 // VIOLIN theme in D minor over warm strings. No chiptune, no 8-bit, no drums.
 const THEME = 'a lonely, expressive solo violin in D minor over warm sustained orchestral strings, film score, hopeful yet haunting, NO chiptune, no 8-bit, no synth beeps, no drums';
 const TRACKS = [
-  { name: 'music_title', ms: 34000, prompt: `The main title theme: ${THEME}. A clear singable violin melody that swells and breathes, slow, cinematic, loops gently.` },
+  { name: 'music_title', ms: 34000, prompt: `A POWERFUL cinematic thriller main theme in D minor: long, slow, sustained swelling string chords, deep low strings and cello underneath, a solo violin singing a strong simple line on top, dramatic and weighty and a little dangerous, building tension. NOT busy, not fast, NOT plucky, no chiptune, no drums. Heavy and grand. Loops.` },
   { name: 'music_trip',  ms: 42000, prompt: `The same D minor solo violin theme reimagined as a dreamlike, surreal, floating version: a softly wavering detuned solo violin with lush reverb and gentle swirling strings, hypnotic and weightless, slowly shifting, beautiful and calm, no beats, no drums.` },
   // ── stingers — short musical hits cut from the same theme/key ──
-  { name: 'sting_kill',   ms: 6000, prompt: `A short triumphant musical STINGER in D minor from a violin-led film score: a rising solo violin flourish landing on a confident resolved chord, then silence. About 3 seconds, cinematic, clean ending.` },
+  { name: 'sting_kill',   ms: 6000, prompt: `A short, warm, HOPEFUL musical resolve, violin-led: a gentle solo violin and soft strings rise and settle onto a comforting, grateful major chord — relief and quiet hope, the feeling of being fed and safe. Tender, NOT jarring, not sharp, not a stab. About 3 seconds, soft clean ending.` },
   { name: 'sting_flee',   ms: 6000, prompt: `A short wistful musical STINGER in D minor, violin-led: a soft falling two-note violin sigh, a missed chance, gentle and brief, then silence. About 2 seconds.` },
   { name: 'sting_escape', ms: 7000, prompt: `A short dramatic musical STINGER in D minor, violin-led: tense strings surge then exhale into relief, a narrow escape, brief, then silence. About 3 seconds.` },
   { name: 'sting_boat',   ms: 7000, prompt: `A short adventurous musical STINGER in D minor, violin-led: solo violin and strings lift and swell upward as if setting off on a journey, brief, then settle. About 3 seconds.` },
+  // a building dread loop for the shark chase — intensity ramps in-engine by proximity
+  { name: 'music_shark',  ms: 38000, prompt: `A building loop of predatory dread for a hunt-at-sea chase: low ominous double-bass and cello pulses that quicken and tighten, dissonant high string swells, rising tension and danger, cinematic, NO drums, loops seamlessly. Original — do not imitate any existing film score.` },
 ];
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 for (const tr of TRACKS) {

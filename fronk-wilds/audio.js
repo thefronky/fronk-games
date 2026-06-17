@@ -245,12 +245,13 @@ export class AudioEngine {
     const C = this.ctx;
     const names = [
       'impact_wood_1','impact_wood_2','impact_ground_1','impact_ground_2',
-      'impact_flesh_1','impact_flesh_2','impact_water',
-      'bow_release_1','bow_release_2','bow_draw',
+      'impact_flesh_1','impact_flesh_2','impact_water_1','impact_water_2',
+      'bow_release_1','bow_release_2','bow_draw_1','bow_draw_2',
       'bear_growl_1','bear_growl_2','bear_charge','bear_rustle',
       'step_grass_1','step_grass_2','step_grass_3','step_rock_1','step_rock_2','step_rock_3',
       'step_sand_1','step_sand_2','step_sand_3','twig_snap_1','twig_snap_2',
       'breath_1','breath_2','thud','fire_catch',
+      'shark_splash_1','shark_splash_2','shark_lunge',
     ];
     names.forEach(async (name) => {
       try {
@@ -281,12 +282,21 @@ export class AudioEngine {
         b.noise.gain.setTargetAtTime(0, C.currentTime, 0.8);   // crossfade synth → recording
       } catch (e) {}
     });
-    // ── MUSIC tracks ── title + trip. The daytime ambient stays procedural.
-    ['title', 'trip'].forEach(async (key) => {
+    // ── MUSIC tracks ── title + trip + the daytime ambient bed. The daytime
+    // 'base' track REPLACES the old procedural ambient (pads/melody/jaw-harp),
+    // which read as 8-bit/chiptune — once it loads we mute the synth musicBus
+    // and loop the recorded underscore instead.
+    ['title', 'trip', 'base'].forEach(async (key) => {
       try {
         const r = await fetch('sfx/music_' + key + '.mp3');
         if (!r.ok) return;
         this._music[key] = await C.decodeAudioData(await r.arrayBuffer());
+        if (key === 'base') {
+          this._baseTrack = this._startTrack('base', { gain: 0.45, fade: 4 });
+          // silence the procedural ambient (it still computes into a dead bus)
+          this.musicBus.gain.setTargetAtTime(0.0001, C.currentTime, 1.5);
+          this._musicLevel = 0.0001;        // keep the foley sidechain from restoring it
+        }
         // if the title was already asked for before the track finished loading,
         // start it now and fade the procedural theme out from under it.
         if (key === 'title' && this._wantTitle && !this._titleH) {
@@ -568,6 +578,14 @@ export class AudioEngine {
     if (!this.started) return;
     const C = this.ctx, t = C.currentTime;
     const k = Math.max(0, Math.min(1, t01 || 0));
+    // real recorded bow-pull (one-shot, fired once at the START of the draw)
+    // instead of the synthetic creak that read as electronic.
+    if (this._sfx['bow_draw_1'] || this._sfx['bow_draw']) {
+      if (k > 0.04 && !this._drawingSnd) { this._drawingSnd = true; this._play('bow_draw', { gain: 0.7, n: 2, rate: 0.97 }); }
+      if (k <= 0.04) this._drawingSnd = false;
+      this._creakOn = true; this._creakT = 0.15;
+      return;
+    }
     if (!this._creak) {
       const src = this._noiseLoop();
       const lp = C.createBiquadFilter(); lp.type = 'lowpass';
@@ -662,7 +680,7 @@ export class AudioEngine {
       const d0 = Math.max(0, Math.min(1, dist01 || 0));
       const map = { flesh: 'impact_flesh', wood: 'impact_wood', water: 'impact_water', ground: 'impact_ground' };
       const base = map[kind] || 'impact_ground';
-      if (this._play(base, { gain: (1 - d0 * 0.72) * 0.9, rate: 1, n: base === 'impact_water' ? 1 : 2 })) return;
+      if (this._play(base, { gain: (1 - d0 * 0.72) * 0.9, rate: 1, n: 2 })) return;
     }
     const C = this.ctx, t = C.currentTime;
     const d = Math.max(0, Math.min(1, dist01 || 0));

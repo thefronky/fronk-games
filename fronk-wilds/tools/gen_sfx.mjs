@@ -24,13 +24,13 @@ const FORCE = process.argv.includes('--force');
 const DRY = ', isolated single sound effect, dry, close-mic, no music, no reverb, no speech';
 const MANIFEST = [
   // ── arrow impacts (by surface) ──
-  { name: 'impact_wood',  n: 2, dur: 1.0, prompt: 'an arrow thwacks hard into a solid tree trunk, sharp woody knock, short' },
-  { name: 'impact_ground',n: 2, dur: 1.0, prompt: 'an arrow stabs into soft dirt and grass, dull muffled thud, short' },
-  { name: 'impact_flesh', n: 2, dur: 1.0, prompt: 'an arrow strikes flesh, wet meaty impact thump, short, visceral' },
-  { name: 'impact_water', n: 1, dur: 1.0, prompt: 'an arrow plunges into a lake, quick water splash plonk' },
+  { name: 'impact_wood',  n: 2, dur: 1.0, influence: 0.5, prompt: 'an arrow slams hard into a thick solid tree trunk, sharp deep woody THOCK with a faint shaft quiver, dry, close, short' },
+  { name: 'impact_ground',n: 2, dur: 1.0, influence: 0.5, prompt: 'an arrow stabs deep into soft earth and grass, dull muffled earthy thud with a tiny soil scatter, short' },
+  { name: 'impact_flesh', n: 2, dur: 1.0, influence: 0.5, prompt: 'an arrow strikes a large animal body, heavy wet meaty thwack and flesh impact, visceral, brutal, short, no scream' },
+  { name: 'impact_water', n: 2, dur: 1.0, influence: 0.5, prompt: 'an arrow plunges into a lake, sharp water splash and plonk with a small after-ripple, short' },
   // ── the bow ──
   { name: 'bow_release',  n: 2, dur: 1.0, prompt: 'a wooden longbow looses an arrow, string snap and whoosh, taut twang' },
-  { name: 'bow_draw',     n: 1, dur: 1.6, prompt: 'drawing a wooden longbow, creak of bending wood and stretching string under tension' },
+  { name: 'bow_draw',     n: 2, dur: 1.8, influence: 0.4, prompt: 'the real sound of a person slowly drawing a wooden longbow: creaking bending wood, the leather grip flexing and the bowstring stretching taut under rising tension, organic close-mic foley, woody and natural, NO electronic tones, no synth, no music' },
   // ── the bear ──
   { name: 'bear_growl',   n: 2, dur: 2.0, prompt: 'a large angry grizzly bear roars and growls, deep guttural, menacing' },
   { name: 'bear_charge',  n: 1, dur: 2.2, prompt: 'a huge bear charges, thundering heavy footfalls on earth with a low roar' },
@@ -44,6 +44,9 @@ const MANIFEST = [
   { name: 'breath',       n: 2, dur: 1.6, prompt: 'a single human exhale, tired heavy breath out through the nose, close, calm' },
   { name: 'thud',         n: 1, dur: 0.9, prompt: 'a heavy body blow gut punch, dull winded impact, short' },
   { name: 'fire_catch',   n: 1, dur: 1.4, prompt: 'a whoosh as a fire suddenly catches and ignites, flames flaring up' },
+  // ── sharks ──
+  { name: 'shark_splash', n: 2, dur: 1.2, prompt: 'a large fish or shark thrashing and splashing hard at the surface of a lake, big violent water splash, close' },
+  { name: 'shark_lunge',  n: 1, dur: 1.4, prompt: 'a huge shark bursts up out of the water in a violent surging splash, sudden explosive water lunge, menacing' },
   // ── seamless ambience BEDS (looped in-engine; long clips for smooth loops) ──
   { name: 'bed_wind',  n: 1, dur: 16, influence: 0.3, prompt: 'gentle steady wind blowing through a meadow and trees, soft continuous breeze, calm ambience' },
   { name: 'bed_water', n: 1, dur: 16, influence: 0.3, prompt: 'calm lake water lapping gently at a shoreline, soft continuous ripples, peaceful ambience' },
