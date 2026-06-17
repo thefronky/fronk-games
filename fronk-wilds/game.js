@@ -4963,37 +4963,71 @@ function cryptidUpdate(night) {
 // ── canoe: a low-poly dugout that appears when you're on water ──
 const canoe = (() => {
   const g = new THREE.Group();
-  const woodM = new THREE.MeshStandardMaterial({ color: 0x6a4427, roughness: 0.8, flatShading: true });
-  const inM = new THREE.MeshStandardMaterial({ color: 0x47301b, roughness: 1, flatShading: true });
-  const trimM = new THREE.MeshStandardMaterial({ color: 0x3a2414, roughness: 0.9 });
-  // a real rowboat — long, beamy, with raised gunwales you see OVER the edge of
-  // (so sharks read past the rail), tapered to points fore & aft.
-  const L = 4.8, W = 1.6, H = 0.66;
-  const hull = new THREE.Mesh(new THREE.BoxGeometry(W, H, L, 1, 1, 7), woodM);
-  const vp = hull.geometry.attributes.position;
-  for (let i = 0; i < vp.count; i++) {
-    const z = vp.getZ(i), taper = 1 - Math.pow(Math.min(1, Math.abs(z) / (L / 2)), 1.4) * 0.92;
-    vp.setX(i, vp.getX(i) * taper);
-    if (vp.getY(i) < 0) vp.setY(i, vp.getY(i) * (0.62 + 0.38 * taper));   // rounded keel
+  const logM = new THREE.MeshStandardMaterial({ color: 0x6a4427, roughness: 0.85, flatShading: true });
+  const lashM = new THREE.MeshStandardMaterial({ color: 0x3a2414, roughness: 0.95 });
+  const mastM = new THREE.MeshStandardMaterial({ color: 0x4f3320, roughness: 0.9, flatShading: true });
+  const sailM = new THREE.MeshStandardMaterial({ color: 0xcfc4ac, roughness: 0.95, side: THREE.DoubleSide });
+  // a lashed LOG RAFT — five logs running fore-aft, two cross-lash spars over
+  // them, a stubby mast and a simple bowed sail on a pivot. Wide and low so a
+  // shark reads right up to the deck. Logs are 'z' (fore-aft), x = beam.
+  const L = 4.8, R = 0.26, N = 5;
+  for (let i = 0; i < N; i++) {
+    const log = new THREE.Mesh(new THREE.CylinderGeometry(R, R * 0.92, L, 7), logM);
+    log.rotation.x = Math.PI / 2;                       // lay it flat, running fore-aft
+    log.position.set((i - (N - 1) / 2) * (R * 2.02), 0, 0);
+    g.add(log);
   }
-  vp.needsUpdate = true; hull.geometry.computeVertexNormals();
-  hull.position.y = -0.06;
-  const well = new THREE.Mesh(new THREE.BoxGeometry(W * 0.72, 0.36, L * 0.78), inM);
-  well.position.y = 0.2;
-  // gunwale rails — the raised sides
-  const railGeo = new THREE.BoxGeometry(0.11, 0.13, L * 0.9);
-  const rl = new THREE.Mesh(railGeo, trimM); rl.position.set(-W * 0.46, 0.36, 0);
-  const rr = new THREE.Mesh(railGeo, trimM); rr.position.set(W * 0.46, 0.36, 0);
-  // two cross-benches (thwarts)
-  const benchGeo = new THREE.BoxGeometry(W * 0.82, 0.08, 0.36);
-  const b1 = new THREE.Mesh(benchGeo, trimM); b1.position.set(0, 0.38, -0.75);
-  const b2 = new THREE.Mesh(benchGeo, trimM); b2.position.set(0, 0.38, 0.95);
-  g.add(hull, well, rl, rr, b1, b2);
+  // two cross-lash spars sitting ON TOP of the logs (the binding poles)
+  const W = N * R * 2.02;
+  const sparGeo = new THREE.CylinderGeometry(0.07, 0.07, W + 0.2, 6);
+  for (const sz of [-L * 0.32, L * 0.32]) {
+    const spar = new THREE.Mesh(sparGeo, lashM);
+    spar.rotation.z = Math.PI / 2; spar.position.set(0, R + 0.05, sz);
+    g.add(spar);
+  }
+  // mast a touch forward of center, with a sail on a pivot group so it can swing
+  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 3.0, 6), mastM);
+  mast.position.set(0, R + 1.5, -0.2);
+  g.add(mast);
+  const sailPivot = new THREE.Group();
+  sailPivot.position.set(0, R + 1.5, -0.2);            // hinge at the mast
+  const sail = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 2.2, 6, 1), sailM);
+  // bow the sail so it reads as wind-filled cloth, not a flat board
+  const sp = sail.geometry.attributes.position;
+  for (let i = 0; i < sp.count; i++) {
+    const u = sp.getX(i) / 1.1;                          // -1..1 across the sail
+    sp.setZ(i, (1 - u * u) * 0.35);                      // belly outward
+  }
+  sp.needsUpdate = true; sail.geometry.computeVertexNormals();
+  sail.position.set(1.1, 0, 0);                          // hangs off one side of the mast
+  sailPivot.add(sail);
+  g.add(sailPivot);
   g.traverse(o => { if (o.isMesh) o.castShadow = true; });
+  g._sailPivot = sailPivot;     // game swings this to the lee side each frame
+  g._sail = sail;
   g.visible = false;
   return g;
 })();
 scene.add(canoe);
+
+// ── offshore swell ── two crossing directional waves. Amplitude is ~0 at the
+// bank and grows with how DEEP the water is (WATER_Y minus the lake floor), so
+// it's glassy near shore and rolls out in the deep. Returns the surface height
+// plus the gradient (gx,gz) for pitch/roll, and `o` = how open-water you are
+// (0 shallow → 1 deep). Cheap: two sines, no allocation.
+function waveAt(x, z, t) {
+  const depth = Math.max(0, WATER_Y - heightAt(x, z));   // how deep below the surface
+  const o = Math.max(0, Math.min(1, (depth - 0.6) / 5));  // ~0 at the bank, 1 far out
+  const amp = o * 0.55;                                    // wave height offshore
+  // two crossing swells, different headings/wavelengths/speeds
+  const k1 = 0.16, p1 = (x * 0.7 + z * 0.71) * k1 + t * 1.1;
+  const k2 = 0.11, p2 = (x * -0.6 + z * 0.8) * k2 + t * 0.8;
+  const h = (Math.sin(p1) * 0.62 + Math.sin(p2) * 0.38) * amp;
+  // analytic slope (∂h/∂x, ∂h/∂z) → drives the raft's pitch & roll
+  const gx = (Math.cos(p1) * 0.62 * 0.7 * k1 + Math.cos(p2) * 0.38 * -0.6 * k2) * amp;
+  const gz = (Math.cos(p1) * 0.62 * 0.71 * k1 + Math.cos(p2) * 0.38 * 0.8 * k2) * amp;
+  return { h, gx, gz, o };
+}
 
 // ───────────────────────── player ─────────────────────────
 // the calm clearing you wake in — every life starts and respawns here
@@ -5034,8 +5068,13 @@ window._uTrip = () => tripUniforms.uTrip.value;   // debug/test hook
 let playerVy = 0, grounded = true, jumpQ = false;
 let inCanoe = false, canoeVX = 0, canoeVZ = 0, _wasCanoe = false;
 let _boatRoll = 0, _boatPitch = 0;   // boat rock, handed from the canoe to the camera
-// the canoe is a real boat: you push it with the move stick like walking,
-// but it carries momentum — slow to build, drifts and slides to a stop.
+// the raft is a SAILING vessel: left/right tacks the heading, the sail catches
+// the wind, and the boat carries heavy momentum — slow to build, long to slide.
+let raftYaw = 0;                 // the raft's own heading (decoupled from the camera)
+let windDir = Math.PI * 0.35;    // where the wind blows TO, in world radians
+let windStr = 0.7;               // 0..1 wind strength — drifts slowly each frame
+let _raftAirborne = false, _raftAirVy = 0;   // wave-jump: launched off a steep face
+let _raftCreakT = 0;             // occasional timber-creak cooldown
 
 // ── the wake-up: a ~3.5s cinematic intro that plays on enter and on
 // every respawn. Driven entirely by introT on the dt loop (no setTimeout),
@@ -7172,6 +7211,11 @@ function tickBody() {
   puffUpdate(dt);                  // blood puff plays through the hitstop
   windUniforms.uTime.value = t;
   waterUniforms.uTime.value = t;
+  // ── wind drift ── the breeze wanders slowly in direction and strength, so a
+  // good point of sail isn't a fixed setting — you read it and re-trim. Cheap:
+  // two slow sines, no allocation, bounded.
+  windDir += Math.sin(t * 0.013) * 0.04 * dt;
+  windStr = 0.55 + 0.4 * (0.5 + 0.5 * Math.sin(t * 0.021 + 1.7));
   // the trees only move on the trip — strongest on that first wide-eyed L1,
   // eased in/out so it swells on rather than popping. (uTrip=0 → rigid.)
   // trees come alive FIRST on the come-up (rides _tripTreeEnv, the early envelope)
@@ -7382,32 +7426,53 @@ function tickBody() {
     let nx = player.x + (-sin * mz + cos * mx) * sp * dt;
     let nz = player.z + (-cos * mz - sin * mx) * sp * dt;
     if (inCanoe) {
-      // ── the canoe ── a substantial boat. Push it with the move stick,
-      // same as walking (relative to where you're looking) — but it carries
-      // MOMENTUM: builds speed slowly, then drifts and slides to a stop. No
-      // jump. The view is never touched by the controls (no more oar jitter).
-      const sinY = Math.sin(player.yaw), cosY = Math.cos(player.yaw);
-      const ACCEL = 6.5, MAXV = 4.6;
-      canoeVX += (-sinY * mz + cosY * mx) * ACCEL * dt;
-      canoeVZ += (-cosY * mz - sinY * mx) * ACCEL * dt;
-      const drag = Math.pow(0.5, dt);                    // long glide / drift
+      // ── SAILING the raft ── hold LEFT/RIGHT (mx) to tack the heading; the
+      // sail does the pushing. Thrust depends on your point of sail: a broad
+      // reach (sailing across/with the wind) is fast, sailing straight INTO
+      // the wind stalls you (you can't point dead upwind). Heavy momentum —
+      // slow to build, long to slide. The view is never touched by the helm.
+      const RAFT_ACCEL = 7.0, RAFT_MAXV = 11;
+      raftYaw -= mx * 1.4 * dt;             // helm: left/right swings the bow
+      // angle between where the bow points and where the wind blows TO
+      const rel = Math.atan2(Math.sin(raftYaw - windDir), Math.cos(raftYaw - windDir));
+      const ar = Math.abs(rel);
+      // sail efficiency: ~0 dead into the wind (ar≈π), peaks on a broad reach,
+      // decent running downwind (ar≈0). No-go zone close-hauled into the wind.
+      const trim = ar < Math.PI * 0.28 ? 0.55 + ar / (Math.PI * 0.28) * 0.45   // run → reach
+                 : ar > Math.PI * 0.82 ? Math.max(0, (Math.PI - ar) / (Math.PI * 0.18)) * 0.5  // stall upwind
+                 : 1.0;                                                          // beam/broad reach
+      const thrust = RAFT_ACCEL * windStr * trim;
+      canoeVX += Math.sin(raftYaw) * thrust * dt;
+      canoeVZ += Math.cos(raftYaw) * thrust * dt;
+      const drag = Math.pow(0.62, dt);                   // long glide / drift
       canoeVX *= drag; canoeVZ *= drag;
       const cspd = Math.hypot(canoeVX, canoeVZ);
-      if (cspd > MAXV) { canoeVX *= MAXV / cspd; canoeVZ *= MAXV / cspd; }
-      // soft paddle-dip while actively pushing
-      if (mx || mz) { tickBody._rowSnd = (tickBody._rowSnd || 0) - dt;
-        if (tickBody._rowSnd <= 0) { tickBody._rowSnd = 0.7; if (audio.impact) audio.impact('water', 0.5); } }
+      if (cspd > RAFT_MAXV) { canoeVX *= RAFT_MAXV / cspd; canoeVZ *= RAFT_MAXV / cspd; }
+      const speed01 = Math.min(1, cspd / RAFT_MAXV);
+      // swing the sail to the LEE side (downwind of the mast), more open as it
+      // catches more wind — purely cosmetic; the pivot lives on the mesh.
+      if (canoe._sailPivot) {
+        const lee = rel > 0 ? 1 : -1;
+        const target = lee * (0.3 + trim * 0.9);
+        canoe._sailPivot.rotation.y += (target - canoe._sailPivot.rotation.y) * Math.min(1, dt * 3);
+      }
+      // continuous sail/wind hiss + the occasional timber creak
+      if (audio.setSail) audio.setSail(speed01, windStr);
+      _raftCreakT -= dt;
+      if (_raftCreakT <= 0) { _raftCreakT = 2.4 + Math.random() * 3.5; if (audio.raftCreak) audio.raftCreak(); }
       const lim2 = WORLD * 0.47;
       let cx = Math.max(-lim2, Math.min(lim2, player.x + canoeVX * dt));
       let cz = Math.max(-lim2, Math.min(lim2, player.z + canoeVZ * dt));
       const wy = heightAt(cx, cz);
       if (wy > WATER_Y - 0.12) {            // nosed into the shallows → step out onto land
         inCanoe = false; canoeVX = 0; canoeVZ = 0;
+        _raftAirborne = false; _raftAirVy = 0;
+        if (audio.setSail) audio.setSail(0, windStr);    // cut the sail hiss ashore
         player.x = cx; player.z = cz; player.y = wy; grounded = true; player.airY = wy;
       } else {
         player.x = cx; player.z = cz; player.y = WATER_Y; grounded = true; player.airY = WATER_Y;
       }
-      _moveLvl = Math.min(1, cspd / MAXV);
+      _moveLvl = speed01;
     } else {
     // tree collision — pushes you out at trunk level. BUT if you're up at
     // canopy height (a mushroom trip), you're ON the tree, not walking into
@@ -7526,6 +7591,7 @@ function tickBody() {
       if (audio.themeSting) audio.themeSting('sting_boat', 0.85);   // setting off — adventure lift
       const sinY = Math.sin(player.yaw), cosY = Math.cos(player.yaw);
       canoeVX = (-sinY * mz + cosY * mx) * 2.0; canoeVZ = (-cosY * mz - sinY * mx) * 2.0;
+      raftYaw = player.yaw;            // shove off pointing where you were facing
       player.x = nx; player.z = nz; player.y = WATER_Y;
     }
     }  // end !inCanoe walk branch
@@ -7679,18 +7745,57 @@ function tickBody() {
     });
   }
 
-  // canoe: float the hull under you, swap the controls. It ROCKS like a real
-  // boat — a constant idle roll/pitch on the water, heavier the faster you push,
-  // plus a slow vertical bob. Never glassy-smooth.
+  // raft: ride the swell under you. It sits ON the wave height and tilts to the
+  // wave's SLOPE (pitch/roll from the gradient) — calm at the bank, rolling out
+  // deep. The mesh rotates by raftYaw (its own heading), decoupled from the
+  // camera. JET/CRASH: drive fast up a steep wave face and the raft launches
+  // off the crest, hangs, then slams down — a camera punch + a big splash.
   canoe.visible = inCanoe && started;
   if (canoe.visible) {
-    const spd = Math.min(1, Math.hypot(canoeVX, canoeVZ) / 4.6);
-    const roll = Math.sin(t * 1.7) * 0.06 + Math.sin(t * 2.9 + 1.3) * 0.03 + spd * 0.05 * Math.sin(t * 3.4);
-    const pitch = Math.sin(t * 1.3 + 0.7) * 0.035 + spd * 0.06;        // noses down as it drives
-    const bob = Math.sin(t * 1.5) * 0.05 + Math.sin(t * 2.3 + 2.1) * 0.03;
-    canoe.position.set(player.x, WATER_Y - 0.16 + bob, player.z);
-    canoe.rotation.set(pitch, player.yaw, roll);
-    _boatRoll = roll; _boatPitch = pitch + bob * 0.3;   // hand to the camera for the same rock
+    const cspd = Math.hypot(canoeVX, canoeVZ);
+    const spd = Math.min(1, cspd / 11);
+    const wv = waveAt(player.x, player.z, t);
+    // the bow's local fore-aft / lateral slope, from the wave gradient
+    const fwdSlope = wv.gx * Math.sin(raftYaw) + wv.gz * Math.cos(raftYaw);
+    const latSlope = wv.gx * Math.cos(raftYaw) - wv.gz * Math.sin(raftYaw);
+    // ── wave-jump ── moving fast UP a steep face (slope rising toward the bow)
+    // flings the raft off the crest. Bounded airtime, integrated like the player.
+    if (!_raftAirborne && cspd > 6 && fwdSlope > 0.12 && wv.o > 0.4) {
+      _raftAirborne = true;
+      _raftAirVy = 2.2 + cspd * 0.32 + fwdSlope * 6;     // takeoff kick scales with speed/steepness
+      if (audio.waveLaunch) audio.waveLaunch(Math.min(1, _raftAirVy / 9));
+    }
+    let rideY = WATER_Y - 0.1 + wv.h;
+    let pitch, roll;
+    if (_raftAirborne) {
+      _raftAirVy -= 16 * dt;                              // gravity
+      rideY = (canoe._airY ?? rideY) + _raftAirVy * dt;
+      canoe._airY = rideY;
+      pitch = -_raftAirVy * 0.05;                         // nose follows the arc
+      roll = Math.sin(t * 2.4) * 0.04;
+      if (rideY <= WATER_Y - 0.1 + wv.h) {               // splash-down
+        const impact = -_raftAirVy;
+        _raftAirborne = false; canoe._airY = undefined;
+        rideY = WATER_Y - 0.1 + wv.h;
+        if (impact > 3) {                                 // a real crash, not a soft set-down
+          const imp01 = Math.min(1, impact / 12);
+          camShakeT = SHAKE_DUR * (1.2 + imp01 * 1.8); kickT = KICK_DUR;
+          if (audio.waveCrash) audio.waveCrash(imp01);
+          // big splash ring under the bow
+          for (let i = 0; i < 8; i++) {
+            const a = Math.random() * Math.PI * 2, rr = Math.random() * 1.6;
+            dustPuff(player.x + Math.cos(a) * rr, WATER_Y + 0.05, player.z + Math.sin(a) * rr, 0xbfd4e0, 1.3);
+          }
+        } else if (audio.waveSlap) audio.waveSlap(spd);
+      }
+    } else {
+      // riding the surface: idle rock + the wave's own tilt (more offshore)
+      pitch = Math.sin(t * 1.3 + 0.7) * 0.025 + fwdSlope * 1.6 + spd * 0.04;
+      roll = Math.sin(t * 1.7) * 0.05 * (0.4 + wv.o) + latSlope * 1.6 + spd * 0.04 * Math.sin(t * 3.4);
+    }
+    canoe.position.set(player.x, rideY, player.z);
+    canoe.rotation.set(pitch, raftYaw, roll);            // heading is the raft's own, not the camera's
+    _boatRoll = roll; _boatPitch = pitch;                // hand to the camera for the same rock
   }
   if (inCanoe !== _wasCanoe) { _wasCanoe = inCanoe;
     document.body.classList.toggle('canoe', inCanoe); }

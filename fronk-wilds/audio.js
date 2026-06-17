@@ -255,6 +255,8 @@ export class AudioEngine {
       'deer_call_1','deer_call_2','stag_call_1','stag_call_2',
       'fox_call_1','fox_call_2','cow_moo_1','cow_moo_2',
       'horse_call_1','horse_call_2','wolf_call_1','wolf_call_2',
+      'raft_creak_1','raft_creak_2','wave_slap_1','wave_slap_2',
+      'wave_launch','wave_crash_1','wave_crash_2',
     ];
     names.forEach(async (name) => {
       try {
@@ -285,6 +287,16 @@ export class AudioEngine {
         b.noise.gain.setTargetAtTime(0, C.currentTime, 0.8);   // crossfade synth → recording
       } catch (e) {}
     });
+    // ── sail loop ── a continuous wind-in-the-sail bed for the raft, on its own
+    // gain that setSail() ramps from speed/wind. Lazy-started on first setSail so
+    // it never plays ashore; a no-op until the sample loads.
+    (async () => {
+      try {
+        const r = await fetch('sfx/sail_wind.mp3');
+        if (!r.ok) return;
+        this._sailBuf = await C.decodeAudioData(await r.arrayBuffer());
+      } catch (e) {}
+    })();
     // ── MUSIC tracks ── title + trip + the daytime ambient bed. The daytime
     // 'base' track REPLACES the old procedural ambient (pads/melody/jaw-harp),
     // which read as 8-bit/chiptune — once it loads we mute the synth musicBus
@@ -1400,6 +1412,40 @@ export class AudioEngine {
   }
   setGround(kind) {                 // footstep material from the game
     this._ground = (kind === 'rock' || kind === 'sand') ? kind : 'grass';
+  }
+  // ── raft sailing ── one continuous sail-wind loop (lazy-started) whose level
+  // tracks speed × wind, plus a few wood/water one-shots. speed01, wind01 0..1.
+  setSail(speed01 = 0, wind01 = 0.7) {
+    if (!this.started || this.muted) return;
+    const C = this.ctx, t = C.currentTime;
+    const lvl = Math.max(0, Math.min(1, speed01)) * (0.4 + 0.6 * Math.max(0, Math.min(1, wind01)));
+    // lazy-start the loop on first real sailing; no-op if the sample isn't loaded
+    if (!this._sailNode) {
+      if (!this._sailBuf || lvl <= 0.001) return;
+      const src = C.createBufferSource(); src.buffer = this._sailBuf; src.loop = true;
+      const g = C.createGain(); g.gain.value = 0.0001;
+      src.connect(g).connect(this.foleyBus);
+      try { src.start(); } catch (e) { return; }
+      this._sailNode = src; this._sailGain = g;
+    }
+    this._sailGain.gain.setTargetAtTime(0.0001 + lvl * 0.5, t, 0.25);   // smooth ramp, never clicks
+  }
+  raftCreak() {                     // occasional timber/rope groan while afloat
+    if (!this.started || this.muted) return;
+    this._play('raft_creak', { gain: 0.5, n: 2, rate: 0.96 + Math.random() * 0.08 });
+  }
+  waveSlap(speed01 = 0) {           // soft set-down after a small launch
+    if (!this.started || this.muted) return;
+    this._play('wave_slap', { gain: 0.45 + Math.max(0, Math.min(1, speed01)) * 0.3, n: 2 });
+  }
+  waveLaunch(power01 = 0) {         // lifting off a crest
+    if (!this.started || this.muted) return;
+    this._play('wave_launch', { gain: 0.4 + Math.max(0, Math.min(1, power01)) * 0.4 });
+  }
+  waveCrash(impact01 = 0) {         // hard splash-down after a real jump
+    if (!this.started || this.muted) return;
+    const i = Math.max(0, Math.min(1, impact01));
+    this._play('wave_crash', { gain: 0.6 + i * 0.4, n: 2, rate: 1.04 - i * 0.12 });
   }
   _step(speed) {                   // footstep (shared noise, no alloc)
     // speed: 0..1 gait level. The hunter's noise is a real dB curve — a

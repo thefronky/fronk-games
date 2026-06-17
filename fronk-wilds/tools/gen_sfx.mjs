@@ -59,6 +59,12 @@ const MANIFEST = [
   { name: 'bed_water', n: 1, dur: 16, influence: 0.3, prompt: 'calm lake water lapping gently at a shoreline, soft continuous ripples, peaceful ambience' },
   { name: 'bed_rain',  n: 1, dur: 16, influence: 0.3, prompt: 'steady soft rainfall on grass and leaves, gentle continuous rain ambience, no thunder' },
   { name: 'bed_fire',  n: 1, dur: 16, influence: 0.3, prompt: 'a large campfire burning steadily, continuous crackling roar of flames, close ambience' },
+  // ── raft sailing (sail_wind looped in-engine; the rest one-shots) ──
+  { name: 'sail_wind',   n: 1, dur: 12, influence: 0.3, prompt: 'wind filling and luffing a cloth sail on open water, steady rushing breeze flapping canvas with gentle hull wash, continuous, no music' },
+  { name: 'raft_creak',  n: 2, dur: 1.4, prompt: 'wet wooden logs and rope lashings creaking and groaning as a raft flexes on the water, organic timber and cordage strain, no music' },
+  { name: 'wave_slap',   n: 2, dur: 1.0, prompt: 'a flat wooden raft slaps down onto a lake wave, soft water splash and hull thump, short, natural' },
+  { name: 'wave_launch', n: 1, dur: 1.0, prompt: 'a raft rushes up a wave face and lifts off the crest, surging water whoosh and a brief airborne lull, natural' },
+  { name: 'wave_crash',  n: 2, dur: 1.4, prompt: 'a heavy raft crashes down hard into open water after a jump, big explosive splash and spray with a deep wooden boom, dramatic, natural' },
 ];
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
