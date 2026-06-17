@@ -21,7 +21,7 @@ window._audio = audio;
 const IS_TOUCH = matchMedia('(pointer: coarse)').matches;
 const WORLD = 860;            // square world size
 const WATER_Y = 2.1;          // lake level
-const EYE = 2.85;  // stand TALL — grass tops ~1.3m; earlier 2.3 still read short, so this puts the eyeline clearly head-and-shoulders above the field
+const EYE = 3.6;   // stand TALL — 2.3 then 2.85 still read short against the world's scale; this lifts the eyeline to a clear 6-foot-plus stance over the field
 const CFG = IS_TOUCH
   ? { grass: 30000, trees: 2200, bushes: 380, rocks: 150, px: 2, shadow: 1536, segs: 230,
       flowers: 2200, tufts: 1400, mushrooms: 260, bedFlowers: 1300 }
@@ -2851,10 +2851,12 @@ function updateMist(t, night) {
     u.a += u.v * 0.016;
     const x = player.x + Math.cos(u.a) * u.r, z = player.z + Math.sin(u.a) * u.r;
     const gy = heightAt(x, z);
-    // valley bias — mist pools in low ground, thins out on the slopes
-    const low = Math.max(0.2, Math.min(1.3, 1.35 - (gy - WATER_Y) / 12));
+    // valley bias — mist pools in LOW ground only, fully gone on slopes/peaks
+    const low = Math.max(0, Math.min(1.3, 1.45 - (gy - WATER_Y) / 8));
+    // never bloom right on the lens (no grey blob in your face); fade with closeness
+    const near = Math.min(1, Math.max(0, (Math.hypot(x - player.x, z - player.z) - 7) / 7));
     sp.position.set(x, gy + 1.6 + Math.sin(t * 0.2 + u.ph) * 0.4, z);
-    sp.material.opacity = Math.min(0.5, edge * low * (0.2 + 0.12 * Math.sin(t * 0.13 + u.ph)));
+    sp.material.opacity = Math.min(0.5, edge * low * near * (0.2 + 0.12 * Math.sin(t * 0.13 + u.ph)));
   }
 }
 
@@ -4293,7 +4295,8 @@ function killAnimal(a, suffered = false) {
     a.obj.position.y = heightAt(a.obj.position.x, a.obj.position.z) + 0.5; }
   score[a.name] = (score[a.name] || 0) + 1;
   spawnCarrion(a);                               // scavengers gather over the kill
-  if (audio.killStinger) audio.killStinger();   // the theme punctuates every kill
+  // the violin theme punctuates every kill (procedural stinger as fallback)
+  if (!(audio.themeSting && audio.themeSting('sting_kill', 0.95)) && audio.killStinger) audio.killStinger();
   if (a.isCryptid) {
     say('killCryptid', 7000);
     audio.stinger(); cryptid = null; a.t = 20;
@@ -5120,9 +5123,11 @@ window._bearHitFX = () => bearHitFX();   // debug/test hook
 // a ground animal can only claw you when you're actually on the ground —
 // not when you've jumped/climbed up a tree or a cloud well above the terrain.
 function meleeReach() { return (player.y - heightAt(player.x, player.z)) < 2.6; }
+let _escapeArmed = 0;   // set when a predator wounds you; the escape stinger fires when you get clear
 function hurtPlayer(dmg) {
   if (dead) return;
   player.hp -= dmg; player.lastHit = clock.elapsedTime;
+  _escapeArmed = clock.elapsedTime;
   camShakeT = SHAKE_DUR;           // kill-feel: teeth rattle the camera too
   audio.thud();
   document.getElementById('hurt').style.opacity = 1;
@@ -5691,6 +5696,12 @@ function loose() {
       a.state = 'flee'; a.t = 3 + Math.random() * 2.5;
       a.dir = Math.atan2(-adx, -adz) + (Math.random() - 0.5) * 0.7;
       spookHerd(a);
+      // a rare wistful stinger when a chance bolts away — sparse on purpose
+      loose._fleeT = loose._fleeT || -99;
+      if (clock.elapsedTime - loose._fleeT > 28 && Math.random() < 0.6) {
+        loose._fleeT = clock.elapsedTime;
+        if (audio.themeSting) audio.themeSting('sting_flee', 0.5);
+      }
     } else {                                                // first shot → look your way
       a.state = 'alert'; a.t = 2.6 + Math.random() * 2.0;
     }
@@ -6596,6 +6607,19 @@ function tickBody() {
   if (kickT > 0) kickT -= dt;
   if (camShakeT > 0) camShakeT -= dt;
   if (fovPunchT > 0) fovPunchT -= dt;
+  // ── the escape stinger ── after a predator wounds you, once you've broken
+  // contact (no charging/attacking predator within 26m for ~4s), the theme
+  // breathes a relief sting. Cleared if you die.
+  if (_escapeArmed && !dead && clock.elapsedTime - _escapeArmed > 4) {
+    let danger = false;
+    for (const a of animals) {
+      if (a.dead || !(a.cfg.bearish || a.cfg.hunts || a.cfg.territorial)) continue;
+      if (!(a.aggro || a.state === 'charge' || a.state === 'attack')) continue;
+      if (Math.hypot(a.obj.position.x - player.x, a.obj.position.z - player.z) < 26) { danger = true; break; }
+    }
+    if (!danger) { if (audio.themeSting) audio.themeSting('sting_escape', 0.85); _escapeArmed = 0; }
+    else _escapeArmed = clock.elapsedTime - 3.5;   // still hunted — re-check shortly
+  }
   puffUpdate(dt);                  // blood puff plays through the hitstop
   windUniforms.uTime.value = t;
   waterUniforms.uTime.value = t;
@@ -6950,6 +6974,7 @@ function tickBody() {
     // actually down at the water — never while jumping/flying high above it.
     if (ny <= WATER_Y - 0.4 && stickMag > 0.02 && grounded && player.y < WATER_Y + 2.5) {
       inCanoe = true;
+      if (audio.themeSting) audio.themeSting('sting_boat', 0.85);   // setting off — adventure lift
       const sinY = Math.sin(player.yaw), cosY = Math.cos(player.yaw);
       canoeVX = (-sinY * mz + cosY * mx) * 2.0; canoeVZ = (-cosY * mz - sinY * mx) * 2.0;
       player.x = nx; player.z = nz; player.y = WATER_Y;

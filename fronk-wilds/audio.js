@@ -45,6 +45,7 @@ export class AudioEngine {
     this._sfx = {};                    // ElevenLabs foley sample bank (loaded in start)
     this._sfxReady = false;
     this._music = {};                  // ElevenLabs music tracks (title, trip)
+    this._sting = {};                  // short themed musical stingers (kill, boat, …)
     this._titleH = null; this._tripH = null; this._wantTitle = false;
     this._ground = 'grass';            // footstep material (setGround)
     this._stepL = false;               // alternating step pan
@@ -299,6 +300,31 @@ export class AudioEngine {
         }
       } catch (e) {}
     });
+    // ── themed STINGERS ── short musical hits on the game's theme, fired on events
+    ['sting_kill', 'sting_flee', 'sting_escape', 'sting_boat'].forEach(async (key) => {
+      try {
+        const r = await fetch('sfx/' + key + '.mp3');
+        if (!r.ok) return;
+        this._sting[key] = await C.decodeAudioData(await r.arrayBuffer());
+      } catch (e) {}
+    });
+  }
+
+  // play a short themed musical stinger once (kill / boat / escape / flee).
+  // Anti-spammed per name so rapid events don't pile the music up.
+  themeSting(name, gain = 0.9) {
+    if (!this.started || this.muted) return false;
+    const buf = this._sting[name]; if (!buf) return false;
+    const C = this.ctx, t = C.currentTime;
+    this._stingAt = this._stingAt || {};
+    if (t - (this._stingAt._any || -9) < 0.25) return true;  // never two stingers at once (count as handled)
+    if (t - (this._stingAt[name] || -9) < 0.6) return true;  // same stinger debounce
+    this._stingAt[name] = t; this._stingAt._any = t;
+    const src = C.createBufferSource(); src.buffer = buf;
+    const g = C.createGain(); g.gain.value = gain;
+    src.connect(g); g.connect(this.master); g.connect(this.verb);
+    try { src.start(); src.stop(t + 4.5); } catch (e) {}    // cap length so it rings, not drones
+    return true;
   }
 
   // play a music track on its own gain → master (+ a little verb), looped.
@@ -324,7 +350,7 @@ export class AudioEngine {
   // play a foley sample (non-spatial) through the foley bus. `n` picks a random
   // variation (base_1..base_n); rate jitter keeps repeats from feeling robotic.
   // Returns true if a sample played (caller skips its procedural fallback).
-  _play(base, { gain = 1, rate = 1, n = 1, pan = 0 } = {}) {
+  _play(base, { gain = 1, rate = 1, n = 1, pan = 0, lp = 0 } = {}) {
     const C = this.ctx; if (!C) return false;
     const name = n > 1 ? `${base}_${1 + Math.floor(Math.random() * n)}` : base;
     const buf = this._sfx[name] || this._sfx[base] || this._sfx[base + '_1'];
@@ -333,7 +359,8 @@ export class AudioEngine {
     src.playbackRate.value = rate * (0.94 + Math.random() * 0.12);
     const g = C.createGain(); g.gain.value = gain;
     let node = src;
-    if (pan) { const p = C.createStereoPanner(); p.pan.value = Math.max(-1, Math.min(1, pan)); src.connect(p); node = p; }
+    if (lp) { const f = C.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = lp; node.connect(f); node = f; }
+    if (pan) { const p = C.createStereoPanner(); p.pan.value = Math.max(-1, Math.min(1, pan)); node.connect(p); node = p; }
     node.connect(g).connect(this.foleyBus);
     try { src.start(); } catch (e) { return false; }
     return true;
@@ -1260,7 +1287,7 @@ export class AudioEngine {
       const spv = Math.max(0, Math.min(1, speed == null ? 1 : speed));
       const lvl0 = Math.pow(10, (-(1 - spv) * 26) / 20);
       this._stepL = !this._stepL;
-      if (this._play('step_' + this._ground, { gain: lvl0 * 0.5, rate: 0.9 + spv * 0.28, n: 3, pan: this._stepL ? -0.13 : 0.13 })) return;
+      if (this._play('step_' + this._ground, { gain: lvl0 * 0.42, rate: 0.92 + spv * 0.24, n: 3, pan: this._stepL ? -0.13 : 0.13, lp: 4800 })) return;
     }
     const C = this.ctx, t = C.currentTime;
     const sp = Math.max(0, Math.min(1, speed == null ? 1 : speed));

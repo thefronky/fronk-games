@@ -36,9 +36,9 @@ const MANIFEST = [
   { name: 'bear_charge',  n: 1, dur: 2.2, prompt: 'a huge bear charges, thundering heavy footfalls on earth with a low roar' },
   { name: 'bear_rustle',  n: 1, dur: 1.4, prompt: 'a large animal pushes through dense bushes and undergrowth, leaves rustling' },
   // ── footsteps by surface ──
-  { name: 'step_grass',   n: 3, dur: 0.6, prompt: 'a single footstep on soft grass and dirt, soft crunch' },
-  { name: 'step_rock',    n: 3, dur: 0.6, prompt: 'a single footstep on hard rock and gravel, gritty scrape' },
-  { name: 'step_sand',    n: 3, dur: 0.6, prompt: 'a single footstep on dry sand, soft granular shuffle' },
+  { name: 'step_grass',   n: 3, dur: 0.5, influence: 0.4, prompt: 'one soft muffled footstep, a leather boot pressing down into a grassy meadow, dry grass and soft soil compressing, natural outdoor foley, organic, warm, NO metallic ring, no click, no clang' },
+  { name: 'step_rock',    n: 3, dur: 0.5, influence: 0.4, prompt: 'one footstep, a leather boot on dirt and small loose stones, soft gritty scuff, natural outdoor foley, organic, no metallic ring, no clang' },
+  { name: 'step_sand',    n: 3, dur: 0.5, influence: 0.4, prompt: 'one footstep, a leather boot pressing into soft dry sand, muffled granular shuffle, natural, organic, no metallic ring' },
   // ── body / misc foley ──
   { name: 'twig_snap',    n: 2, dur: 0.7, prompt: 'a dry twig snaps sharply underfoot in a forest, crisp crack' },
   { name: 'breath',       n: 2, dur: 1.6, prompt: 'a single human exhale, tired heavy breath out through the nose, close, calm' },
@@ -68,7 +68,9 @@ async function gen(name, prompt, dur, influence = 0.45) {
   await sleep(900);
 }
 
+const only = process.argv.slice(2).filter(a => !a.startsWith('--'));   // optional name filter
 for (const m of MANIFEST) {
+  if (only.length && !only.some(o => m.name.startsWith(o))) continue;
   if (m.n && m.n > 1) for (let i = 1; i <= m.n; i++) await gen(`${m.name}_${i}`, m.prompt, m.dur, m.influence);
   else await gen(m.name, m.prompt, m.dur, m.influence);
 }
