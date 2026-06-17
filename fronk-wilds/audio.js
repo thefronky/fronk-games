@@ -55,7 +55,14 @@ export class AudioEngine {
   }
 
   start() {
-    if (this.started) return;
+    // start() is called once on load (which, on autoplay-blocked browsers like
+    // mobile, creates the context SUSPENDED) and again on the first user gesture.
+    // The second call must RESUME the suspended context — otherwise the title
+    // track schedules onto a frozen clock and you get silence "half the time".
+    if (this.started) {
+      if (this.ctx && this.ctx.state !== 'running' && this.ctx.resume) this.ctx.resume();
+      return;
+    }
     this.started = true;
     const C = this.ctx = new (window.AudioContext || window.webkitAudioContext)();
     this.master = C.createGain();
@@ -967,7 +974,7 @@ export class AudioEngine {
   // a missing sample just returns false.
   animalCall(species, x, z, vol = 0.6) {
     if (!this.started || this.muted) return false;
-    if (this._cinematic) return false;   // no animal voices during the intro/dive/wake (kills the jarring opening howl)
+    if (this._noVoices) return false;   // no animal voices through the whole opening (kills the jarring opening howl/pant "bounce")
     // ── predation voices ── pant/howl/snarl during a pack hunt. Sample-first
     // (wolf_pant/wolf_howl/wolf_snarl if loaded), else a procedural fallback.
     if (species === 'pant' || species === 'howl' || species === 'snarl') {

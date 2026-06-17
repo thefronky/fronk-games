@@ -7931,6 +7931,12 @@ function tickBody() {
   // kill sting that read as "is the game resetting?"). _cinematic gates the voice
   // methods; the bus mutes below catch EVERYTHING else routed through foley/spatial.
   audio._cinematic = !started || intro || launching || (_wakeT > 0 && t - _wakeT < 6);
+  // animal VOICES (pant/howl/snarl from a wolf hunting near spawn) read as a
+  // rhythmic "bouncing" sound and kept leaking the instant the 6s cinematic
+  // window lapsed — but the perceived OPENING runs longer. Hold all animal
+  // voices quiet for a generous window so the opening is music-only, while the
+  // player's own foley returns at 6s. (animalCall checks _noVoices.)
+  audio._noVoices = !started || intro || launching || (_wakeT > 0 && t - _wakeT < 16);
   if (audio.foleyBus) audio.foleyBus.gain.value = audio._cinematic ? 0 : 1.15;
   if (audio.spatialBus) audio.spatialBus.gain.value = audio._cinematic ? 0 : 1.0;
   if (_lookHoldT > 0) _lookHoldT -= dt;
