@@ -481,6 +481,7 @@ window._region = regionAt;
 window._REGION = REGION;
 
 let _groundColAttr = null, _groundSeg = 0;   // terrain color attr + vertex spacing (for scorch recolor)
+let _terrainMesh = null;                     // module handle (terrain itself is block-scoped) — hidden inside the kitchen world
 // burned ground registry — quantized cells the fire has turned to desert, so
 // the grass field knows to stop growing blades there (burned = bare sand).
 const _burned = new Set();
@@ -537,7 +538,7 @@ let _grassResweep = 0;   // frames of full-field grass reblade after a burn (cle
   const terrain = new THREE.Mesh(g, new THREE.MeshStandardMaterial({
     vertexColors: true, roughness: 1, metalness: 0 }));
   terrain.receiveShadow = true;
-  scene.add(terrain);
+  scene.add(terrain); _terrainMesh = terrain;
   // expose the ground so fire can RECOLOR it to scorched sand in place — a real
   // desert that follows the terrain, not floating see-through scar discs.
   _groundColAttr = g.attributes.color; _groundSeg = WORLD / segs;
@@ -4869,10 +4870,12 @@ function spawnClouds() {
   _cloudCx = player.x; _cloudCz = player.z; _cloudBaseY = player.y;
   _cloudI = 0; _cloudTopY = player.y;
   for (let k = 0; k < (IS_TOUCH ? 26 : 38); k++) _makeCloud(_cloudI++);
+  placeDoor();                              // the summit: a glowing door waits at the top
 }
-// keep ~140m of clouds above you, prune the ones well below — endless climb
+// the climb is now FINITE — it leads to the door, not nowhere. Pruning + extra
+// generation stop once the door is placed (the door IS the top of the climb).
 function extendClouds() {
-  if (!_cloudGroup || tripLevel < 3) return;
+  if (!_cloudGroup || tripLevel < 3 || _doorPlaced) return;
   while (_cloudTopY < player.y + 140 && _cloudI < 100000) _makeCloud(_cloudI++);
   if (CLOUDSTEPS.length > 80) {
     for (let i = CLOUDSTEPS.length - 1; i >= 0; i--) {
@@ -4882,12 +4885,115 @@ function extendClouds() {
   }
 }
 function clearClouds() {
+  if (_inKitchen) exitKitchen();            // sobering up while inside drops you home first
   if (_cloudGroup) { scene.remove(_cloudGroup); _cloudGroup = null; }
   CLOUDSTEPS.length = 0;
   KITCHEN_TARGETS.length = 0; _heavenOpen = false;
+  _doorGroup = null; _doorPlat = null; _doorPlaced = false;
 }
 window._spawnClouds = () => { spawnClouds(); return CLOUDSTEPS.length; };
 window._cloudsteps = () => CLOUDSTEPS.map(c => [Math.round(c.x), Math.round(c.y), Math.round(c.z)]);
+
+// ════════════════════ THE DOOR + THE KITCHEN WORLD ════════════════════
+// Climb the clouds to the summit and a glowing DOOR waits on the final
+// platform. Step through it and the screen floods white, then clears: you're
+// shrunk to nothing on a giant modern kitchen counter — a completely
+// different world. When the trip finally ebbs, you wake back in the valley.
+let _doorGroup = null, _doorPlat = null, _doorPlaced = false;
+let _inKitchen = false, _kitchenGroup = null, _preKitchen = null;
+let _kitchenItems = [], _kitchenPrev = null, _kitchenFlashT = 0;
+const KFLOOR = 640;                         // the counter sits up here, far above the valley
+function placeDoor() {
+  if (_doorPlaced || !_cloudGroup) return;
+  _doorPlaced = true;
+  const cx = _cloudCx, cz = _cloudCz, py = _cloudTopY + 7;   // a final platform above the top cloud
+  const disc = new THREE.Mesh(new THREE.CylinderGeometry(11, 11, 1.4, 30),
+    new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xfff0cf, emissiveIntensity: 1.4,
+      roughness: 1, transparent: true, opacity: 0.96 }));
+  disc.position.set(cx, py, cz); _cloudGroup.add(disc);
+  CLOUDSTEPS.push({ x: cx, z: cz, y: py + 0.8, r: 10 });
+  // the DOOR — a free-standing frame with a shimmering portal pane (bloom-lit)
+  const g = new THREE.Group(); g.position.set(cx, py + 0.7, cz);
+  const frameMat = new THREE.MeshStandardMaterial({ color: 0x2a1c12, emissive: 0x271a0e,
+    emissiveIntensity: 0.5, roughness: 0.6, metalness: 0.1 });
+  const W = 1.6, H = 4.2, T = 0.32;
+  const post = new THREE.BoxGeometry(T, H, T);
+  const pl = new THREE.Mesh(post, frameMat); pl.position.set(-W, H / 2, 0); g.add(pl);
+  const pr = new THREE.Mesh(post, frameMat); pr.position.set(W, H / 2, 0); g.add(pr);
+  const lintel = new THREE.Mesh(new THREE.BoxGeometry(W * 2 + T, T, T), frameMat);
+  lintel.position.set(0, H, 0); g.add(lintel);
+  const pane = new THREE.Mesh(new THREE.PlaneGeometry(W * 2 - 0.1, H - 0.2),
+    new THREE.MeshBasicMaterial({ color: 0xffe9b8, transparent: true, opacity: 0.82, side: THREE.DoubleSide }));
+  pane.position.set(0, H / 2, 0); g.add(pane);
+  _cloudGroup.add(g);
+  _doorGroup = g;
+  _doorPlat = { x: cx, y: py + 0.8, z: cz };
+}
+// the giant 90s/modern kitchen — built once, lazily, hidden until you enter
+function buildKitchen() {
+  if (_kitchenGroup) return;
+  const G = new THREE.Group(); G.position.set(0, KFLOOR, 0); G.visible = false;
+  const counter = new THREE.Mesh(new THREE.BoxGeometry(170, 6, 170),
+    new THREE.MeshStandardMaterial({ color: 0xd9c9a8, roughness: 0.5, metalness: 0.0 }));
+  counter.position.y = -3; counter.receiveShadow = true; G.add(counter);
+  const wall = new THREE.Mesh(new THREE.BoxGeometry(170, 130, 4),
+    new THREE.MeshStandardMaterial({ color: 0xe9e3d8, roughness: 0.92 }));
+  wall.position.set(0, 62, -85); G.add(wall);
+  const wall2 = new THREE.Mesh(new THREE.BoxGeometry(4, 130, 170),
+    new THREE.MeshStandardMaterial({ color: 0xe2dccf, roughness: 0.92 }));
+  wall2.position.set(-85, 62, 0); G.add(wall2);
+  // a big sunny WINDOW — daylight pours in (you're miniature, in modern day)
+  const win = new THREE.Mesh(new THREE.PlaneGeometry(78, 64),
+    new THREE.MeshBasicMaterial({ color: 0xd2eaff }));
+  win.position.set(34, 60, -82.8); G.add(win);
+  const winFrame = new THREE.Mesh(new THREE.BoxGeometry(84, 70, 2.5),
+    new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.7 }));
+  winFrame.position.set(34, 60, -83.4); G.add(winFrame);
+  for (const mx of [34]) { const m = new THREE.Mesh(new THREE.BoxGeometry(2, 64, 2.6),
+      new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.7 })); m.position.set(mx, 60, -82.6); G.add(m); }
+  // GIANT objects on the counter — you land among them like a mouse
+  const place = (item, x, z, rot, s) => { item.position.set(x, 0, z); item.rotation.y = rot || 0; item.scale.setScalar(s || 1); G.add(item); };
+  place(buildKitchenItem('mug', 0xcf3b2e), -40, -18, 0.3, 1.7);
+  place(buildKitchenItem('cookie', 0xc89a5b), 18, 30, 0, 1.5);
+  place(buildKitchenItem('cereal', 0xe8b53a), 48, -34, -0.4, 1.6);
+  place(buildKitchenItem('mug', 0x2f6fcf), 56, 22, 1.1, 1.25);
+  place(buildKitchenItem('cookie', 0xb98a4b), -52, 36, 0.7, 1.2);
+  G.traverse(o => { if (o.isMesh) o.castShadow = true; });
+  scene.add(G); _kitchenGroup = G;
+  _kitchenItems = [];
+  G.children.forEach(c => { if (c.userData && c.userData.topH)
+    _kitchenItems.push({ x: c.position.x, z: c.position.z, r: (c.userData.r || 5) * (c.scale.x || 1),
+                         top: KFLOOR + c.userData.topH * (c.scale.y || 1) }); });
+}
+function enterKitchen() {
+  if (_inKitchen) return;
+  _inKitchen = true; buildKitchen();
+  _preKitchen = { x: player.x, z: player.z };
+  _kitchenFlashT = 1;                        // the threshold floods white, then clears
+  _kitchenGroup.visible = true;
+  sky.visible = false; if (_terrainMesh) _terrainMesh.visible = false;
+  if (_cloudGroup) _cloudGroup.visible = false;
+  _kitchenPrev = { bg: scene.background, fog: scene.fog };
+  scene.background = new THREE.Color(0xeae3d6);
+  scene.fog = new THREE.Fog(0xe6ddcd, 110, 440);   // nearby objects crisp; far walls gently hazy
+  player.x = 0; player.z = 28; player.y = KFLOOR; player.airY = KFLOOR;
+  grounded = false; playerVy = 0;
+  if (audio.cue) audio.cue(2);
+}
+function exitKitchen() {
+  if (!_inKitchen) return;
+  _inKitchen = false;
+  if (_kitchenGroup) _kitchenGroup.visible = false;
+  sky.visible = true; if (_terrainMesh) _terrainMesh.visible = true;
+  if (_kitchenPrev) { scene.background = _kitchenPrev.bg; scene.fog = _kitchenPrev.fog; _kitchenPrev = null; }
+  if (_preKitchen) {
+    player.x = _preKitchen.x; player.z = _preKitchen.z;
+    player.y = heightAt(player.x, player.z); player.airY = player.y;
+    grounded = true; playerVy = 0; _preKitchen = null;
+  }
+}
+window._enterKitchen = () => { _doorPlat = _doorPlat || { x: player.x, y: player.y, z: player.z }; enterKitchen(); return _inKitchen; };
+window._inKitchen = () => _inKitchen;
 function forageUpdate(t) {
   let mush = null;
   for (const f of FORAGE) {
@@ -6341,7 +6447,11 @@ function tickBody() {
   // ── the trip ── a mushroom turns the world strange: hue cycles, colors
   // swell, the picture breathes. Eases out over the last couple seconds.
   if (tripT > 0) {
-    tripT -= dt;
+    // the climb to the door is long — don't let the trip ebb out from under you
+    // while you're high in the clouds. Near the ground / in the kitchen it runs
+    // at normal speed, so the kitchen has a finite dwell and you wake back home.
+    const _climbing = !_inKitchen && (player.y - heightAt(player.x, player.z)) > 30;
+    tripT -= dt * (_climbing ? 0.25 : 1);
     _tripOnset += dt;
     const tail = Math.max(0, Math.min(1, tripT / 2));     // the fade-OUT at the very end
     // come-up envelopes: trees + the swaying view arrive FIRST (~3.5s), the
@@ -6366,15 +6476,17 @@ function tickBody() {
     // SUBTLE & SLOW — the trip should ooze in, never flash. The come-up
     // envelopes (k=colour, ks=sway) already ease from 0; these peaks are now
     // gentle so even at full it's a soft shift, not a neon disco.
-    const hue = (t * (7 + lv * 3) + 28 * Math.sin(t * 0.4)) % 360;   // slow drift, never races a bad colour
+    // the kitchen is a REAL modern place — barely any hue drift so its colours
+    // read true (a faint dreamy shimmer only); the valley keeps the full drift.
+    const hue = ((t * (7 + lv * 3) + 28 * Math.sin(t * 0.4)) * (_inKitchen ? 0.05 : 1)) % 360;
     const sat = 1 + (0.4 + 0.15 * lv) * k * (1 - heaven * 0.75);     // ~1.55 max @ L1 (was ~3.2)
     const con = 1 + (0.10 + 0.05 * lv) * k * (1 - heaven * 0.6);     // ~1.15 max
-    const bri = 1 + (0.03 + 0.015 * lv) + heaven * 0.38 + 0.02 * Math.sin(t * 1.0) * k;
+    const bri = 1 + (0.03 + 0.015 * lv) + (_inKitchen ? 0.04 : heaven * 0.38) + 0.02 * Math.sin(t * 1.0) * k;
     const blur = IS_TOUCH ? 0 : (0.12 + 0.22 * Math.sin(t * 0.5)) * k;
     // surreal liquid WARP (desktop): a gentle breathing displacement, not a melt
     let warp = '';
     if (_warpDisp) {
-      _warpDisp.setAttribute('scale', (IS_TOUCH ? 0 : (4 + lv * 4) * k * (1 - heaven * 0.7)).toFixed(1));
+      _warpDisp.setAttribute('scale', (IS_TOUCH || _inKitchen ? 0 : (4 + lv * 4) * k * (1 - heaven * 0.7)).toFixed(1));
       if (!IS_TOUCH) warp = 'url(#warp) ';
     }
     canvas.style.filter = warp + 'hue-rotate(' + hue.toFixed(0) + 'deg) saturate(' + sat.toFixed(2)
@@ -6389,13 +6501,14 @@ function tickBody() {
     canvas.style.transformOrigin = 'center';
     canvas.style.transform = 'scale(' + sc.toFixed(3) + ') rotate(' + rot.toFixed(2)
       + 'deg) skewX(' + skx.toFixed(2) + 'deg) skewY(' + sky.toFixed(2) + 'deg)';
-    if (_heaven) _heaven.style.opacity = (heaven * 0.42).toFixed(3);   // a heavenly haze, not a whiteout
-    if (tripT <= 0) { tripLevel = 0; clearClouds(); }   // sober up
+    if (_kitchenFlashT > 0) _kitchenFlashT = Math.max(0, _kitchenFlashT - dt * 0.5);   // door threshold flash fades
+    if (_heaven) _heaven.style.opacity = Math.max(_inKitchen ? 0 : heaven * 0.42, _kitchenFlashT).toFixed(3);
+    if (tripT <= 0) { tripLevel = 0; clearClouds(); }   // sober up (drops you home if in the kitchen)
     _tripKsway = ks; _tripTreeEnv = treeEnv;
   } else if (canvas.style.filter) {
     canvas.style.filter = ''; canvas.style.transform = '';
     tripLevel = 0; clearClouds();
-    _tripKsway = 0; _tripTreeEnv = 0; _tripLvlVis = 0;
+    _tripKsway = 0; _tripTreeEnv = 0; _tripLvlVis = 0; _kitchenFlashT = 0;
     if (_heaven) _heaven.style.opacity = '0';
     if (audio.tripMusic) audio.tripMusic(false);
   }
@@ -6635,6 +6748,7 @@ function tickBody() {
     // canopy height (a mushroom trip), you're ON the tree, not walking into
     // it, so it doesn't shove you — you can stand and hop tree to tree.
     for (const tr of TREES) {
+      if (_inKitchen) break;                                            // kitchen world: no valley collision
       if (tr.top !== undefined && player.y >= tr.top - 1.3) continue;   // on the canopy
       // canopy trees (have .inst) store the wide cover/LOS radius (~2x the
       // trunk) → collide at the actual TRUNK (tr.r*0.45 + body). Rocks, snags and
@@ -6655,6 +6769,7 @@ function tickBody() {
     let stepGround = -Infinity;
     const feetY = player.y;
     for (const sp2 of STEPPROPS) {
+      if (_inKitchen) break;                                            // kitchen world: no valley props
       const d = Math.hypot(nx - sp2.x, nz - sp2.z);
       if (d >= sp2.r + 0.5) continue;
       if (sp2.top <= feetY + STEP_REACH) {
@@ -6667,7 +6782,7 @@ function tickBody() {
     // ── mushroom trip: tree CANOPIES become landable surfaces. Jump up and
     // you can perch on a treetop, then bound tree to tree (and onto the
     // mountains). Only while tripping; off-trip you can't reach them anyway.
-    if (tripT > 0) {
+    if (tripT > 0 && !_inKitchen) {
       const TRIP_REACH = 2.8;
       for (const tr of TREES) {
         if (tr.top === undefined) continue;
@@ -6685,16 +6800,23 @@ function tickBody() {
         }
       }
     }
-    const lim = WORLD * 0.47;
+    const lim = _inKitchen ? 80 : WORLD * 0.47;           // stay on the counter in the kitchen
     nx = Math.max(-lim, Math.min(lim, nx)); nz = Math.max(-lim, Math.min(lim, nz));
-    const ny = heightAt(nx, nz);
+    const ny = _inKitchen ? KFLOOR : heightAt(nx, nz);
+    // ── kitchen: the giant objects are landable surfaces (clamber a mug/cookie)
+    if (_inKitchen) {
+      for (const it of _kitchenItems) {
+        if (Math.hypot(nx - it.x, nz - it.z) >= it.r) continue;
+        if (it.top <= feetY + 1.6 && it.top > stepGround) stepGround = it.top;
+      }
+    }
     // ── jump / fall: light, forgiving hop (Apple-simple) ──
-    let groundY = (ny > WATER_Y - 0.4) ? ny : player.y;
-    if (stepGround > groundY) groundY = stepGround;       // standing on a prop
+    let groundY = _inKitchen ? KFLOOR : ((ny > WATER_Y - 0.4) ? ny : player.y);
+    if (stepGround > groundY) groundY = stepGround;       // standing on a prop / kitchen object
     // ── breathing ground ── while tripping the earth itself swells and
     // sinks, and your footing rides it: the ground you stand on physically
     // moves, so the same jump lands differently depending on the breath.
-    if (tripT > 0 && stepGround === -Infinity) {
+    if (tripT > 0 && stepGround === -Infinity && !_inKitchen) {
       groundY += Math.sin(t * 1.25 + player.x * 0.14 + player.z * 0.12) * (0.22 * tripLevel);
     }
     if (ny > WATER_Y - 0.4) { player.x = nx; player.z = nz; }
@@ -6741,6 +6863,14 @@ function tickBody() {
       player.x = nx; player.z = nz; player.y = WATER_Y;
     }
     }  // end !inCanoe walk branch
+
+    // ── the summit ── reach the glowing door on the top platform and step
+    // through: the world floods white and you drop into the kitchen.
+    if (_doorPlat && !_inKitchen && tripT > 0 &&
+        Math.abs(player.y - _doorPlat.y) < 4.0 &&
+        Math.hypot(player.x - _doorPlat.x, player.z - _doorPlat.z) < 2.4) {
+      enterKitchen();
+    }
 
     // bow — at full draw it RAISES to your eye: grip near center,
     // nock at the cheek, slight zoom like focusing down the arrow
