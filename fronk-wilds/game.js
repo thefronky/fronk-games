@@ -5540,7 +5540,8 @@ let _raftCreakT = 0;             // occasional timber-creak cooldown
 let _raftLaunch = 0;             // >0 = the launch glide: a clean push straight off the bank
 let _raftJumpCd = 0;            // cooldown so the raft only rarely leaps off a crest
 let _sailFovT = 0;               // 0..1 eased "sailing view" zoom-out
-let _sailTrim = 0;               // -1..1 — the SHEET: pull the rope to swing the sail
+let _sailTrim = 0;               // -1..1 — the actual sail position (LAGS toward the target)
+let _sailTarget = 0;             // -1..1 — where the slider/keys want the sail; trim eases to it
 let _boatWake = 0;               // 0..1 eased boat speed — drives wave size + bow wake
 let _luffing = false;            // sail flapping / spilling wind (no drive)
 let _wakeFoamT = 0;              // bow-spray spawn cooldown
@@ -5700,6 +5701,25 @@ if (_anchorBtn) {
   const tog = (e) => { e.preventDefault(); e.stopPropagation(); toggleAnchor(); _anchorBtn.textContent = anchored ? 'raise anchor' : 'drop anchor'; };
   _anchorBtn.addEventListener('click', tog);
   _anchorBtn.addEventListener('touchstart', tog, { passive: false });
+}
+const _sailSlider = document.getElementById('sailSlider'); // drag left/right to swing the sail ±90°
+const _sailHandle = document.getElementById('sailHandle');
+if (_sailSlider) {
+  let dragging = false;
+  const setFromX = (clientX) => {
+    const r = _sailSlider.getBoundingClientRect();
+    const f = (clientX - r.left) / r.width;            // 0..1 across the bar
+    _sailTarget = Math.max(-1, Math.min(1, f * 2 - 1)); // → -1..1
+  };
+  const down = (e) => { e.preventDefault(); e.stopPropagation(); dragging = true; setFromX((e.touches ? e.touches[0] : e).clientX); };
+  const move = (e) => { if (!dragging) return; e.preventDefault(); e.stopPropagation(); setFromX((e.touches ? e.touches[0] : e).clientX); };
+  const up = () => { dragging = false; };
+  _sailSlider.addEventListener('mousedown', down);
+  addEventListener('mousemove', move);
+  addEventListener('mouseup', up);
+  _sailSlider.addEventListener('touchstart', down, { passive: false });
+  _sailSlider.addEventListener('touchmove', move, { passive: false });
+  addEventListener('touchend', up);
 }
 function setLids(openPct, glow) {     // openPct: 0 = shut, -100 = wide open
   if (!_eyelids) return;
@@ -8265,9 +8285,12 @@ function tickBody() {
       // over- or under-sheet a touch and the bow carves that way. You can't point
       // dead into the wind — fall off, find the wind, trim, go.
       const RAFT_ACCEL = 9.0, RAFT_MAXV = 11;
-      // the sheet — swing the sail with left/right; it's your throttle AND helm.
-      _sailTrim = Math.max(-1, Math.min(1, _sailTrim + mx * 1.7 * dt));
-      const boom = _sailTrim * 1.15;                      // boom angle off the centreline
+      // THE SAIL SLIDER — you set a TARGET position (the on-screen slider, or A/D
+      // nudges it); the sail then EASES toward it with a slight lag, so it feels
+      // like a heavy boom swinging, not a twitchy stick. Full range = 180° swing.
+      _sailTarget = Math.max(-1, Math.min(1, _sailTarget + mx * 1.1 * dt));   // A/D nudge the target
+      _sailTrim += (_sailTarget - _sailTrim) * Math.min(1, dt * 2.6);          // the lag
+      const boom = _sailTrim * 1.57;                      // boom swings a full ±90° (180° total)
       // apparent wind relative to the bow (windDir = where the wind blows TO)
       const windRel = Math.atan2(Math.sin(windDir - raftYaw), Math.cos(windDir - raftYaw));
       const ar = Math.abs(windRel);
@@ -8463,7 +8486,7 @@ function tickBody() {
       // walk-forward is (-sin,-cos). So the bow must point at player.yaw + PI to
       // head the way you walked in — otherwise the sail shoves you back ashore.
       raftYaw = player.yaw + Math.PI;
-      _sailTrim = 0; _boatWake = 0;
+      _sailTrim = 0; _sailTarget = 0; _boatWake = 0;
       // arm a clean LAUNCH GLIDE: ~10 yards straight off the bank, wind disabled,
       // no auto-disembark — you clear the shallows, then the sail takes over.
       _raftLaunch = 1.3;
@@ -8639,6 +8662,15 @@ function tickBody() {
     const showAnchor = inCanoe && started && _raftLaunch <= 0;
     _anchorBtn.classList.toggle('show', showAnchor);
     if (showAnchor) _anchorBtn.textContent = anchored ? 'raise anchor' : 'drop anchor';
+  }
+  // the sail slider shows only while actually sailing (aboard, launched, not anchored)
+  if (_sailSlider) {
+    const showSail = inCanoe && started && _raftLaunch <= 0 && !anchored;
+    _sailSlider.classList.toggle('show', showSail);
+    if (showSail && _sailHandle) {
+      // map the live (lagging) trim onto the bar so the handle visibly trails your drag
+      _sailHandle.style.left = ((_sailTrim * 0.5 + 0.5) * 100).toFixed(1) + '%';
+    }
   }
   // (the first-person sheet hand was removed per Fronk — no rope in hand while
   // sailing; the bow stays in hand as normal.)

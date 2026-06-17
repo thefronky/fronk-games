@@ -132,6 +132,16 @@
     box-shadow:0 0 20px rgba(120,170,210,.32)}
   #anchorBtn.show{opacity:1;pointer-events:auto;transform:scale(1)}
   #anchorBtn:active{transform:scale(.95)}
+  #sailSlider{position:fixed;left:50%;bottom:7%;transform:translateX(-50%);width:46%;max-width:430px;height:30px;
+    z-index:16;opacity:0;pointer-events:none;transition:opacity .25s;touch-action:none;
+    background:rgba(14,22,30,.34);border:1.5px solid rgba(150,190,220,.42);border-radius:18px;
+    backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)}
+  #sailSlider.show{opacity:1;pointer-events:auto}
+  #sailSlider::before{content:'';position:absolute;top:50%;left:14px;right:14px;height:2px;transform:translateY(-50%);
+    background:rgba(180,210,230,.3)}
+  #sailHandle{position:absolute;top:50%;left:50%;width:42px;height:42px;transform:translate(-50%,-50%);
+    border-radius:50%;background:rgba(222,234,242,.92);border:2px solid rgba(120,170,210,.75);
+    box-shadow:0 0 14px rgba(120,170,210,.5);pointer-events:none}
   @keyframes consumePulse{0%,100%{box-shadow:0 0 22px rgba(150,80,255,.34),inset 0 0 16px rgba(150,80,255,.16)}
     50%{box-shadow:0 0 38px rgba(170,100,255,.6),inset 0 0 22px rgba(150,80,255,.26)}}
 
@@ -259,6 +269,7 @@
 <div id="exhaust"></div>
 <button id="consume">take</button>
 <button id="anchorBtn">drop anchor</button>
+<div id="sailSlider"><div id="sailHandle"></div></div>
 <div id="title">
   <div id="titleback"></div>
   <h1>CONSUME</h1>
