@@ -609,14 +609,11 @@ const waterUniforms = { uTime: { value: 0 } };
                     * (0.5 + 0.5*sin(vDepth*9.0 - uTime*2.2))
                     * smoothstep(0.5, 0.95, wfbm(vWP*0.7 + vec3(uTime*0.3)));
        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.90,0.95,0.98), clamp(foam,0.0,1.0)*0.8);
-       // WHITECAPS — foam breaking on the crests of the offshore swell. Kept LOCAL
-       // (faded out past ~45m) so distant water doesn't shimmer/jitter as the
-       // camera pans — that crawl looked bad in the opening orbit. Lower-frequency
-       // noise + slower time = bigger, calmer foam patches that don't strobe.
-       float capDist = smoothstep(95.0, 35.0, length(cameraPosition - vWP));
-       float cap = smoothstep(0.22, 0.36, vWave) * smoothstep(2.5, 4.5, vDepth)
-                   * smoothstep(0.62, 0.95, wfbm(vWP*0.6 + vec3(uTime*0.25))) * capDist;
-       diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.93,0.96,0.99), clamp(cap,0.0,1.0)*0.6);`)
+       // (Whitecaps removed — the per-pixel foam flecks strobed/aliased into a
+       //  glitchy speckle. The WAVES are the smooth vertex swell instead; a soft
+       //  crest BRIGHTENING reads as a wave without any high-frequency sparkle.)
+       float crest = smoothstep(0.12, 0.32, vWave) * smoothstep(2.0, 5.0, vDepth);
+       diffuseColor.rgb += vec3(0.05, 0.07, 0.08) * crest;`)
       .replace('#include <dithering_fragment>',
       `#include <dithering_fragment>
        vec3 V = normalize(cameraPosition - vWP);
@@ -3791,7 +3788,7 @@ function buildSharkMesh() {
 // the music fades — a near-miss, not (usually) a bite. Then a cooldown.
 const SHARKS = [];
 const SHARK_CENTER = { x: 70, z: -90 };   // the deepest part of the lake
-const SHARK_SCALE = 4.0;                  // a true leviathan — bigger than the whole raft
+const SHARK_SCALE = 5.2;                  // MASSIVE — far bigger than the whole raft
 function spawnSharks() {
   for (let i = 0; i < 2; i++) {           // sparse — rarely more than one in view
     const obj = buildSharkMesh(); obj.scale.setScalar(SHARK_SCALE);
@@ -3808,17 +3805,28 @@ function spawnSharks() {
   }
 }
 let _sharkInWaterT = 0, _sharkScareCd = 0, _sharkOnset = 30 + Math.random() * 60;
+let _sharkLungeCd = 18 + Math.random() * 18;
 function sharkUpdate(dt) {
   if (!SHARKS.length) return;
   const onWater = inCanoe || (player.y < WATER_Y + 0.5
     && Math.hypot(player.x - SHARK_CENTER.x, player.z - SHARK_CENTER.z) < 150);
   if (onWater) _sharkInWaterT += dt; else _sharkInWaterT = 0;
   _sharkScareCd -= dt;
-  const scareActive = SHARKS.some(s => s.state === 'circle' || s.state === 'dive');
+  const scareActive = SHARKS.some(s => s.state === 'circle' || s.state === 'dive' || s.state === 'lunge');
   if (onWater && !scareActive && _sharkInWaterT > _sharkOnset && _sharkScareCd <= 0) {
-    let best = null, bd = 1e9;            // the nearest shark commits to the scare
+    let best = null, bd = 1e9;            // the nearest shark commits to the Jaws SCARE
     for (const s of SHARKS) { const d = Math.hypot(s.obj.position.x - player.x, s.obj.position.z - player.z); if (d < bd) { bd = d; best = s; } }
     if (best) { best.state = 'circle'; best.circleT = 15; }
+  }
+  // RANDOM ATTACK — besides the set-piece circle scare, a shark will just GO for
+  // you out of nowhere now and then (more the longer you linger): a fast
+  // surfacing charge straight at the boat that bites if it reaches you.
+  _sharkLungeCd -= dt;
+  if (onWater && !scareActive && _sharkInWaterT > 6 && _sharkLungeCd <= 0) {
+    let best = null, bd = 1e9;
+    for (const s of SHARKS) { if (s.state !== 'patrol') continue; const d = Math.hypot(s.obj.position.x - player.x, s.obj.position.z - player.z); if (d < bd) { bd = d; best = s; } }
+    if (best && bd < 100) { best.state = 'lunge'; best.lungeT = 2.6; best.biteCd = 0; _sharkLungeCd = 14 + Math.random() * 20;
+      if (audio.sharkSfx) audio.sharkSfx('shark_splash', best.obj.position.x, best.obj.position.z, { gain: 0.8 }); }
   }
   const finTip = 2.6 * SHARK_SCALE;
   const upY = WATER_Y - (finTip - 0.6);  // fin breaks the surface
@@ -3838,6 +3846,20 @@ function sharkUpdate(dt) {
       s._spl -= dt; if (s._spl <= 0) { s._spl = 0.8 + Math.random() * 0.7; if (audio.sharkSfx) audio.sharkSfx('shark_splash', p.x, p.z, { gain: 0.7 }); }
       if (dist < 5 && s.biteCd <= 0) { s.biteCd = 2.5; hurtPlayer(30); if (audio.sharkSfx) audio.sharkSfx('shark_lunge', p.x, p.z); }   // only if you crowd it
       if (s.circleT <= 0) { s.state = 'dive'; s.diveT = 10; if (audio.sharkSfx) audio.sharkSfx('shark_splash', p.x, p.z, { gain: 0.9 }); }
+    } else if (s.state === 'lunge') {
+      // a fast surfacing CHARGE straight at you — bites if it reaches the boat
+      s.lungeT -= dt; finUp = true; speed = 13;
+      s.dir = Math.atan2(player.x - p.x, player.z - p.z);
+      s.obj.rotation.y = lerpAngle(s.obj.rotation.y, s.dir, Math.min(1, dt * 6));  // turn hard onto you
+      dread = Math.max(dread, 0.85);
+      if (dist < 6.5 && s.biteCd <= 0) {
+        s.biteCd = 99; hurtPlayer(38); camShakeT = SHAKE_DUR * 2.5;
+        if (audio.sharkSfx) audio.sharkSfx('shark_lunge', p.x, p.z, { gain: 1.2 });
+        s.state = 'dive'; s.diveT = 8;
+      } else if (s.lungeT <= 0) {                    // missed — it dives off
+        s.state = 'dive'; s.diveT = 8;
+        if (audio.sharkSfx) audio.sharkSfx('shark_splash', p.x, p.z, { gain: 0.8 });
+      }
     } else if (s.state === 'dive') {
       s.diveT -= dt; finUp = false; speed = 5.5;
       dread = Math.max(dread, Math.max(0, (s.diveT / 10) * 0.5));   // fades over ~10s
@@ -4579,7 +4601,11 @@ function animalUpdate(a, dt) {
       a._grazeDir = a.dir;                                   // remember its body heading to crane FROM
     } else wander(a, dt);
   }
-  a.obj.rotation.y = lerpAngle(a.obj.rotation.y, a.dir, Math.min(1, dt * 6));
+  // turn the BODY toward the heading — slow + majestic for big animals (a horse
+  // shouldn't snap left-right-left), quick only for the little darty critters or
+  // when actively fleeing/fighting.
+  const turnRate = a.cfg.darty ? 6 : (a.state === 'flee' || a.state === 'rear' || a.state === 'attack') ? 3.5 : 1.7;
+  a.obj.rotation.y = lerpAngle(a.obj.rotation.y, a.dir, Math.min(1, dt * turnRate));
   applyGait(a, a._moved, dt);
   a._moved = false;
 }
