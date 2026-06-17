@@ -300,7 +300,7 @@ export class AudioEngine {
         // if the title was already asked for before the track finished loading,
         // start it now and fade the procedural theme out from under it.
         if (key === 'title' && this._wantTitle && !this._titleH) {
-          this._titleH = this._startTrack('title', { gain: 1.0, fade: 2.5 });
+          this._titleH = this._startTrack('title', { gain: 1.15, fade: 0.7 });
           if (this._title) {
             const tt = C.currentTime; this.titleBus.gain.cancelScheduledValues(tt);
             this.titleBus.gain.setValueAtTime(Math.max(0.0001, this.titleBus.gain.value), tt);
@@ -985,7 +985,7 @@ export class AudioEngine {
   // update() so it keeps building until the dive fades it out.
   titleTheme() {
     if (!this.started || this._title || this._titleH) return;
-    if (this._music.title) { this._titleH = this._startTrack('title', { gain: 1.0, fade: 2.5 }); return; }
+    if (this._music.title) { this._titleH = this._startTrack('title', { gain: 1.15, fade: 0.7 }); return; }
     this._wantTitle = true;            // not loaded yet → start it on load (procedural plays meanwhile)
     const t = this.ctx.currentTime;
     this.titleBus.gain.cancelScheduledValues(t);
@@ -1005,7 +1005,10 @@ export class AudioEngine {
     if (this._title.fading && t > this._title.stopAt) this._title = null;
   }
   fadeTitle(sec = 4) {
-    if (this._titleH) { this._fadeTrack(this._titleH, Math.min(sec, 3)); this._titleH = null; this._wantTitle = false; }
+    // carry the theme INTO the game — don't cut it on the dive. It rings on for
+    // ~14s as you start playing, then the daytime ambient takes over. (This is
+    // why "the theme song" was inaudible: it was hard-cut the instant you dove.)
+    if (this._titleH) { this._fadeTrack(this._titleH, 14); this._titleH = null; this._wantTitle = false; }
     if (!this._title) return;
     const t = this.ctx.currentTime;
     this.titleBus.gain.cancelScheduledValues(t);
