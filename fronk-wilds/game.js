@@ -5515,6 +5515,9 @@ let _boatWake = 0;               // 0..1 eased boat speed — drives wave size +
 let _luffing = false;            // sail flapping / spilling wind (no drive)
 let _wakeFoamT = 0;              // bow-spray spawn cooldown
 let _lookHoldT = 0;             // >0 = you're actively looking around; pauses the boat-follow camera
+let anchored = false;          // anchor dropped → boat holds still; you fish with the bow
+let _fishLine = null;          // the line from the bow to a cast fishing arrow
+window._anchored = () => anchored;   // debug/test hook
 
 // ── the wake-up: a ~3.5s cinematic intro that plays on enter and on
 // every respawn. Driven entirely by introT on the dt loop (no setTimeout),
@@ -5657,6 +5660,12 @@ if (_consumeBtn) {
   const eat = (e) => { e.preventDefault(); e.stopPropagation(); window._eatMushroom(); };
   _consumeBtn.addEventListener('click', eat);
   _consumeBtn.addEventListener('touchstart', eat, { passive: false });
+}
+const _anchorBtn = document.getElementById('anchorBtn'); // tap to drop/raise the anchor (fishing)
+if (_anchorBtn) {
+  const tog = (e) => { e.preventDefault(); e.stopPropagation(); toggleAnchor(); _anchorBtn.textContent = anchored ? 'raise anchor' : 'drop anchor'; };
+  _anchorBtn.addEventListener('click', tog);
+  _anchorBtn.addEventListener('touchstart', tog, { passive: false });
 }
 function setLids(openPct, glow) {     // openPct: 0 = shut, -100 = wide open
   if (!_eyelids) return;
@@ -6818,6 +6827,15 @@ window._forceRain = () => { _rainDur = 40; _rainTarget = 0.8; _rainCd = 0; };   
 window._forceRainbow = () => { _rainbowT = 26; };      // debug/test hook
 buildRain(); buildRainbow();
 
+// ── anchor ── drop it to hold the boat still and fish; raise it to sail again.
+function toggleAnchor() {
+  if (!inCanoe || !started || _raftLaunch > 0) return;
+  anchored = !anchored;
+  if (anchored) { canoeVX = 0; canoeVZ = 0; _boatWake = 0; toast('Anchor down — cast with the bow to fish.', 2600); }
+  else toast('Anchor up.', 1400);
+}
+window._toggleAnchor = toggleAnchor;   // test/UI hook
+
 function loose() {
   // a real press always looses a shot — even a quick tap (raiseT confirms the
   // bow came up). Only a true no-draw is ignored. Floor the power so a fast
@@ -6830,8 +6848,10 @@ function loose() {
     toast('Out of arrows.', 2400);
     return;
   }
-  player.arrows--; renderNotes();
-  const onFire = tripT > 0;
+  // FISHING cast — anchored, you fire a line-arrow you reel back: no ammo spent.
+  const fishing = inCanoe && anchored;
+  if (!fishing) { player.arrows--; renderNotes(); }
+  const onFire = tripT > 0 && !fishing;   // no flaming fishing arrows
   // sober: speed scales with draw, arrows arc. TRIPPING: every shot is a
   // FIERY BULLET — full power regardless of pull, dead flat, no gravity,
   // straight at whatever the reticle marks. It just hits.
@@ -6856,7 +6876,7 @@ function loose() {
   }
   scene.add(m);
   const rec = { m, v: dir.multiplyScalar(speed),
-                t: ARROW_LIFE, power, fire: onFire,
+                t: ARROW_LIFE, power, fire: onFire, fishing,
                 ox: m.position.x, oy: m.position.y, oz: m.position.z };
   arrows.push(rec);
   arrowCam = { rec, mode: 'follow', rt: 0 };   // ride this one
@@ -6924,7 +6944,21 @@ function hitZone(an, hx, hy, hz) {
 function arrowUpdate(dt) {
   for (let i = arrows.length - 1; i >= 0; i--) {
     const a = arrows[i];
-    if (a.stuck) { a.t -= dt; if (a.t <= 0) { scene.remove(a.m); arrows.splice(i, 1); } continue; }
+    if (a.stuck) {
+      a.t -= dt;
+      if (a.t <= 0) {
+        if (a.fishing === 'soak') {                       // reel the line back in
+          if (a.fishHooked) {
+            player.lastAte = clock.elapsedTime; if (player.hp < 100) { player.hp = Math.min(100, player.hp + 18); renderHP && renderHP(); }
+            player.meat = Math.min(3, (player.meat || 0) + 1); renderNotes();
+            if (audio.sharkSfx) audio.sharkSfx('shark_splash', a.m.position.x, a.m.position.z, { gain: 0.5 });
+            toast('A fish! Reeled it in.', 2400);
+          } else toast('Nothing biting. Cast again.', 1800);
+        }
+        scene.remove(a.m); arrows.splice(i, 1);
+      }
+      continue;
+    }
     a._px = a.m.position.x; a._py = a.m.position.y; a._pz = a.m.position.z;  // last pos (swept tests)
     if (!a.fire) a.v.y -= ARROW_GRAVITY * dt;   // fire-arrows fly dead flat — no gravity, like a bullet
     a.m.position.addScaledVector(a.v, dt);
@@ -7169,10 +7203,19 @@ function arrowUpdate(dt) {
       continue;                                       // skip the valley water/ground tests inside
     }
 
-    // water hit — a splash, then it sinks and is gone
+    // water hit — a splash, then it sinks and is gone. A FISHING arrow instead
+    // floats at the surface on its line and SOAKS: wait for a bite, then reel.
     if (py < WATER_Y && heightAt(px, pz) < WATER_Y) {
       if (audio.impact) audio.impact('water', distVol);
-      scene.remove(a.m); arrows.splice(i, 1); continue;
+      if (a.fishing) {
+        a.m.position.y = WATER_Y - 0.05; a.v.set(0, 0, 0);
+        a.stuck = true; a.fishing = 'soak';
+        a.t = 2.0 + Math.random() * 3.0;                 // the wait for a bite
+        a.fishHooked = Math.random() < 0.55;             // ~55% a fish is on when you reel
+        if (a.m.userData.streak) { a.m.remove(a.m.userData.streak); a.m.userData.streak = null; }
+        toast('Line cast. Wait for a bite…', 1800);
+      } else { scene.remove(a.m); arrows.splice(i, 1); }
+      continue;
     }
 
     // ground hit (grass/dirt) — PLANT it tip-down so the shaft ALWAYS shows,
@@ -7196,6 +7239,22 @@ function arrowUpdate(dt) {
     }
     a.t -= dt; if (a.t <= 0) { scene.remove(a.m); arrows.splice(i, 1); }
   }
+  // ── fishing line ── a taut thread from the bow to whichever arrow is on a line
+  let fa = null;
+  for (const a of arrows) if (a.fishing) { fa = a; break; }
+  if (fa) {
+    if (!_fishLine) {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
+      _fishLine = new THREE.Line(g, new THREE.LineBasicMaterial({ color: 0xeae3cf, transparent: true, opacity: 0.5 }));
+      _fishLine.frustumCulled = false; scene.add(_fishLine);
+    }
+    const pos = _fishLine.geometry.attributes.position.array;
+    pos[0] = camera.position.x; pos[1] = camera.position.y - 0.35; pos[2] = camera.position.z;
+    pos[3] = fa.m.position.x;   pos[4] = fa.m.position.y;          pos[5] = fa.m.position.z;
+    _fishLine.geometry.attributes.position.needsUpdate = true;
+    _fishLine.visible = true;
+  } else if (_fishLine) _fishLine.visible = false;
 }
 
 // bow viewmodel — a real recurve: curved limbs, leather grip, a
@@ -7404,6 +7463,7 @@ function resetDrawState() {
 // the wake-up is skippable — any input fast-forwards it to the end
 function skipIntro() { if (intro) introSkip = true; }
 addEventListener('keydown', e => { keys[e.code] = true;
+  if (e.code === 'KeyF' && !intro) toggleAnchor();   // anchor down/up (fishing)
   if (e.code === 'Space' && !intro && !arrowCam) jumpQ = true;
   if (e.code === 'Escape' && drawing) {      // back out of the shot
     drawing = false; drawT = 0; holdT = 0; if (audio.drawCreak) audio.drawCreak(0); }
@@ -8132,6 +8192,13 @@ function tickBody() {
       if (_raftCreakT <= 0) { _raftCreakT = 2.4 + Math.random() * 3.5; if (audio.raftCreak) audio.raftCreak(); }
       if (canoe._sailPivot) canoe._sailPivot.rotation.y += (0.6 - canoe._sailPivot.rotation.y) * Math.min(1, dt * 3);
       _moveLvl = 0.55;
+    } else if (inCanoe && anchored) {
+      // ── ANCHORED ── the boat holds still; you're fishing. No wind drive.
+      canoeVX *= Math.pow(0.2, dt); canoeVZ *= Math.pow(0.2, dt);   // settle to a stop
+      player.y = WATER_Y; grounded = true; player.airY = WATER_Y;
+      player.x += canoeVX * dt; player.z += canoeVZ * dt;
+      _boatWake += (0 - _boatWake) * Math.min(1, dt * 2);
+      _moveLvl = 0;
     } else if (inCanoe) {
       // ── SAILING the raft ── YOU work the wind. LEFT/RIGHT (mx) is the SHEET:
       // pull the rope to swing the sail. The wind is the only engine — sheet the
@@ -8211,7 +8278,7 @@ function tickBody() {
       let cz = Math.max(-lim2, Math.min(lim2, player.z + canoeVZ * dt));
       const wy = heightAt(cx, cz);
       if (wy > WATER_Y - 0.12) {            // nosed into the shallows → step out onto land
-        inCanoe = false; canoeVX = 0; canoeVZ = 0; _raftLaunch = 0; _boatWake = 0;
+        inCanoe = false; canoeVX = 0; canoeVZ = 0; _raftLaunch = 0; _boatWake = 0; anchored = false;
         _raftAirborne = false; _raftAirVy = 0;
         if (audio.setSail) audio.setSail(0, windStr);    // cut the sail hiss ashore
         player.x = cx; player.z = cz; player.y = wy; grounded = true; player.airY = wy;
@@ -8517,7 +8584,13 @@ function tickBody() {
   canoe.visible = inCanoe && started;
   // ── the sheet hand ── while sailing, swap the bow for the gloved hand on the
   // rope; it hauls left/right with your trim so you SEE yourself working the sail.
-  const _sailing = inCanoe && started && _raftLaunch <= 0;
+  // the anchor button rides whenever you're aboard and not mid-launch
+  if (_anchorBtn) {
+    const showAnchor = inCanoe && started && _raftLaunch <= 0;
+    _anchorBtn.classList.toggle('show', showAnchor);
+    if (showAnchor) _anchorBtn.textContent = anchored ? 'raise anchor' : 'drop anchor';
+  }
+  const _sailing = inCanoe && started && _raftLaunch <= 0 && !anchored;   // anchored = bow out to fish, not the sheet
   if (sheetHand.visible !== _sailing) sheetHand.visible = _sailing;
   if (_sailing) {
     if (bow.visible) bow.visible = false;                 // can't shoot while working the sheet
