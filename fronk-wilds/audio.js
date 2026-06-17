@@ -1024,6 +1024,12 @@ export class AudioEngine {
   }
 
   // the breath-in of waking — a soft rising inhale of filtered noise
+  // a short effort grunt — the breath sample pitched DOWN and clipped short, so
+  // a jump/landing reads as a human exertion, not a sigh. Reuses 'breath'.
+  grunt(vol = 0.5) {
+    if (!this.started || this.muted) return;
+    this._play('breath', { gain: vol, rate: 0.6 + Math.random() * 0.12, n: 2, lp: 1500 });
+  }
   breath() {
     if (!this.started || this.muted) return;
     if (this._play('breath', { gain: 0.5, rate: 1.06, n: 2 })) return;

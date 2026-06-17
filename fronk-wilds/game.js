@@ -2066,23 +2066,23 @@ function buildFire(g, cx, cz, lit) {
   }
   // three nested flame cones at descending scale — layered flicker
   const flame = new THREE.Group(); flame.position.set(cx, 0.5, cz);
-  const matA = new THREE.MeshStandardMaterial({ color: 0xff7a1e, emissive: 0xff5a10, emissiveIntensity: 2.4 });
-  const matB = new THREE.MeshStandardMaterial({ color: 0xffb347, emissive: 0xff8a1e, emissiveIntensity: 2.8 });
-  const matC = new THREE.MeshStandardMaterial({ color: 0xffe39a, emissive: 0xffd070, emissiveIntensity: 3.4 });
+  const matA = new THREE.MeshStandardMaterial({ color: 0xff7a1e, emissive: 0xff5a10, emissiveIntensity: 1.9 });
+  const matB = new THREE.MeshStandardMaterial({ color: 0xffb347, emissive: 0xff8a1e, emissiveIntensity: 2.25 });
+  const matC = new THREE.MeshStandardMaterial({ color: 0xffe39a, emissive: 0xffd070, emissiveIntensity: 2.7 });
   const fa = new THREE.Mesh(flameGeoA, matA); fa.position.y = 0.7;
   const fb = new THREE.Mesh(flameGeoB, matB); fb.position.y = 0.55;
   const fc = new THREE.Mesh(flameGeoC, matC); fc.position.y = 0.4;
   flame.add(fa, fb, fc); g.add(flame);
   // a few glowing embers floating low over the pit
   const embers = [];
-  const emberMat = new THREE.MeshStandardMaterial({ color: 0xff8a2e, emissive: 0xff6a1e, emissiveIntensity: 3 });
+  const emberMat = new THREE.MeshStandardMaterial({ color: 0xff8a2e, emissive: 0xff6a1e, emissiveIntensity: 2.4 });
   for (let i = 0; i < 5; i++) {
     const e = new THREE.Mesh(emberGeo, emberMat);
     const a = i * 1.7;
     e.position.set(cx + Math.cos(a) * 0.3, 0.45 + (i % 3) * 0.12, cz + Math.sin(a) * 0.3);
     e.userData.ph = a; g.add(e); embers.push(e);
   }
-  const light = new THREE.PointLight(0xff9242, 14, 26, 1.8);
+  const light = new THREE.PointLight(0xff9242, 11.5, 26, 1.8);
   light.position.set(cx, 1.5, cz); g.add(light);
   g.userData.fire = { flame, fa, fb, fc, embers, light, cx, cz };
 }
@@ -8090,6 +8090,7 @@ function tickBody() {
     const _ji = Math.min(2, tripLevel - 1);   // levels 4-10 reuse the L3 (max float) jump
     if (jumpQ && grounded) {
       playerVy = tripLevel > 0 ? TRIP_VY[_ji] : 7.7; grounded = false;
+      if (audio.grunt && Math.random() < 0.5) audio.grunt(0.42);   // an effort grunt on the push-off
     }
     jumpQ = false;
     if (!grounded) {
@@ -8101,6 +8102,7 @@ function tickBody() {
         if (impact > 2.6) {                       // a real landing, not a tiny step-down
           _landDip = Math.min(0.13, impact * 0.014);   // the camera settles into your knees
           if (audio.impact) audio.impact(_curGround === 'rock' ? 'wood' : 'ground', 0.1);
+          if (audio.grunt && impact > 5) audio.grunt(Math.min(0.6, 0.3 + impact * 0.03));   // "oof" on a hard landing
           if (IS_TOUCH && navigator.vibrate && impact > 5.5) navigator.vibrate(14);
           // a burst of dust at your boots — bigger the harder you hit
           if (_curGround !== 'rock') {
