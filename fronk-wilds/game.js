@@ -4903,6 +4903,11 @@ let _doorGroup = null, _doorPlat = null, _doorPlaced = false;
 let _inKitchen = false, _kitchenGroup = null, _preKitchen = null;
 let _kitchenItems = [], _kitchenPrev = null, _kitchenFlashT = 0;
 const KFLOOR = 640;                         // the counter sits up here, far above the valley
+// neutral daylight for the kitchen — the valley's golden-hour sun/IBL washes it
+// monochrome-gold; these cool fills (toggled on only inside) read as modern
+// indoor daylight. Added once at intensity 0; driven in the lighting block.
+const _kitchenFill = new THREE.HemisphereLight(0xfdfdff, 0xc4c8d2, 0); scene.add(_kitchenFill);
+const _kitchenKey = new THREE.DirectionalLight(0xffffff, 0); _kitchenKey.position.set(40, 130, -50); scene.add(_kitchenKey);
 function placeDoor() {
   if (_doorPlaced || !_cloudGroup) return;
   _doorPlaced = true;
@@ -5886,6 +5891,24 @@ function arrowUpdate(dt) {
     }
     if (treeHit) continue;
 
+    // ── kitchen world: the counter (and the giant objects) stop arrows, so
+    // they don't fall 600m to the valley floor you can no longer see ──
+    if (_inKitchen) {
+      let floor = KFLOOR;
+      for (const it of _kitchenItems) {
+        if (Math.hypot(px - it.x, pz - it.z) < it.r && it.top > floor) floor = it.top;
+      }
+      if (py < floor) {
+        const vl = Math.hypot(a.v.x, a.v.y, a.v.z) || 1;
+        a.m.position.set(px, floor + 0.02, pz);
+        a.m.lookAt(px + a.v.x / vl, floor + 0.02 + a.v.y / vl, pz + a.v.z / vl);
+        a.stuck = true; a.t = ARROW_STUCK_LIFE;
+        if (a.m.userData.streak) { a.m.remove(a.m.userData.streak); a.m.userData.streak = null; }
+        if (audio.impact) audio.impact('wood', distVol);
+      }
+      continue;                                       // skip the valley water/ground tests inside
+    }
+
     // water hit — a splash, then it sinks and is gone
     if (py < WATER_Y && heightAt(px, pz) < WATER_Y) {
       if (audio.impact) audio.impact('water', distVol);
@@ -6561,6 +6584,20 @@ function tickBody() {
     hemi.intensity *= 1 - cover * 0.28;
     if ('environmentIntensity' in scene) scene.environmentIntensity *= 1 - cover * 0.3;
     renderer.toneMappingExposure += cover * 0.05;   // lift a touch so shadows don't crush to mud
+  }
+  // ── kitchen world: override the valley's golden-hour rig with neutral indoor
+  // daylight so it reads as a real modern place, not a gold-soaked field. Done
+  // here (the lighting runs every frame) so it survives the day/night writes;
+  // valley lighting resumes automatically the moment you leave (_inKitchen=0).
+  if (_inKitchen) {
+    sun.intensity = 0.45;                            // tame the golden key
+    hemi.intensity = 0.18;
+    if ('environmentIntensity' in scene) scene.environmentIntensity = 0.35;
+    _kitchenFill.intensity = 1.3;                    // cool neutral daylight
+    _kitchenKey.intensity = 1.5;                     // a crisp window key for shape
+    renderer.toneMappingExposure = 1.05;
+  } else if (_kitchenFill.intensity) {
+    _kitchenFill.intensity = 0; _kitchenKey.intensity = 0;
   }
   // your carried lantern — a STRONG warm pool (~20-70ft) with a live flicker;
   // beyond it, the dark. Faint by day, the hero light after dark.
