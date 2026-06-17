@@ -5418,6 +5418,7 @@ let _sailFovT = 0;               // 0..1 eased "sailing view" zoom-out
 let _sailTrim = 0;               // -1..1 — the SHEET: pull the rope to swing the sail
 let _boatWake = 0;               // 0..1 eased boat speed — drives wave size + bow wake
 let _luffing = false;            // sail flapping / spilling wind (no drive)
+let _wakeFoamT = 0;              // bow-spray spawn cooldown
 
 // ── the wake-up: a ~3.5s cinematic intro that plays on enter and on
 // every respawn. Driven entirely by introT on the dt loop (no setTimeout),
@@ -8024,6 +8025,18 @@ function tickBody() {
       if (cspd > RAFT_MAXV) { canoeVX *= RAFT_MAXV / cspd; canoeVZ *= RAFT_MAXV / cspd; }
       const speed01 = Math.min(1, cspd / RAFT_MAXV);
       _boatWake += (speed01 - _boatWake) * Math.min(1, dt * 1.5);   // wake/waves build with speed
+      // BOW WAKE — foam spray peels off the bow in a V, more the faster you go,
+      // so the sea reads as alive when you're underway. Reuses the dust particles.
+      _wakeFoamT -= dt;
+      if (speed01 > 0.22 && _wakeFoamT <= 0) {
+        _wakeFoamT = 0.13 - speed01 * 0.08;                 // faster → denser spray
+        const bx = player.x + Math.sin(raftYaw) * 7.5, bz = player.z + Math.cos(raftYaw) * 7.5;
+        const sxv = Math.cos(raftYaw), szv = -Math.sin(raftYaw);   // beam vector
+        const spread = 1.1 + speed01 * 1.6;
+        for (const s of [-1, 1]) {
+          dustPuff(bx + sxv * s * spread, WATER_Y + 0.12, bz + szv * s * spread, 0xeaf2f4, 0.45 + speed01 * 0.7);
+        }
+      }
       // the sail ANSWERS THE ROPE: the boom swings to your trim (and shivers a
       // little when it's luffing, so you can see you've spilled the wind).
       if (canoe._sailPivot) {
