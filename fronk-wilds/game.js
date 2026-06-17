@@ -5781,7 +5781,7 @@ if (_consumeBtn) {
 }
 const _anchorBtn = document.getElementById('anchorBtn'); // tap to drop/raise the anchor (fishing)
 if (_anchorBtn) {
-  const tog = (e) => { e.preventDefault(); e.stopPropagation(); toggleAnchor(); _anchorBtn.textContent = anchored ? 'raise anchor' : 'drop anchor'; };
+  const tog = (e) => { e.preventDefault(); e.stopPropagation(); toggleAnchor(); _anchorBtn.classList.toggle('dropped', anchored); };
   _anchorBtn.addEventListener('click', tog);
   _anchorBtn.addEventListener('touchstart', tog, { passive: false });
 }
@@ -7632,7 +7632,7 @@ if (!IS_TOUCH) {
     if (!(started && !intro && !arrowCam && document.pointerLockElement)) return;
     if (e.button === 2 && drawing) {          // right-click — back out of the shot
       drawing = false; drawT = 0; holdT = 0; if (audio.drawCreak) audio.drawCreak(0);
-    } else if (e.button === 0) drawing = true;
+    } else if (e.button === 0 && !(inCanoe && !anchored)) drawing = true;   // no bow while DRIVING (anchor up)
   });
   addEventListener('mouseup', e => { if (e.button === 0 && drawing) { drawing = false; loose(); } });
   addEventListener('contextmenu', e => { if (document.pointerLockElement) e.preventDefault(); });
@@ -7726,7 +7726,7 @@ if (!IS_TOUCH) {
   const btn = document.getElementById('shootBtn');
   btn.addEventListener('touchstart', e => {
     e.preventDefault();
-    if (shootId !== null || intro || arrowCam) return;  // 2nd finger / wake-up / mid-chase
+    if (shootId !== null || intro || arrowCam || (inCanoe && !anchored)) return;  // 2nd finger / wake-up / mid-chase / DRIVING (anchor up = no bow)
     const t = e.changedTouches[0];
     shootId = t.identifier; lastShoot = { x: t.clientX, y: t.clientY };
     drawing = true; btn.classList.add('drawing');
@@ -8016,10 +8016,11 @@ function tickBody() {
     const e = Math.min(1, dt * 7 * _cineStrength);
     player.yaw += Math.atan2(Math.sin(wantYaw - player.yaw), Math.cos(wantYaw - player.yaw)) * e;
     player.pitch += (Math.max(-0.6, Math.min(0.4, wantPitch)) - player.pitch) * e;
-    _lookHoldT = 0.6;                                        // brief settle before boat-follow resumes
-  } else if (inCanoe && started && _lookHoldT <= 0 && !drawing) {
-    // ── boat-follow camera ── while sailing, the view eases back to face the bow
-    // (where you're heading) once you stop looking around — your head settles forward.
+    _lookHoldT = 4.5;                                        // hold on what we looked at — don't yank back to the bow
+  } else if (inCanoe && !anchored && started && _lookHoldT <= 0 && !drawing) {
+    // ── boat-follow camera ── ONLY while DRIVING (anchor up). Anchored = fishing,
+    // so your look is free (shooting the bow never snaps you back to the bow).
+    // While driving, the view eases back to face the heading once you stop looking.
     const want = raftYaw + Math.PI;
     player.yaw += Math.atan2(Math.sin(want - player.yaw), Math.cos(want - player.yaw)) * Math.min(1, dt * 1.3);
     player.pitch += (-0.02 - player.pitch) * Math.min(1, dt * 0.8);
@@ -8384,7 +8385,7 @@ function tickBody() {
       // nudges it); the sail then EASES toward it with a slight lag, so it feels
       // like a heavy boom swinging, not a twitchy stick. Full range = 180° swing.
       _sailTarget = Math.max(-1, Math.min(1, _sailTarget + mx * 1.1 * dt));   // A/D nudge the target
-      _sailTrim += (_sailTarget - _sailTrim) * Math.min(1, dt * 2.6);          // the lag
+      _sailTrim += (_sailTarget - _sailTrim) * Math.min(1, dt * 1.8);          // the lag — heavier, less twitchy
       const boom = _sailTrim * 1.57;                      // boom swings a full ±90° (180° total)
       // ── TRUE → APPARENT wind ── the wind the SAIL feels is the true wind minus
       // the boat's own velocity. Accelerate and the wind swings forward (you must
@@ -8411,7 +8412,7 @@ function tickBody() {
       _luffing = pos > 0.05 && catchW < 0.4;                   // flapping — spilling the wind
       // STEER with the sail's balance — perfect trim holds course, a little off
       // turns you. Looking around no longer touches the helm.
-      raftYaw += trimSigned * 1.0 * appStr * pos * dt;
+      raftYaw += trimSigned * 0.7 * appStr * pos * dt;        // gentler helm — turns feel weightier
       const drive = RAFT_ACCEL * appStr * pos * catchW;
       canoeVX += Math.sin(raftYaw) * drive * dt;
       canoeVZ += Math.cos(raftYaw) * drive * dt;
@@ -8781,8 +8782,11 @@ function tickBody() {
   if (_anchorBtn) {
     const showAnchor = inCanoe && started && _raftLaunch <= 0;
     _anchorBtn.classList.toggle('show', showAnchor);
-    if (showAnchor) _anchorBtn.textContent = anchored ? 'raise anchor' : 'drop anchor';
+    _anchorBtn.classList.toggle('dropped', anchored);
   }
+  // DRIVING (aboard, anchor up): the sail lever is the only control — CSS hides
+  // bow + jump; walking is already off in the canoe. Fishing (anchored) frees the bow.
+  document.body.classList.toggle('driving', inCanoe && started && !anchored && _raftLaunch <= 0);
   // the sail slider shows only while actually sailing (aboard, launched, not anchored)
   if (_sailSlider) {
     const showSail = inCanoe && started && _raftLaunch <= 0 && !anchored;

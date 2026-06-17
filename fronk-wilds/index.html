@@ -122,16 +122,21 @@
   #consume.show{opacity:1;pointer-events:auto;transform:translate(-50%,0) scale(1);
     animation:consumePulse 1.8s ease-in-out infinite}
   #consume:active{transform:translate(-50%,0) scale(.95)}
-  #anchorBtn{position:fixed;right:4%;bottom:30%;transform:scale(.9);
-    z-index:16;pointer-events:none;opacity:0;transition:opacity .25s,transform .25s;
-    font-family:'Cinzel','Times New Roman',serif;font-weight:600;font-size:14px;
-    letter-spacing:.22em;text-indent:.22em;text-transform:uppercase;color:#dbe7ee;
-    background:rgba(14,22,30,.4);border:1.5px solid rgba(150,190,220,.5);
-    border-radius:40px;padding:13px 24px;cursor:pointer;-webkit-tap-highlight-color:transparent;
+  /* anchor = a round symbol up top-right; the ONLY tap-control besides the sail
+     lever while you're aboard. Dim outline = anchor up (driving); lit amber =
+     anchor down (fishing). */
+  #anchorBtn{position:fixed;right:5%;top:13%;width:54px;height:54px;
+    z-index:16;pointer-events:none;opacity:0;transition:opacity .25s,transform .25s,color .2s,border-color .2s,box-shadow .2s;
+    display:flex;align-items:center;justify-content:center;font-size:27px;line-height:1;color:#cfe0ea;
+    background:rgba(14,22,30,.4);border:1.6px solid rgba(150,190,220,.5);
+    border-radius:50%;cursor:pointer;-webkit-tap-highlight-color:transparent;
     backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);
-    box-shadow:0 0 20px rgba(120,170,210,.32)}
-  #anchorBtn.show{opacity:1;pointer-events:auto;transform:scale(1)}
-  #anchorBtn:active{transform:scale(.95)}
+    box-shadow:0 0 18px rgba(120,170,210,.3)}
+  #anchorBtn.show{opacity:1;pointer-events:auto}
+  #anchorBtn:active{transform:scale(.92)}
+  #anchorBtn.dropped{color:#ffd9a4;border-color:rgba(255,200,140,.8);box-shadow:0 0 22px rgba(255,190,120,.5)}
+  /* DRIVING (anchor up): the sail lever is the only control — hide bow + jump */
+  .driving #shootBtn, .driving #jumpBtn{display:none !important}
   #sailSlider{position:fixed;left:50%;bottom:7%;transform:translateX(-50%);width:46%;max-width:430px;height:30px;
     z-index:16;opacity:0;pointer-events:none;transition:opacity .25s;touch-action:none;
     background:rgba(14,22,30,.34);border:1.5px solid rgba(150,190,220,.42);border-radius:18px;
@@ -268,7 +273,7 @@
 <div id="vignette"></div>
 <div id="exhaust"></div>
 <button id="consume">take</button>
-<button id="anchorBtn">drop anchor</button>
+<button id="anchorBtn" aria-label="anchor">⚓</button>
 <div id="sailSlider"><div id="sailHandle"></div></div>
 <div id="title">
   <div id="titleback"></div>
