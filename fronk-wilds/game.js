@@ -3848,7 +3848,7 @@ spawnSharks();   // the lake already exists (built at module load) — stock it 
 // glance down through the half-clear water and a shape the size of a building is
 // just… moving down there. (Opaque, so it shows through the transparent surface.)
 let _leviathan = null;
-const LEVI_Y = -26;                                  // far below the sharks (~-7..-10)
+const LEVI_Y = -19;                                  // deep, but shallow enough to glimpse past the deck edge (sharks ~-7..-10)
 {
   const g = new THREE.Group();
   const mat = new THREE.MeshStandardMaterial({ color: 0x0a161e, roughness: 1, metalness: 0, flatShading: true });
@@ -3861,6 +3861,7 @@ const LEVI_Y = -26;                                  // far below the sharks (~-
     fin.position.set(sx * 5.5, -1, 6); fin.rotation.z = sx * 0.3; fin.rotation.y = sx * 0.45; g.add(fin);
   }
   g.position.set(SHARK_CENTER.x, LEVI_Y, SHARK_CENTER.z);
+  g.scale.setScalar(1.4);                            // ~60m — a true leviathan, readable from above
   scene.add(g); _leviathan = g;
 }
 function leviathanUpdate(t) {
