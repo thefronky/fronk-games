@@ -5567,6 +5567,7 @@ window._tripLevel = () => tripLevel;   // debug/test hook
 window._tripOnset = () => _tripOnset;  // debug/test hook
 window._uTrip = () => tripUniforms.uTrip.value;   // debug/test hook
 let playerVy = 0, grounded = true, jumpQ = false;
+let _coyote = 0, _jumpBuf = 0;   // coyote grace (jump just after a ledge) + input buffer (jump just before landing)
 let inCanoe = false, canoeVX = 0, canoeVZ = 0, _wasCanoe = false;
 let _boatRoll = 0, _boatPitch = 0;   // boat rock, handed from the canoe to the camera
 // the raft is a SAILING vessel: left/right tacks the heading, the sail catches
@@ -8517,13 +8518,24 @@ function tickBody() {
     // L3 = ethereal, bigger leaps. (apex L1~5.8m · L2~10m · L3~22m)
     const TRIP_VY = [9, 11, 14], TRIP_G = [7, 6, 4.5];
     const _ji = Math.min(2, tripLevel - 1);   // levels 4-10 reuse the L3 (max float) jump
-    if (jumpQ && grounded) {
+    // ── coyote time + input buffer ── forgive touch timing: you can jump for a
+    // beat AFTER walking off a ledge (coyote), and a jump pressed just BEFORE you
+    // land fires the instant you touch down (buffer). Big deal for the treetop
+    // parkour on a phone where tap and ledge/landing frame rarely line up.
+    if (jumpQ) { _jumpBuf = 0.13; jumpQ = false; }
+    _coyote = grounded ? 0.12 : Math.max(0, _coyote - dt);
+    if (_jumpBuf > 0 && (grounded || _coyote > 0)) {
       playerVy = tripLevel > 0 ? TRIP_VY[_ji] : 7.7; grounded = false;
+      _jumpBuf = 0; _coyote = 0;
       if (audio.grunt && Math.random() < 0.5) audio.grunt(0.42);   // an effort grunt on the push-off
     }
-    jumpQ = false;
+    _jumpBuf = Math.max(0, _jumpBuf - dt);
     if (!grounded) {
-      const g = tripLevel > 0 ? TRIP_G[_ji] : 13;
+      // ── asymmetric gravity ── light on the way up (keep the tall Halo float),
+      // a readable HANG at the apex, then a HEAVIER fall so you land with weight
+      // instead of moon-mushing down. Apex height barely moves (takeoff vel kept).
+      const baseG = tripLevel > 0 ? TRIP_G[_ji] : 13;
+      const g = playerVy < 0 ? baseG * 1.8 : (Math.abs(playerVy) < 1.6 ? baseG * 0.55 : baseG);
       playerVy -= g * dt; player.airY = (player.airY ?? groundY) + playerVy * dt;
       if (player.airY <= groundY) {
         const impact = -playerVy;                 // how hard you came down
