@@ -47,6 +47,13 @@ const MANIFEST = [
   // ── sharks ──
   { name: 'shark_splash', n: 2, dur: 1.2, prompt: 'a large fish or shark thrashing and splashing hard at the surface of a lake, big violent water splash, close' },
   { name: 'shark_lunge',  n: 1, dur: 1.4, prompt: 'a huge shark bursts up out of the water in a violent surging splash, sudden explosive water lunge, menacing' },
+  // ── living-animal idle calls (spatial, played by audio.animalCall) ──
+  { name: 'deer_call',  n: 2, dur: 1.2, prompt: 'a deer bleats and grunts softly, short nasal call, calm wild animal in a meadow, natural, no music' },
+  { name: 'stag_call',  n: 2, dur: 1.8, prompt: 'a red deer stag bellows, deep guttural roar grunt, wild, resonant, autumn rut, natural, no music' },
+  { name: 'fox_call',   n: 2, dur: 1.0, prompt: 'a red fox screams and yelps, sharp eerie call, short, piercing, natural, no music' },
+  { name: 'cow_moo',    n: 2, dur: 1.6, prompt: 'a cow lows and moos, deep mellow drawn-out call, calm pasture animal, natural, no music' },
+  { name: 'horse_call', n: 2, dur: 1.6, prompt: 'a horse whinnies and neighs, bright snorting call, single, wild, natural, no music' },
+  { name: 'wolf_call',  n: 2, dur: 1.4, prompt: 'a wolf yips and growls low, short close call, not a full howl, alert wild canine, natural, no music' },
   // ── seamless ambience BEDS (looped in-engine; long clips for smooth loops) ──
   { name: 'bed_wind',  n: 1, dur: 16, influence: 0.3, prompt: 'gentle steady wind blowing through a meadow and trees, soft continuous breeze, calm ambience' },
   { name: 'bed_water', n: 1, dur: 16, influence: 0.3, prompt: 'calm lake water lapping gently at a shoreline, soft continuous ripples, peaceful ambience' },
