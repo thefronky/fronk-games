@@ -604,11 +604,14 @@ const waterUniforms = { uTime: { value: 0 } };
                     * (0.5 + 0.5*sin(vDepth*9.0 - uTime*2.2))
                     * smoothstep(0.5, 0.95, wfbm(vWP*0.7 + vec3(uTime*0.3)));
        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.90,0.95,0.98), clamp(foam,0.0,1.0)*0.8);
-       // WHITECAPS — foam flecks breaking on the crests of the offshore swell, so
-       // the open water reads alive. Only where the wave is near its peak AND deep.
-       float cap = smoothstep(0.20, 0.34, vWave) * smoothstep(2.0, 4.0, vDepth)
-                   * smoothstep(0.55, 0.92, wfbm(vWP*1.3 + vec3(uTime*0.5)));
-       diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.93,0.96,0.99), clamp(cap,0.0,1.0)*0.7);`)
+       // WHITECAPS — foam breaking on the crests of the offshore swell. Kept LOCAL
+       // (faded out past ~45m) so distant water doesn't shimmer/jitter as the
+       // camera pans — that crawl looked bad in the opening orbit. Lower-frequency
+       // noise + slower time = bigger, calmer foam patches that don't strobe.
+       float capDist = smoothstep(95.0, 35.0, length(cameraPosition - vWP));
+       float cap = smoothstep(0.22, 0.36, vWave) * smoothstep(2.5, 4.5, vDepth)
+                   * smoothstep(0.62, 0.95, wfbm(vWP*0.6 + vec3(uTime*0.25))) * capDist;
+       diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.93,0.96,0.99), clamp(cap,0.0,1.0)*0.6);`)
       .replace('#include <dithering_fragment>',
       `#include <dithering_fragment>
        vec3 V = normalize(cameraPosition - vWP);
