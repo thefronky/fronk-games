@@ -581,8 +581,21 @@ const waterUniforms = { uTime: { value: 0 } };
     sh.uniforms.uTime = waterUniforms.uTime;
     sh.uniforms.uSunDir = skyUniforms.sunDir;     // shared live uniforms — free
     sh.uniforms.uNight = skyUniforms.night;
-    sh.vertexShader = 'uniform float uTime;\nattribute float depth;\nvarying float vDepth;\nvarying vec3 vWP;\nvarying float vWave;\n'
-      + sh.vertexShader.replace('#include <begin_vertex>',
+    sh.vertexShader = 'uniform float uTime;\nattribute float depth;\nvarying float vDepth;\nvarying vec3 vWP;\nvarying float vWave;\nvarying vec3 vWN;\n'
+      + sh.vertexShader
+      .replace('#include <beginnormal_vertex>',
+      `#include <beginnormal_vertex>
+       // ── analytic wave normal (the keystone) ── the surface DISPLACES below but
+       //    used to keep its flat up-normal, so it never caught the light. Take the
+       //    exact derivative of the wave height field → a true sloped normal, so the
+       //    sun glint and sky reflection now ride across the swells.
+       float wdN = clamp((depth-0.4)*0.6, 0.0, 1.0);
+       float ph1 = position.x*0.12 + position.y*0.05 + uTime*1.45;
+       float dWdx = (cos(ph1)*0.036 + cos(position.x*0.22 + uTime*1.7)*0.0264) * wdN;
+       float dWdy = (cos(ph1)*0.015 - sin(position.y*0.31 + uTime*1.3)*0.031) * wdN;
+       objectNormal = normalize(vec3(-dWdx, -dWdy, 1.0));
+       vWN = normalize(mat3(modelMatrix) * objectNormal);`)
+      .replace('#include <begin_vertex>',
       `#include <begin_vertex>
        float wd = clamp((depth-0.4)*0.6, 0.0, 1.0);   // calm at the bank, big swell offshore
        float wave = sin(position.x*0.12 + position.y*0.05 + uTime*1.45)*0.30   // long primary roller
@@ -593,7 +606,7 @@ const waterUniforms = { uTime: { value: 0 } };
        vDepth = depth;
        vWP = (modelMatrix * vec4(position, 1.0)).xyz;`);
     sh.fragmentShader = `uniform float uTime; uniform vec3 uSunDir; uniform float uNight;
-      varying float vDepth; varying vec3 vWP; varying float vWave;
+      varying float vDepth; varying vec3 vWP; varying float vWave; varying vec3 vWN;
       float wh31(vec3 p){ return fract(sin(dot(p, vec3(127.1,311.7,74.7)))*43758.5453); }
       float wvn(vec3 p){ vec3 i=floor(p),f=fract(p); f=f*f*(3.0-2.0*f);
         return mix(mix(mix(wh31(i),wh31(i+vec3(1,0,0)),f.x),mix(wh31(i+vec3(0,1,0)),wh31(i+vec3(1,1,0)),f.x),f.y),
@@ -617,11 +630,12 @@ const waterUniforms = { uTime: { value: 0 } };
       .replace('#include <dithering_fragment>',
       `#include <dithering_fragment>
        vec3 V = normalize(cameraPosition - vWP);
-       float fres = mix(0.06, 0.7, pow(1.0 - max(V.y, 0.0), 5.0));            // Schlick sky reflection (gentle)
+       vec3 N = normalize(vWN);                                                // the true wave-sloped normal
+       float fres = mix(0.06, 0.7, pow(1.0 - max(dot(V, N), 0.0), 5.0));       // Schlick sky reflection, now riding the slopes
        vec3 skyCol = mix(vec3(0.55,0.66,0.80), vec3(0.04,0.06,0.12), uNight);
        gl_FragColor.rgb = mix(gl_FragColor.rgb, skyCol, fres*0.4);
-       vec3 Hh = normalize(V + uSunDir);                                       // tight sun sparkle
-       gl_FragColor.rgb += vec3(1.0,0.85,0.6) * pow(max(Hh.y,0.0), 120.0) * (1.0 - uNight) * 0.8;`);
+       vec3 Hh = normalize(V + uSunDir);                                       // sun glint travels the swells now
+       gl_FragColor.rgb += vec3(1.0,0.85,0.6) * pow(max(dot(N, Hh), 0.0), 90.0) * (1.0 - uNight) * 0.85;`);
   };
   // lake-local plane (a world-sized sheet pokes out past the terrain rim and
   // reads as a band on the horizon). Per-vertex DEPTH = how far the lakebed sits
