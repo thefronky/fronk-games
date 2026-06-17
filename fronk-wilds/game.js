@@ -7829,7 +7829,7 @@ function tickBody() {
       fireLvl = Math.min(1, TREEFIRES.length / 8) * prox;
     }
     audio.update(dt, {
-      moving: !!(mx || mz), sprint: sprinting, _moveLvl,
+      moving: !inCanoe && !!(mx || mz), sprint: sprinting, _moveLvl,   // no footsteps in the boat
       wolfDist, lakeDist: Math.hypot(player.x - 70, player.z + 90),
       night: window._night || 0, hp: player.hp, breath: breathLoad,
       px: player.x, pz: player.z, yaw: player.yaw, rain: _rainLevel, fire: fireLvl,
