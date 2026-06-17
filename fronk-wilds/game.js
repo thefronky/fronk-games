@@ -617,11 +617,16 @@ const waterUniforms = { uTime: { value: 0 } };
       `#include <color_fragment>
        float dn = clamp(vDepth/7.0, 0.0, 1.0);
        diffuseColor.rgb = mix(vec3(0.20,0.40,0.42), vec3(0.04,0.14,0.20), dn);   // mid-shallow→deep (both watery)
-       // a THIN foamy shoreline only — gated OFF where depth<=0 so it never washes the whole sheet
-       float foam = smoothstep(0.7, 0.06, vDepth) * step(0.05, vDepth)
-                    * (0.5 + 0.5*sin(vDepth*9.0 - uTime*2.2))
-                    * smoothstep(0.5, 0.95, wfbm(vWP*0.7 + vec3(uTime*0.3)));
-       diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.90,0.95,0.98), clamp(foam,0.0,1.0)*0.8);
+       // shoreline surf as STEADY bands parallel to shore (by depth). The old
+       // sin(depth - uTime) + drifting fbm scrolled inward and shimmered; these
+       // ribbons sit still and only breathe gently, with STATIC noise breaking
+       // the ring so it never reads as a perfect circle. Gated OFF in deep water.
+       float shore = smoothstep(0.85, 0.06, vDepth) * step(0.05, vDepth);
+       float band  = smoothstep(0.35, 0.95, sin(vDepth*10.0));   // a couple of parallel surf lines
+       float breathe = 0.82 + 0.18*sin(uTime*0.8);               // uniform slow pulse, no spatial scroll
+       float brk   = smoothstep(0.45, 0.85, wfbm(vWP*0.6));      // static break-up (no uTime → no drift)
+       float foam = shore * band * breathe * brk;
+       diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.90,0.95,0.98), clamp(foam,0.0,1.0)*0.85);
        // (Whitecaps removed — the per-pixel foam flecks strobed/aliased into a
        //  glitchy speckle. The WAVES are the smooth vertex swell instead; a soft
        //  crest BRIGHTENING reads as a wave without any high-frequency sparkle.)
