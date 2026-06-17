@@ -339,6 +339,7 @@ export class AudioEngine {
   // Anti-spammed per name so rapid events don't pile the music up.
   themeSting(name, gain = 0.9) {
     if (!this.started || this.muted) return false;
+    if (this._cinematic) return false;   // opening is music-only — no stings
     const buf = this._sting[name]; if (!buf) return false;
     const C = this.ctx, t = C.currentTime;
     this._stingAt = this._stingAt || {};

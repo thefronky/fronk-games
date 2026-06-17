@@ -5488,6 +5488,7 @@ let _sailTrim = 0;               // -1..1 — the SHEET: pull the rope to swing 
 let _boatWake = 0;               // 0..1 eased boat speed — drives wave size + bow wake
 let _luffing = false;            // sail flapping / spilling wind (no drive)
 let _wakeFoamT = 0;              // bow-spray spawn cooldown
+let _lookHoldT = 0;             // >0 = you're actively looking around; pauses the boat-follow camera
 
 // ── the wake-up: a ~3.5s cinematic intro that plays on enter and on
 // every respawn. Driven entirely by introT on the dt loop (no setTimeout),
@@ -7403,6 +7404,7 @@ if (!IS_TOUCH) {
   addEventListener('contextmenu', e => { if (document.pointerLockElement) e.preventDefault(); });
   addEventListener('mousemove', e => {
     if (!document.pointerLockElement) return;
+    if (e.movementX || e.movementY) _lookHoldT = 1.4;   // you're looking → pause boat-follow
     player.yaw -= e.movementX * 0.0023;
     player.pitch = Math.max(-1.45, Math.min(1.45, player.pitch - e.movementY * 0.0023));
   });
@@ -7442,6 +7444,7 @@ if (!IS_TOUCH) {
         // ACCELERATED look: slow drags stay precise for aiming, fast flicks
         // turn WAY faster — the bigger the motion, the more it multiplies.
         const dx = t.clientX - lastLook.x, dy = t.clientY - lastLook.y;
+        if (dx || dy) _lookHoldT = 1.4;                      // you're looking → pause boat-follow
         player.yaw -= accelLook(dx, 0.0040, 0.075);          // horizontal: snappy on big swipes
         player.pitch = Math.max(-1.5, Math.min(1.5,
           player.pitch - accelLook(dy, 0.0030, 0.055)));     // vertical: gentler base, still accelerates
@@ -7753,10 +7756,23 @@ window._sim = (seconds) => {   // test hook: advance the world while the
 function tickBody() {
   const dt = simDt ?? Math.min(clock.getDelta(), 0.05);
   const t = clock.elapsedTime;
-  // no animal voices during the title / dive / wake cinematic OR the first few
-  // seconds after you wake — keeps a stray wolf howl (a buzzy procedural sawtooth)
-  // or any sfx from jarring the quiet, music-only opening.
-  audio._cinematic = !started || intro || launching || (_wakeT > 0 && t - _wakeT < 4);
+  // THE OPENING IS MUSIC-ONLY. Title / dive / wake and the first ~6s after you
+  // wake play nothing but the cinematic theme — no animal voices, no stings, no
+  // foley, no spatial sfx (a wolf hunting right by spawn was firing snarls + a
+  // kill sting that read as "is the game resetting?"). _cinematic gates the voice
+  // methods; the bus mutes below catch EVERYTHING else routed through foley/spatial.
+  audio._cinematic = !started || intro || launching || (_wakeT > 0 && t - _wakeT < 6);
+  if (audio.foleyBus) audio.foleyBus.gain.value = audio._cinematic ? 0 : 1.15;
+  if (audio.spatialBus) audio.spatialBus.gain.value = audio._cinematic ? 0 : 1.0;
+  if (_lookHoldT > 0) _lookHoldT -= dt;
+  // ── boat-follow camera ── while sailing, the view eases back to face the bow
+  // (where you're heading) once you stop looking around — your head naturally
+  // settles forward. Drag to look freely; it re-locks ~1.4s after you let go.
+  if (inCanoe && started && _lookHoldT <= 0 && !drawing) {
+    const want = raftYaw + Math.PI;                 // camera-forward aligned with the bow
+    player.yaw += Math.atan2(Math.sin(want - player.yaw), Math.cos(want - player.yaw)) * Math.min(1, dt * 1.3);
+    player.pitch += (-0.02 - player.pitch) * Math.min(1, dt * 0.8);   // settle to a near-level gaze
+  }
   if (audio.pumpTitle) audio.pumpTitle(dt);   // keep the title theme alive (runs pre-game too)
   // ── the trip ── a mushroom turns the world strange: hue cycles, colors
   // swell, the picture breathes. Eases out over the last couple seconds.
