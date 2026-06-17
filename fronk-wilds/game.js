@@ -3882,7 +3882,7 @@ function buildSharkMesh() {
 // the music fades — a near-miss, not (usually) a bite. Then a cooldown.
 const SHARKS = [];
 const SHARK_CENTER = { x: 70, z: -90 };   // the deepest part of the lake
-const SHARK_SCALE = 6.6;                  // a sea-monster — dwarfs the whole raft
+const SHARK_SCALE = 10.0;                 // a true sea-monster — full body breaks the surface, dwarfs the raft
 function spawnSharks() {
   for (let i = 0; i < 2; i++) {           // sparse — rarely more than one in view
     const obj = buildSharkMesh(); obj.scale.setScalar(SHARK_SCALE);
@@ -3947,7 +3947,7 @@ function sharkUpdate(dt) {
       s.dir = Math.atan2(tx - p.x, tz - p.z); speed = 6.5;
       dread = Math.max(dread, 0.5 + 0.5 * Math.min(1, (15 - s.circleT) / 4));
       s._spl -= dt; if (s._spl <= 0) { s._spl = 0.8 + Math.random() * 0.7; if (audio.sharkSfx) audio.sharkSfx('shark_splash', p.x, p.z, { gain: 0.7 }); }
-      if (dist < 5 && s.biteCd <= 0) { s.biteCd = 2.5; hurtPlayer(30); if (audio.sharkSfx) audio.sharkSfx('shark_lunge', p.x, p.z); }   // only if you crowd it
+      if (dist < 8 && s.biteCd <= 0) { s.biteCd = 2.5; hurtPlayer(30); if (audio.sharkSfx) audio.sharkSfx('shark_lunge', p.x, p.z); }   // only if you crowd it (bigger mouth)
       if (s.circleT <= 0) { s.state = 'dive'; s.diveT = 10; if (audio.sharkSfx) audio.sharkSfx('shark_splash', p.x, p.z, { gain: 0.9 }); }
     } else if (s.state === 'lunge') {
       // a fast surfacing CHARGE straight at you — bites if it reaches the boat
@@ -3955,7 +3955,7 @@ function sharkUpdate(dt) {
       s.dir = Math.atan2(player.x - p.x, player.z - p.z);
       s.obj.rotation.y = lerpAngle(s.obj.rotation.y, s.dir, Math.min(1, dt * 6));  // turn hard onto you
       dread = Math.max(dread, 0.85);
-      if (dist < 7.0 && s.biteCd <= 0) {
+      if (dist < 11.0 && s.biteCd <= 0) {
         s.biteCd = 99; camShakeT = SHAKE_DUR * 3; kickT = KICK_DUR;
         const took = biteBoatLog();                  // it TEARS A LOG off the raft (no HP damage)
         if (audio.sharkRoar) audio.sharkRoar(p.x, p.z, 1.2);
