@@ -10,6 +10,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 // cache-bust audio.js too (a static import would let the browser/Pages serve
 // a stale audio engine — why new sounds didn't always reach the phone)
 const { AudioEngine } = await import('./audio.js?ts=' + Date.now());
@@ -183,6 +184,24 @@ function buildComposer() {
     0.85);  // threshold — only genuinely bright things bloom
   composer.addPass(bloomPass);
   composer.addPass(new OutputPass());
+  // ── golden-hour grade ── one cheap final pass (display space, after the tonemap):
+  // split-tone (warm shadows / cool highlights) + a touch of contrast & saturation
+  // + a faint vignette folded in, so every surface reads under one graded mood.
+  composer.addPass(new ShaderPass({
+    uniforms: { tDiffuse: { value: null } },
+    vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
+    fragmentShader: `uniform sampler2D tDiffuse; varying vec2 vUv;
+      void main(){
+        vec3 c = texture2D(tDiffuse, vUv).rgb;
+        float l = dot(c, vec3(0.299, 0.587, 0.114));
+        c *= mix(vec3(1.05,0.97,0.88), vec3(0.96,0.99,1.04), smoothstep(0.0, 0.75, l)); // warm shadows → cool highs
+        c = (c - 0.5) * 1.05 + 0.5;                       // gentle contrast
+        c = mix(vec3(l), c, 1.10);                        // a touch more saturation
+        float vig = smoothstep(0.95, 0.32, length(vUv - 0.5));
+        c *= mix(0.84, 1.0, vig);                         // faint vignette
+        gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0);
+      }`,
+  }));
 }
 if (USE_POST) buildComposer();
 
