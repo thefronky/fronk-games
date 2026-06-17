@@ -5495,6 +5495,8 @@ function blinkAwake() {
   if (_eyelids) _eyelids.classList.add('waking');
   setLids(0, 0.5);                                 // shut, a soft warm glow
   if (audio.wakeBreath) audio.wakeBreath();
+  if (audio.dawnChorus) audio.dawnChorus();        // you wake to birdsong + insects
+
   setTimeout(() => setLids(-45, 0.3), 480);        // first flutter
   setTimeout(() => setLids(-12, 0.35), 820);       // a heavy second blink
   setTimeout(() => setLids(-100, 0), 1450);        // and you're awake
@@ -8216,8 +8218,9 @@ function tickBody() {
         player.airY = groundY; playerVy = 0; grounded = true;
         if (impact > 2.6) {                       // a real landing, not a tiny step-down
           _landDip = Math.min(0.13, impact * 0.014);   // the camera settles into your knees
-          if (audio.impact) audio.impact(_curGround === 'rock' ? 'wood' : 'ground', 0.1);
-          if (audio.grunt && impact > 5) audio.grunt(Math.min(0.6, 0.3 + impact * 0.03));   // "oof" on a hard landing
+          // a soft earthen landing only — NO woody 'rock' clack (read as metallic),
+          // NO landing grunt. Keep it natural and quiet.
+          if (audio.impact) audio.impact('ground', 0.3);
           if (IS_TOUCH && navigator.vibrate && impact > 5.5) navigator.vibrate(14);
           // a burst of dust at your boots — bigger the harder you hit
           if (_curGround !== 'rock') {

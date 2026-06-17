@@ -1049,6 +1049,42 @@ export class AudioEngine {
     src.start(t); src.stop(t + 1.3);
   }
 
+  // ── DAWN CHORUS ── the world you wake into: a soft shimmer of insects and a
+  // scatter of sweet birdsong, swelling in gently under the cinematic theme.
+  // Fully procedural (no samples, no paid gen) — sine-whistle birds + a tremolo
+  // insect bed. This is the "waking up to beautiful nature" of the arrival.
+  dawnChorus() {
+    if (!this.started || this.muted) return;
+    const C = this.ctx, t0 = C.currentTime;
+    // insect shimmer — gentle high band-passed noise with a soft tremolo
+    const ins = C.createBufferSource(); ins.buffer = this._shotNoise; ins.loop = true;
+    const bp = C.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 6200; bp.Q.value = 2.2;
+    const ig = C.createGain();
+    ig.gain.setValueAtTime(0.0001, t0);
+    ig.gain.linearRampToValueAtTime(0.022, t0 + 2.2);
+    ig.gain.linearRampToValueAtTime(0.014, t0 + 7);
+    ig.gain.exponentialRampToValueAtTime(0.0004, t0 + 11);
+    const lfo = C.createOscillator(); lfo.frequency.value = 11;
+    const lg = C.createGain(); lg.gain.value = 0.009;
+    lfo.connect(lg).connect(ig.gain); lfo.start(t0); lfo.stop(t0 + 11.2);
+    ins.connect(bp).connect(ig).connect(this.master); ins.start(t0); ins.stop(t0 + 11.3);
+    // birdsong — a handful of soft, sweet chirps that sweep up then settle
+    const chirp = (when, f) => {
+      const o = C.createOscillator(); o.type = 'sine';
+      o.frequency.setValueAtTime(f, when);
+      o.frequency.linearRampToValueAtTime(f * 1.5, when + 0.06);
+      o.frequency.linearRampToValueAtTime(f * 1.12, when + 0.15);
+      const g = C.createGain();
+      g.gain.setValueAtTime(0.0001, when);
+      g.gain.linearRampToValueAtTime(0.05, when + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0005, when + 0.24);
+      o.connect(g).connect(this.master); o.start(when); o.stop(when + 0.28);
+    };
+    const notes = [1800, 2200, 2600, 1500, 2000, 2400, 1700, 2300];
+    let when = t0 + 0.7;
+    for (let i = 0; i < 8; i++) { chirp(when, notes[i] * (0.95 + Math.random() * 0.1)); when += 0.65 + Math.random() * 0.7; }
+  }
+
   // ── the FIRST breath of coming alive ── a deep, audible gasp-inhale that
   // swells as the eyes open, then a slow shaky exhale settling into rhythm.
   // Bigger and wetter than breath(): this is the moment you come to. The
