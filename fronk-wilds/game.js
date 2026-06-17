@@ -5381,6 +5381,14 @@ const canoe = (() => {
   sp.needsUpdate = true; sail.geometry.computeVertexNormals();
   sail.position.set(0, 0.1, 0);                          // centered on the mast, up near the bow
   sailPivot.add(sail);
+  // a TELLTALE — a little wool streamer on the sail. It lies flat/streaming when
+  // the sail is drawing (good trim) and lifts/flutters when it's luffing, so you
+  // can read your trim at a glance. Animated in the sail block (canoe._telltale).
+  const telltale = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.09),
+    new THREE.MeshBasicMaterial({ color: 0xe8584a, side: THREE.DoubleSide }));
+  telltale.position.set(1.7, 0.4, 0.05);      // out near the leading edge of the sail
+  sailPivot.add(telltale);
+  g._telltale = telltale;
   g.add(sailPivot);
   // masthead pennant — re-aimed downwind each frame in the loop (g._windFlag)
   const flag = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.42), flagM);
@@ -8132,6 +8140,12 @@ function tickBody() {
         if (canoe._sail) {
           const fill = _luffing ? 0.18 : 0.7 + catchW * 0.55;   // flat & flapping vs full & taut
           canoe._sail.scale.z += (fill - canoe._sail.scale.z) * Math.min(1, dt * 6);
+        }
+        // telltale streamer: lies flat + streaming when drawing (good trim),
+        // lifts and flutters when luffing — a read-at-a-glance trim cue.
+        if (canoe._telltale) {
+          const flutter = _luffing ? Math.sin(t * 24) * 0.7 + 0.5 : Math.sin(t * 6) * 0.06;
+          canoe._telltale.rotation.z += (flutter - canoe._telltale.rotation.z) * Math.min(1, dt * 9);
         }
       }
       // continuous sail/wind hiss + the occasional timber creak. A LUFFING sail
