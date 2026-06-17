@@ -8135,6 +8135,14 @@ function tickBody() {
   const fogClose = night * Math.sqrt(night);
   scene.fog.near = 60 - 26 * fogClose;
   scene.fog.far = 340 - 170 * fogClose;
+  // ── open sea: hold the foreground clear ── the warm desert fog hazed the sea
+  // to pale orange-tan from just 60m out, washing the water flat. While aboard by
+  // day, push the NEAR plane out so the near sea reads crisp and deep (sun road +
+  // sky reflection land); FAR stays put so the water's edge keeps hiding in haze.
+  if (inCanoe && started && !intro) {
+    const open = 1 - night;
+    scene.fog.near = Math.max(scene.fog.near, 60 + 75 * open);
+  }
   weatherUpdate(t, dt, night);   // a passing shower greys the light + closes the fog (after the day/night grade)
   // moon rides opposite the sun — only shows once it clears the horizon
   _moonDir.copy(_sunDir).multiplyScalar(-1);
