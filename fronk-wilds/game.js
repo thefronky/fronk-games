@@ -3900,7 +3900,7 @@ function spawnSharks() {
 }
 let _sharkInWaterT = 0, _sharkScareCd = 0, _sharkOnset = 30 + Math.random() * 60;
 let _sharkLungeCd = 18 + Math.random() * 18;
-let _sharkBreachCd = 45 + Math.random() * 45;   // the rare showpiece: a breach OVER the boat
+let _sharkBreachCd = 4;   // TEST (Fronk): first breach ~10s into being on water; reverts to rare after. NORMAL = 45 + Math.random() * 45
 function sharkUpdate(dt) {
   if (!SHARKS.length) return;
   const onWater = inCanoe || (player.y < WATER_Y + 0.5
