@@ -687,6 +687,15 @@ const waterUniforms = { uTime: { value: 0 }, uWindDir: { value: 0 }, uBoatWake: 
       `#include <dithering_fragment>
        vec3 V = normalize(cameraPosition - vWP);
        vec3 N = normalize(vWN);                                                // the true wave-sloped normal
+       // ── near-water micro-detail ── cheap fbm-derivative ripples perturb N up
+       //    close (sun-road sparkle, livelier near water) but FADE to nothing by
+       //    ~160m so the far water stays glassy and the glint never aliases/strobes.
+       float _detF = 0.14 * (1.0 - smoothstep(80.0, 160.0, distance(cameraPosition, vWP)));
+       if (_detF > 0.002) {
+         vec2 _q = vWP.xz * 0.5 + vec2(uTime * 0.22, uTime * -0.16);           // slow drift, low frequency
+         float _h0 = wfbm(vec3(_q, 0.0)), _hx = wfbm(vec3(_q + vec2(0.4, 0.0), 0.0)), _hz = wfbm(vec3(_q + vec2(0.0, 0.4), 0.0));
+         N = normalize(N + vec3(-(_hx - _h0), 0.0, -(_hz - _h0)) * _detF * 5.0);
+       }
        float fres = mix(0.06, 0.7, pow(1.0 - max(dot(V, N), 0.0), 5.0));       // Schlick sky reflection, now riding the slopes
        // ── reflect the ACTUAL sky gradient ── sample the reflected ray's height and
        //    blend the same warm-horizon → blue-zenith stops the sky dome uses, so the
