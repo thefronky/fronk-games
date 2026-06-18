@@ -64,6 +64,21 @@ export class AudioEngine {
       return;
     }
     this.started = true;
+    // ── THE OPENING WALL ── one hard gate so that during the opening (title/dive/
+    // wake/settle) the ONLY thing that can make a sound is the cinematic music.
+    // Wrap EVERY non-music emitter: if _silentOpening is set, it's a no-op. This
+    // is set by the game each frame (true through the whole opening window). The
+    // title-music methods (_startTrack/titleTheme/pumpTitle/_scheduleTitleBar/
+    // _title*) are deliberately NOT wrapped — they're the allowed cinematic music.
+    const SILENCEABLE = ['_play', '_playAt', 'themeSting', 'stinger', 'documented', 'twang',
+      '_pluck', '_motif', '_setChord', '_bass', '_jawTwang', 'killStinger', 'bearScream',
+      'bearCharge', 'bearRustle', 'snapAt', 'grunt', 'breath', 'dawnChorus', 'wakeBreath',
+      'sharkRoar', 'gatorAttack', 'sharkSfx', 'sharkDread', 'drawCreak', 'impact',
+      'animalCall', '_wolfVoice'];
+    for (const n of SILENCEABLE) {
+      const orig = this[n];
+      if (typeof orig === 'function') this[n] = (...a) => this._silentOpening ? false : orig.apply(this, a);
+    }
     const C = this.ctx = new (window.AudioContext || window.webkitAudioContext)();
     this.master = C.createGain();
     this.master.gain.value = 1.0;

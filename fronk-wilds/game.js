@@ -8192,6 +8192,10 @@ function tickBody() {
   // voices quiet for a generous window so the opening is music-only, while the
   // player's own foley returns at 6s. (animalCall checks _noVoices.)
   audio._noVoices = !started || intro || launching || (_wakeT > 0 && t - _wakeT < 16);
+  // THE WALL: through the whole opening, ONLY the cinematic music may sound. This
+  // hard-gates every non-music emitter in the engine (plucks, stings, jingles,
+  // foley, voices) until the title music has handed off (~14s after wake).
+  audio._silentOpening = !started || intro || launching || (_wakeT > 0 && t - _wakeT < 14);
   if (audio.foleyBus) audio.foleyBus.gain.value = audio._cinematic ? 0 : 1.15;
   if (audio.spatialBus) audio.spatialBus.gain.value = audio._cinematic ? 0 : 1.0;
   if (_lookHoldT > 0) _lookHoldT -= dt;

@@ -215,7 +215,9 @@
     font-size:11px;letter-spacing:.2em;text-transform:uppercase;flex-direction:column;gap:6px}
   #oarL{left:26px}  #oarR{right:26px}
   #oarL svg,#oarR svg{width:34px;height:34px}
-  /* in the canoe: the move stick steers the boat; oars + jump are gone */
+  /* aboard the boat: NO walking stick, EVER (you sail with the lever / fish with
+     the bow — never walk). Oars + jump gone too. */
+  .touch.canoe #stickL{display:none !important}
   .touch.canoe #oarL,.touch.canoe #oarR{display:none}
   .touch.canoe #jumpBtn{display:none}
 </style>
