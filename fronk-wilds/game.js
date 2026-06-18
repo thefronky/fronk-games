@@ -607,7 +607,8 @@ let _grassResweep = 0;   // frames of full-field grass reblade after a burn (cle
 }
 
 // water — animated lake
-const waterUniforms = { uTime: { value: 0 }, uWindDir: { value: 0 }, uBoatWake: { value: 0 } };
+const waterUniforms = { uTime: { value: 0 }, uWindDir: { value: 0 }, uBoatWake: { value: 0 },
+  uBoatPos: { value: new THREE.Vector2(0, -1e4) }, uBoatDir: { value: new THREE.Vector2(0, 1) }, uBoatSpd: { value: 0 } };
 {
   const m = new THREE.MeshStandardMaterial({
     color: 0x2e5a62, transparent: true, opacity: 0.6,
@@ -624,6 +625,9 @@ const waterUniforms = { uTime: { value: 0 }, uWindDir: { value: 0 }, uBoatWake: 
     sh.uniforms.uNight = skyUniforms.night;
     sh.uniforms.uWindDir = waterUniforms.uWindDir;
     sh.uniforms.uBoatWake = waterUniforms.uBoatWake;
+    sh.uniforms.uBoatPos = waterUniforms.uBoatPos;
+    sh.uniforms.uBoatDir = waterUniforms.uBoatDir;
+    sh.uniforms.uBoatSpd = waterUniforms.uBoatSpd;
     sh.vertexShader = 'uniform float uTime;\nuniform float uWindDir;\nuniform float uBoatWake;\nattribute float depth;\nvarying float vDepth;\nvarying vec3 vWP;\nvarying float vWave;\nvarying vec3 vWN;\n'
       + sh.vertexShader
       .replace('#include <beginnormal_vertex>',
@@ -657,6 +661,7 @@ const waterUniforms = { uTime: { value: 0 }, uWindDir: { value: 0 }, uBoatWake: 
        vDepth = depth;
        vWP = (modelMatrix * vec4(transformed, 1.0)).xyz;`);
     sh.fragmentShader = `uniform float uTime; uniform vec3 uSunDir; uniform float uNight;
+      uniform vec2 uBoatPos; uniform vec2 uBoatDir; uniform float uBoatSpd;
       varying float vDepth; varying vec3 vWP; varying float vWave; varying vec3 vWN;
       float wh31(vec3 p){ return fract(sin(dot(p, vec3(127.1,311.7,74.7)))*43758.5453); }
       float wvn(vec3 p){ vec3 i=floor(p),f=fract(p); f=f*f*(3.0-2.0*f);
@@ -678,6 +683,23 @@ const waterUniforms = { uTime: { value: 0 }, uWindDir: { value: 0 }, uBoatWake: 
        float brk   = smoothstep(0.45, 0.85, wfbm(vWP*0.6));      // static break-up (no uTime → no drift)
        float foam = shore * band * breathe * brk;
        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.90,0.95,0.98), clamp(foam,0.0,1.0)*0.85);
+       // ── V-WAKE ── foam churned astern of the boat while underway: a V that
+       //    spreads with distance, bright at its two edges, soft fill between,
+       //    fading out ~36m back and with speed. Cheap: one instantaneous V from
+       //    the boat's pos/heading (no history buffer).
+       if (uBoatSpd > 0.05) {
+         vec2 rel = vWP.xz - uBoatPos;
+         vec2 fwd = uBoatDir, perp = vec2(-fwd.y, fwd.x);
+         float along = dot(rel, -fwd);                       // metres astern (behind the bow)
+         float side = abs(dot(rel, perp));
+         float lenF = smoothstep(36.0, 0.0, along) * step(0.0, along);
+         float halfW = 1.2 + max(0.0, along) * 0.10;          // the V opens up behind you
+         float edge = 1.0 - smoothstep(0.0, 1.6, abs(side - halfW));   // the two churned edge-lines
+         float fill = 1.0 - smoothstep(0.0, halfW + 1.0, side);        // soft wash inside
+         float wk = (edge * 0.8 + fill * 0.32) * lenF * smoothstep(0.05, 0.4, uBoatSpd);
+         wk *= 0.6 + 0.4 * smoothstep(0.4, 0.9, wfbm(vec3(vWP.xz * 0.5 + vec2(uTime * 0.5, 0.0), 0.0)));  // break it up
+         diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.92,0.96,0.99), clamp(wk, 0.0, 1.0) * 0.7);
+       }
        // (Whitecaps removed — the per-pixel foam flecks strobed/aliased into a
        //  glitchy speckle. The WAVES are the smooth vertex swell instead; a soft
        //  crest BRIGHTENING reads as a wave without any high-frequency sparkle.)
@@ -8292,6 +8314,13 @@ function tickBody() {
   waterUniforms.uTime.value = t;
   waterUniforms.uWindDir.value = windDir;       // share the ONE wave field with waveAt (boat rides what you see)
   waterUniforms.uBoatWake.value = _boatWake;
+  // V-wake: feed the boat's pos/heading/speed so the water shader paints a foam
+  // trail astern. Only while DRIVING (not anchored) — fades with speed.
+  if (inCanoe && !anchored && started) {
+    waterUniforms.uBoatPos.value.set(player.x, player.z);
+    waterUniforms.uBoatDir.value.set(Math.sin(raftYaw), Math.cos(raftYaw));
+    waterUniforms.uBoatSpd.value = _boatWake;
+  } else waterUniforms.uBoatSpd.value = 0;
   // ── wind drift ── the breeze wanders slowly in direction and strength, so a
   // good point of sail isn't a fixed setting — you read it and re-trim. Cheap:
   // two slow sines, no allocation, bounded.
