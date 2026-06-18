@@ -4118,6 +4118,60 @@ function buildGatorMesh() {
   g.userData.gator = { jaw };
   return g;
 }
+
+// ════ FISH ════ drop anchor to fish and a few gather around the boat — various
+// sizes, with a RARE big one. They wander gently just under the surface (dark
+// shapes through the half-clear water) and clear when you raise the anchor.
+const FISH = [];
+let _fishActive = false;
+const _fishMat = new THREE.MeshStandardMaterial({ color: 0x2c3a3e, roughness: 0.6, metalness: 0.1, flatShading: true });
+const _fishBigMat = new THREE.MeshStandardMaterial({ color: 0x3a4b44, roughness: 0.55, metalness: 0.12, flatShading: true });
+function buildFishMesh(size, big) {
+  const g = new THREE.Group();
+  const mat = big ? _fishBigMat : _fishMat;
+  const body = new THREE.Mesh(new THREE.SphereGeometry(1, 7, 5), mat);
+  body.scale.set(0.32, 0.42, 1.0); g.add(body);                  // an elongated teardrop
+  const tail = new THREE.Mesh(new THREE.ConeGeometry(0.5, 0.7, 4), mat);
+  tail.rotation.x = -Math.PI / 2; tail.position.z = -1.05; tail.scale.set(0.7, 0.18, 1); g.add(tail);
+  const dorsal = new THREE.Mesh(new THREE.ConeGeometry(0.26, 0.46, 3), mat);
+  dorsal.position.set(0, 0.34, 0.1); g.add(dorsal);
+  g.userData.tail = tail;
+  g.scale.setScalar(size);
+  return g;
+}
+function spawnFishAroundBoat() {
+  clearFish();
+  const n = 5 + (Math.random() * 3 | 0);
+  for (let i = 0; i < n; i++) {
+    const big = Math.random() < 0.14;                            // ~1 in 7 is a big one (harder to land)
+    const size = big ? 3.0 + Math.random() * 1.8 : 0.7 + Math.random() * 0.9;
+    const obj = buildFishMesh(size, big);
+    const ang = Math.random() * 6.283, r = 9 + Math.random() * 14;
+    obj.position.set(player.x + Math.cos(ang) * r, WATER_Y - 0.9 - Math.random() * 1.4, player.z + Math.sin(ang) * r);
+    scene.add(obj);
+    FISH.push({ obj, big, size, heading: Math.random() * 6.283, turnT: 0, ph: Math.random() * 6.283, hooked: false });
+  }
+}
+function clearFish() { for (const f of FISH) scene.remove(f.obj); FISH.length = 0; }
+function fishUpdate(dt, t) {
+  for (const f of FISH) {
+    if (f.hooked) continue;                                      // a hooked fish is driven by the reel minigame
+    const o = f.obj;
+    f.turnT -= dt;
+    if (f.turnT <= 0) { f.turnT = 1.5 + Math.random() * 2.5; f.heading += (Math.random() - 0.5) * 1.4; }
+    const spd = (f.big ? 1.3 : 2.0) * (0.6 + 0.4 * Math.sin(t * 2 + f.ph));
+    o.position.x += Math.sin(f.heading) * spd * dt;
+    o.position.z += Math.cos(f.heading) * spd * dt;
+    const dx = o.position.x - player.x, dz = o.position.z - player.z;
+    if (Math.hypot(dx, dz) > 26) f.heading = Math.atan2(player.x - o.position.x, player.z - o.position.z);  // loosely keep near the boat
+    o.position.y = WATER_Y - 0.9 - (f.big ? 0.6 : 0) + Math.sin(t * 1.5 + f.ph) * 0.25;
+    o.rotation.y = f.heading;
+    o.rotation.z = Math.sin(t * 3 + f.ph) * 0.12;               // gentle body roll
+    if (o.userData.tail) o.userData.tail.rotation.y = Math.sin(t * (f.big ? 5 : 9) + f.ph) * 0.5;
+  }
+}
+window._fish = FISH;   // debug/test hook
+
 // pinned to the waterline; faces the nearest of player OR any Horse in range,
 // and SNAPs (gapes the jaw + audio) when something crosses snapR. Never roams,
 // so it never calls stepAnimal (which would reject it out of the water).
@@ -9130,6 +9184,11 @@ function tickBody() {
   }
   sharkUpdate(wdt);               // the lake patrollers — fin on the surface, Jaws bed
   leviathanUpdate(t);             // the deep one drifts, forever
+  // fish gather while you're anchored to fish; they clear when you raise anchor
+  if (inCanoe && anchored && started) {
+    if (!_fishActive) { _fishActive = true; spawnFishAroundBoat(); }
+    fishUpdate(wdt, t);
+  } else if (_fishActive) { _fishActive = false; clearFish(); }
   arrowUpdate(wdt);
   treeFireUpdate(dt);              // burning trees climb, spread, then fall
   groundFireUpdate(dt);           // grass/bush fire sweeps the ground; animals flee/burn; player heat
