@@ -3871,49 +3871,86 @@ function spiderUpdate(a, dt, dx, dz, dist) {
 // than the canoe. They patrol the deepest lake water with only the dorsal
 // fin breaking the surface; once you're out on the water long enough one
 // commits and runs you down faster than you can paddle.
-const _sharkMat = new THREE.MeshStandardMaterial({ color: 0x33424b, roughness: 0.7, flatShading: true });
+const _sharkMat = new THREE.MeshStandardMaterial({ color: 0x2b3a38, roughness: 0.5, metalness: 0.14, flatShading: true });
 const _sharkBelly = new THREE.MeshStandardMaterial({ color: 0xb9c2c4, roughness: 0.7, flatShading: true });
 const _sharkMaw = new THREE.MeshStandardMaterial({ color: 0x140707, roughness: 0.5 });
 function buildSharkMesh() {
   const g = new THREE.Group();
-  // long tapered body — a stretched, pinched box reads as a streamlined hull.
-  // ~9m nose-to-tail, longer than the dugout canoe.
-  const body = new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.7, 7.0), _sharkMat);
-  body.position.set(0, 0, 0); body.castShadow = true; g.add(body);
-  // pale belly slab tucked under the body
-  const belly = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.5, 6.0), _sharkBelly);
-  belly.position.set(0, -0.75, 0.2); g.add(belly);
-  // blunt snout cone forward (+z)
-  const snout = new THREE.Mesh(new THREE.ConeGeometry(0.85, 2.2, 6), _sharkMat);
-  snout.rotation.x = Math.PI / 2; snout.position.set(0, 0.05, 4.4); g.add(snout);
-  // a dark throat void so an OPEN mouth reads as a maw, not a gap
-  const throat = new THREE.Mesh(new THREE.BoxGeometry(1.05, 0.7, 1.6), _sharkMaw);
-  throat.position.set(0, -0.05, 3.9); g.add(throat);
-  // the hinged LOWER JAW — drops open on the strike. Pivots at its rear edge.
-  const jaw = new THREE.Group(); jaw.position.set(0, -0.35, 3.3); g.add(jaw);
-  const jawMesh = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.4, 1.9), _sharkMat);
-  jawMesh.position.set(0, -0.12, 0.95); jaw.add(jawMesh);
-  // teeth — white cones lining the upper lip and the lower jaw
-  const toothMat = new THREE.MeshStandardMaterial({ color: 0xf2efe6, roughness: 0.5 });
-  for (let i = 0; i < 7; i++) {
-    const tx = -0.55 + i * 0.18;
-    const ut = new THREE.Mesh(new THREE.ConeGeometry(0.075, 0.32, 4), toothMat);
-    ut.rotation.x = Math.PI; ut.position.set(tx, -0.18, 4.2); g.add(ut);   // upper, point down
-    const lt = new THREE.Mesh(new THREE.ConeGeometry(0.075, 0.3, 4), toothMat);
-    lt.position.set(tx, 0.08, 1.7); jaw.add(lt);                            // lower, point up
-  }
-  // the iconic TALL dorsal fin — this is the only part that shows above water
-  const fin = new THREE.Mesh(new THREE.ConeGeometry(0.7, 2.2, 4), _sharkMat);
-  fin.rotation.x = -0.25; fin.position.set(0, 1.5, -0.3); fin.castShadow = true; g.add(fin);
-  // swept tail fluke (-z), a tall vertical blade
-  const tailPiv = new THREE.Group(); tailPiv.position.set(0, 0, -3.4); g.add(tailPiv);
-  const tail = new THREE.Mesh(new THREE.ConeGeometry(1.0, 2.6, 4), _sharkMat);
-  tail.scale.set(0.4, 1, 1); tail.position.set(0, 0.2, -1.0); tail.rotation.x = -1.2; tailPiv.add(tail);
-  // pectoral fins out either side
+  // ── body: SCULPTED from tapered segments (not one box) — broad shoulders,
+  //    thick girth, narrowing to a thin caudal stalk. Subdivided + flatShaded so
+  //    the skin reads as faceted, scarred, wrong. ~9m nose-to-tail.
+  const seg = (w, h, l, z) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, l, 2, 2, 3), _sharkMat);
+    m.position.set(0, 0, z); m.castShadow = true; g.add(m); return m;
+  };
+  seg(1.4, 1.6, 2.6, 2.5);     // forward shoulders
+  seg(1.55, 1.75, 2.8, 0.1);   // thickest girth
+  seg(1.05, 1.3, 2.4, -2.1);   // tapering aft
+  seg(0.5, 0.75, 1.7, -3.5);   // thin caudal peduncle
+  // a hunched upper back ridge — gives it a predatory hump
+  const hump = new THREE.Mesh(new THREE.BoxGeometry(1.05, 0.6, 3.4, 1, 1, 3), _sharkMat);
+  hump.position.set(0, 0.82, 0.6); g.add(hump);
+  // pale, sickly belly
+  const belly = new THREE.Mesh(new THREE.BoxGeometry(1.18, 0.5, 6.3), _sharkBelly);
+  belly.position.set(0, -0.8, 0.2); g.add(belly);
+  // ── blunt snout ──
+  const snout = new THREE.Mesh(new THREE.ConeGeometry(0.9, 2.4, 7), _sharkMat);
+  snout.rotation.x = Math.PI / 2; snout.position.set(0, 0.05, 4.6); g.add(snout);
+  // ── DEAD eyes — sunken black, cold pinpoint glint, set in dark sockets ──
+  const eyeMat = new THREE.MeshStandardMaterial({ color: 0x05080a, roughness: 0.2, metalness: 0.4, emissive: 0x0a1518, emissiveIntensity: 0.35 });
   for (const sx of [-1, 1]) {
-    const pec = new THREE.Mesh(new THREE.ConeGeometry(0.5, 1.8, 4), _sharkMat);
+    const socket = new THREE.Mesh(new THREE.SphereGeometry(0.27, 8, 7), _sharkMaw);
+    socket.position.set(sx * 0.72, 0.26, 3.6); socket.scale.set(1, 1, 0.6); g.add(socket);
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.17, 8, 7), eyeMat);
+    eye.position.set(sx * 0.76, 0.28, 3.72); g.add(eye);
+  }
+  // ── gill slits — five raked dark lines each side ──
+  for (const sx of [-1, 1]) for (let i = 0; i < 5; i++) {
+    const gs = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.72, 0.12), _sharkMaw);
+    gs.position.set(sx * 0.8, 0.1, 2.5 - i * 0.32); gs.rotation.x = 0.4; g.add(gs);
+  }
+  // ── maw: dark throat void + the hinged lower jaw ──
+  const throat = new THREE.Mesh(new THREE.BoxGeometry(1.12, 0.85, 1.9), _sharkMaw);
+  throat.position.set(0, -0.05, 3.95); g.add(throat);
+  const jaw = new THREE.Group(); jaw.position.set(0, -0.35, 3.3); g.add(jaw);
+  const jawMesh = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.45, 2.0), _sharkMat);
+  jawMesh.position.set(0, -0.12, 0.95); jaw.add(jawMesh);
+  // ── TEETH: two ragged rows top and bottom, varied length, splayed crooked ──
+  const toothMat = new THREE.MeshStandardMaterial({ color: 0xe9e1ce, roughness: 0.4 });
+  const tooth = (parent, x, y, z, len, down) => {
+    const tt = new THREE.Mesh(new THREE.ConeGeometry(0.055 + Math.random() * 0.03, len, 4), toothMat);
+    tt.position.set(x, y, z); tt.rotation.x = down ? Math.PI : 0; tt.rotation.z = (Math.random() - 0.5) * 0.35;
+    parent.add(tt);
+  };
+  for (let i = 0; i < 11; i++) {
+    const tx = -0.62 + i * 0.124;
+    tooth(g, tx, -0.16, 4.3, 0.3 + Math.random() * 0.18, true);    // upper outer row
+    tooth(g, tx, -0.04, 3.98, 0.2 + Math.random() * 0.12, true);   // upper inner row
+    tooth(jaw, tx, 0.12, 1.78, 0.28 + Math.random() * 0.18, false);// lower outer
+    tooth(jaw, tx, 0.02, 1.46, 0.18 + Math.random() * 0.1, false); // lower inner
+  }
+  // ── tall dorsal fin (the only above-water tell) + a small second dorsal ──
+  const fin = new THREE.Mesh(new THREE.ConeGeometry(0.75, 2.5, 4), _sharkMat);
+  fin.rotation.x = -0.25; fin.position.set(0, 1.75, -0.3); fin.castShadow = true; g.add(fin);
+  const fin2 = new THREE.Mesh(new THREE.ConeGeometry(0.36, 1.05, 4), _sharkMat);
+  fin2.rotation.x = -0.2; fin2.position.set(0, 1.0, -2.4); g.add(fin2);
+  // ── old scars raked across the back ──
+  for (let i = 0; i < 5; i++) {
+    const scar = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.04, 0.1), _sharkMaw);
+    scar.position.set((Math.random() - 0.5) * 1.1, 0.7 + Math.random() * 0.35, 1.8 - i * 0.85);
+    scar.rotation.y = (Math.random() - 0.5) * 1.2; g.add(scar);
+  }
+  // ── tail: a tall upper fluke + a short lower lobe ──
+  const tailPiv = new THREE.Group(); tailPiv.position.set(0, 0, -3.9); g.add(tailPiv);
+  const tail = new THREE.Mesh(new THREE.ConeGeometry(1.1, 2.9, 4), _sharkMat);
+  tail.scale.set(0.35, 1, 1); tail.position.set(0, 0.25, -1.0); tail.rotation.x = -1.2; tailPiv.add(tail);
+  const tailLow = new THREE.Mesh(new THREE.ConeGeometry(0.6, 1.5, 4), _sharkMat);
+  tailLow.scale.set(0.35, 1, 1); tailLow.position.set(0, -0.6, -0.7); tailLow.rotation.x = 1.4; tailPiv.add(tailLow);
+  // ── pectoral fins ──
+  for (const sx of [-1, 1]) {
+    const pec = new THREE.Mesh(new THREE.ConeGeometry(0.55, 2.0, 4), _sharkMat);
     pec.scale.set(1, 0.3, 1); pec.rotation.z = sx * 1.5; pec.rotation.y = sx * 0.4;
-    pec.position.set(sx * 1.1, -0.4, 1.6); g.add(pec);
+    pec.position.set(sx * 1.15, -0.42, 1.6); g.add(pec);
   }
   g.userData.shark = { tailPiv, jaw };
   return g;
@@ -3923,6 +3960,18 @@ function buildSharkMesh() {
 // now and then. After you've been afloat 30-90s the nearest one commits to a
 // SCARE: it surfaces and CIRCLES you ~15s (dread swelling), then DIVES under and
 // the music fades — a near-miss, not (usually) a bite. Then a cooldown.
+// a BIG water explosion — an expanding foam ring + a tall central column + spray.
+// Used by the shark breach (erupt + splashdown). Reuses the dust-puff particles.
+function bigSplash(x, z) {
+  for (let i = 0; i < 30; i++) {            // expanding ring of foam at the surface
+    const a = Math.random() * 6.283, rr = 1 + Math.random() * 8;
+    dustPuff(x + Math.cos(a) * rr, WATER_Y + 0.1 + Math.random() * 0.6, z + Math.sin(a) * rr, 0xe6f1f4, 1.8 + Math.random() * 1.6);
+  }
+  for (let i = 0; i < 16; i++) {            // a tall central column thrown up
+    const a = Math.random() * 6.283, rr = Math.random() * 2.2;
+    dustPuff(x + Math.cos(a) * rr, WATER_Y + 1 + Math.random() * 9, z + Math.sin(a) * rr, 0xf2f8fa, 1.4 + Math.random() * 1.4);
+  }
+}
 const SHARKS = [];
 const SHARK_CENTER = { x: 70, z: -90 };   // the deepest part of the lake
 const SHARK_SCALE = 10.0;                 // a true sea-monster — full body breaks the surface, dwarfs the raft
@@ -3990,6 +4039,7 @@ function sharkUpdate(dt) {
       best.brX1 = player.x - offx * SPAN + px * SIDE; best.brZ1 = player.z - offz * SPAN + pz * SIDE;   // landing — arcs past your beam
       best.obj.position.set(best.brX0, WATER_Y - 8, best.brZ0);
       best.brT = 0; best.brDur = 1.8; best.state = 'breach'; best.biteCd = 0;
+      bigSplash(best.brX0, best.brZ0);                            // water EXPLODES up as it erupts
       if (audio.sharkRoar) audio.sharkRoar(best.brX0, best.brZ0, 1.2);
       if (audio.themeSting) audio.themeSting('sting_escape', 0.95);
       cineLook(player.x + px * SIDE, WATER_Y + 9, player.z + pz * SIDE, 1.0, 1.0);   // snap your eyes to where it'll crest, beside you
@@ -4045,11 +4095,11 @@ function sharkUpdate(dt) {
       s.obj.rotation.x = -Math.cos(Math.PI * u) * 0.95;           // nose up rising, nose down falling
       dread = Math.max(dread, 1.0);
       cineLook(p.x, p.y, p.z, 0.4, 1.7);                          // camera tracks the whole arc — snappy lock-on
-      if (u >= 1) {                                               // SPLASHDOWN on the far side
+      if (u >= 1) {                                               // SPLASHDOWN on the far side — a HUGE crash
         s.obj.rotation.x = 0;
-        camShakeT = SHAKE_DUR * 2.5; kickT = KICK_DUR;
-        if (audio.sharkSfx) { audio.sharkSfx('shark_lunge', p.x, p.z, { gain: 1.2 }); audio.sharkSfx('shark_splash', p.x, p.z, { gain: 1.1 }); }
-        for (let i = 0; i < 12; i++) { const aa = Math.random() * 6.283, rr = Math.random() * 3; dustPuff(p.x + Math.cos(aa) * rr, WATER_Y + 0.1, p.z + Math.sin(aa) * rr, 0xbfd4e0, 1.6); }
+        camShakeT = SHAKE_DUR * 3.5; kickT = KICK_DUR * 1.5;
+        if (audio.sharkSfx) { audio.sharkSfx('shark_lunge', p.x, p.z, { gain: 1.3 }); audio.sharkSfx('shark_splash', p.x, p.z, { gain: 1.3 }); }
+        bigSplash(p.x, p.z);
         toast('A shark breached right over you!', 2600);
         s.state = 'dive'; s.diveT = 9;
       }
