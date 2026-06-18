@@ -8954,20 +8954,24 @@ function tickBody() {
     // fire roar level: grows with how many trees are ablaze, scaled by how near
     // the nearest one is. Floors at a low murmur when far (a distant roar), and
     // it caps so a whole forest fire never gets obnoxious.
-    let fireLvl = 0;
+    // fire: pass AMOUNT (how much is ablaze) and NEARNESS separately, so the audio
+    // can voice distance as a change in CHARACTER (a far roar vs a near crackle),
+    // not just turn the same sound down.
+    let fireAmt = 0, fireNearness = 0;
     const _nFire = TREEFIRES.length + GROUNDFIRES.length;
     if (_nFire) {
       let nd = 1e9;
       for (const f of TREEFIRES) { const d = Math.hypot(player.x - f.tr.x, player.z - f.tr.z); if (d < nd) nd = d; }
       for (const f of GROUNDFIRES) { const d = Math.hypot(player.x - f.x, player.z - f.z); if (d < nd) nd = d; }
-      const prox = Math.max(0.25, Math.min(1, 1 - (nd - 25) / 170));   // near=1, far floors at 0.25
-      fireLvl = Math.min(1, _nFire / 10) * prox;
+      fireAmt = Math.min(1, _nFire / 6);                             // how big the blaze is
+      fireNearness = Math.max(0, Math.min(1, 1 - (nd - 8) / 92));    // 1 within 8m → 0 by ~100m
     }
     audio.update(dt, {
       moving: !inCanoe && !!(mx || mz), sprint: sprinting, _moveLvl,   // no footsteps in the boat
       wolfDist, lakeDist: Math.hypot(player.x - 70, player.z + 90),
       night: window._night || 0, hp: player.hp, breath: breathLoad,
-      px: player.x, pz: player.z, yaw: player.yaw, rain: _rainLevel, fire: fireLvl,
+      px: player.x, pz: player.z, yaw: player.yaw, rain: _rainLevel,
+      fire: fireAmt, fireNear: fireNearness,
     });
   }
 
