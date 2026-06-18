@@ -2531,20 +2531,30 @@ let lmCheckT = 0;
 // Walk up to a camp's quiver and take what's in it (one-time). 3/5/7.
 const QUIVERS = []; window._quivers = QUIVERS;
 function buildQuiver(n) {
+  // a clear BUNDLE OF ARROWS standing in a small pouch — reads as ammo, not a rock.
   const g = new THREE.Group();
-  const pouch = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.13, 0.8, 7),
+  // short pouch at the base so the arrows dominate the silhouette
+  const pouch = new THREE.Mesh(new THREE.CylinderGeometry(0.13, 0.10, 0.32, 9),
     new THREE.MeshStandardMaterial({ color: 0x5b3a1e, roughness: 1 }));
-  pouch.position.y = 0.4; pouch.rotation.z = 0.32; g.add(pouch);
-  const FLET = [0xff5a7a, 0x6ad0ff, 0xfff0a8];
-  for (let i = 0; i < Math.min(5, Math.max(3, n)); i++) {
-    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.9, 4),
-      new THREE.MeshStandardMaterial({ color: 0x9a886a, roughness: 0.8 }));
-    shaft.position.set((i - 2) * 0.04 + 0.18, 0.78, (i % 2) * 0.05);
-    shaft.rotation.z = 0.32 + (i - 2) * 0.04; g.add(shaft);
-    const fl = new THREE.Mesh(new THREE.ConeGeometry(0.03, 0.12, 4),
-      new THREE.MeshStandardMaterial({ color: FLET[i % 3], roughness: 0.6,
-        emissive: FLET[i % 3], emissiveIntensity: 0.25 }));
-    fl.position.set((i - 2) * 0.04 + 0.32, 1.16, (i % 2) * 0.05); fl.rotation.z = 0.32; g.add(fl);
+  pouch.position.y = 0.16; g.add(pouch);
+  const cnt = Math.min(7, Math.max(4, n));
+  const SHAFT = new THREE.MeshStandardMaterial({ color: 0x9a886a, roughness: 0.8 });
+  const FEATHER = new THREE.MeshStandardMaterial({ color: 0xe6d2a6, roughness: 0.7, emissive: 0xe6d2a6, emissiveIntensity: 0.18 }); // one warm feather tone → clearly a set of arrows
+  const HEAD = new THREE.MeshStandardMaterial({ color: 0xb9c2c8, roughness: 0.35, metalness: 0.6, emissive: 0x6a7378, emissiveIntensity: 0.12 });
+  for (let i = 0; i < cnt; i++) {
+    const az = (i / cnt) * 6.283, r = 0.05;                 // fan around the pouch
+    const ox = Math.cos(az) * r, oz = Math.sin(az) * r;
+    const lean = 0.16;                                       // splay outward a touch
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 1.15, 5), SHAFT);
+    shaft.position.set(ox, 0.72, oz);
+    shaft.rotation.z = Math.cos(az) * lean; shaft.rotation.x = -Math.sin(az) * lean; g.add(shaft);
+    // fletching vanes at the top (where you grab them)
+    const fl = new THREE.Mesh(new THREE.ConeGeometry(0.055, 0.22, 4), FEATHER);
+    fl.position.set(ox + Math.cos(az) * lean * 0.6, 1.26, oz - Math.sin(az) * lean * 0.6);
+    fl.rotation.z = Math.cos(az) * lean; fl.rotation.x = -Math.sin(az) * lean; g.add(fl);
+    // a small metal arrowhead glint just above the pouch lip
+    const hd = new THREE.Mesh(new THREE.ConeGeometry(0.03, 0.1, 4), HEAD);
+    hd.position.set(ox * 0.5, 0.34, oz * 0.5); g.add(hd);
   }
   return g;
 }
@@ -3497,7 +3507,9 @@ function silhouettesUpdate(t, dt, night) {
   }
 }
 window._silhouettes = () => _silhouettes.filter(m => m.visible).length;   // debug/test hook
-buildSilhouettes();   // stand them on the far ridges from the very first frame
+// (the distant deer-silhouette billboards were removed — they read as flat
+//  "fake animals" up on the ridge rather than atmosphere. buildSilhouettes() /
+//  silhouettesUpdate() are left defined but no longer called.)
 
 // ── things in the dark ── after nightfall, shapes you can't quite make out
 // lope past you and are gone. You don't know what they are or why. Unsettling.
@@ -8421,7 +8433,7 @@ function tickBody() {
   updateButterflies(dt, t);
   if (started) { updatePollen(t, dt, night); updateBirds(t, dt, night); updateDarters(dt, night); carrionUpdate(t, dt, night);
     if (!_inKitchen) updateCritters(dt, t); }
-  silhouettesUpdate(t, dt, night);   // distant ridge wildlife — also alive during the title orbit
+  // silhouettesUpdate removed — the fake-looking ridge deer are gone
   corruptionUpdate(dt, t);
   updateMist(t, night);
   // flower trample: live player bends instantly; the wake (zw) trails and
