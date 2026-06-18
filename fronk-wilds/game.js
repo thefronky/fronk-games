@@ -3900,13 +3900,14 @@ function spawnSharks() {
 }
 let _sharkInWaterT = 0, _sharkScareCd = 0, _sharkOnset = 30 + Math.random() * 60;
 let _sharkLungeCd = 18 + Math.random() * 18;
+let _sharkBreachCd = 45 + Math.random() * 45;   // the rare showpiece: a breach OVER the boat
 function sharkUpdate(dt) {
   if (!SHARKS.length) return;
   const onWater = inCanoe || (player.y < WATER_Y + 0.5
     && Math.hypot(player.x - SHARK_CENTER.x, player.z - SHARK_CENTER.z) < 150);
   if (onWater) _sharkInWaterT += dt; else _sharkInWaterT = 0;
   _sharkScareCd -= dt;
-  const scareActive = SHARKS.some(s => s.state === 'circle' || s.state === 'dive' || s.state === 'lunge');
+  const scareActive = SHARKS.some(s => s.state === 'circle' || s.state === 'dive' || s.state === 'lunge' || s.state === 'breach');
   if (onWater && !scareActive && _sharkInWaterT > _sharkOnset && _sharkScareCd <= 0) {
     let best = null, bd = 1e9;            // the nearest shark commits to the Jaws SCARE
     for (const s of SHARKS) { const d = Math.hypot(s.obj.position.x - player.x, s.obj.position.z - player.z); if (d < bd) { bd = d; best = s; } }
@@ -3929,6 +3930,26 @@ function sharkUpdate(dt) {
       if (audio.sharkRoar) audio.sharkRoar(best.obj.position.x, best.obj.position.z, 1.0);
       if (audio.themeSting) audio.themeSting('sting_escape', 0.9);
       cineLook(best.obj.position.x, WATER_Y + 3, best.obj.position.z, 1.7, 1.0);
+    }
+  }
+  // ── THE BREACH ── the showpiece: rarely, a shark erupts out of the deep in a
+  // parabolic arc that sails OVER the boat — its whole massive body clears the
+  // water — and crashes down the far side. A near-miss spectacle, not a bite.
+  _sharkBreachCd -= dt;
+  if (onWater && !scareActive && _sharkInWaterT > 10 && _sharkBreachCd <= 0) {
+    let best = null, bd = 1e9;
+    for (const s of SHARKS) { if (s.state !== 'patrol') continue; const d = Math.hypot(s.obj.position.x - player.x, s.obj.position.z - player.z); if (d < bd) { bd = d; best = s; } }
+    if (best && bd < 60) {
+      _sharkBreachCd = 55 + Math.random() * 45;
+      const a = Math.random() * 6.283, offx = Math.cos(a), offz = Math.sin(a);
+      const px = -offz, pz = offx, SIDE = 11, SPAN = 16;                    // perpendicular offset → the arc sails BESIDE you (a framable profile breach), not straight overhead
+      best.brX0 = player.x + offx * SPAN + px * SIDE; best.brZ0 = player.z + offz * SPAN + pz * SIDE;   // entry
+      best.brX1 = player.x - offx * SPAN + px * SIDE; best.brZ1 = player.z - offz * SPAN + pz * SIDE;   // landing — arcs past your beam
+      best.obj.position.set(best.brX0, WATER_Y - 8, best.brZ0);
+      best.brT = 0; best.brDur = 1.8; best.state = 'breach'; best.biteCd = 0;
+      if (audio.sharkRoar) audio.sharkRoar(best.brX0, best.brZ0, 1.2);
+      if (audio.themeSting) audio.themeSting('sting_escape', 0.95);
+      cineLook(player.x + px * SIDE, WATER_Y + 9, player.z + pz * SIDE, 1.0, 1.0);   // snap your eyes to where it'll crest, beside you
     }
   }
   const finTip = 2.6 * SHARK_SCALE;
@@ -3968,6 +3989,27 @@ function sharkUpdate(dt) {
         s.state = 'dive'; s.diveT = 8;
         if (audio.sharkSfx) audio.sharkSfx('shark_splash', p.x, p.z, { gain: 0.8 });
       }
+    } else if (s.state === 'breach') {
+      // fully scripted parabolic arc OVER the boat. p.x/z/y + rotations set here;
+      // the generic move + depth-easing below is skipped for this state.
+      s.brT += dt; finUp = true;
+      const u = Math.min(1, s.brT / s.brDur);
+      p.x = s.brX0 + (s.brX1 - s.brX0) * u;
+      p.z = s.brZ0 + (s.brZ1 - s.brZ0) * u;
+      const yLow = WATER_Y - 8, yPeak = WATER_Y + 13;
+      p.y = yLow + (yPeak - yLow) * Math.sin(Math.PI * u);        // erupts up → crests over the deck → crashes down
+      s.obj.rotation.y = Math.atan2(s.brX1 - s.brX0, s.brZ1 - s.brZ0);
+      s.obj.rotation.x = -Math.cos(Math.PI * u) * 0.95;           // nose up rising, nose down falling
+      dread = Math.max(dread, 1.0);
+      cineLook(p.x, p.y, p.z, 0.4, 1.7);                          // camera tracks the whole arc — snappy lock-on
+      if (u >= 1) {                                               // SPLASHDOWN on the far side
+        s.obj.rotation.x = 0;
+        camShakeT = SHAKE_DUR * 2.5; kickT = KICK_DUR;
+        if (audio.sharkSfx) { audio.sharkSfx('shark_lunge', p.x, p.z, { gain: 1.2 }); audio.sharkSfx('shark_splash', p.x, p.z, { gain: 1.1 }); }
+        for (let i = 0; i < 12; i++) { const aa = Math.random() * 6.283, rr = Math.random() * 3; dustPuff(p.x + Math.cos(aa) * rr, WATER_Y + 0.1, p.z + Math.sin(aa) * rr, 0xbfd4e0, 1.6); }
+        toast('A shark breached right over you!', 2600);
+        s.state = 'dive'; s.diveT = 9;
+      }
     } else if (s.state === 'dive') {
       s.diveT -= dt; finUp = false; speed = 5.5;
       dread = Math.max(dread, Math.max(0, (s.diveT / 10) * 0.5));   // fades over ~10s
@@ -3980,19 +4022,21 @@ function sharkUpdate(dt) {
       if (s.surfaceT <= 0) { s.surfUp = s.surfUp > 0.5 ? 0 : 1; s.surfaceT = s.surfUp > 0.5 ? (2.5 + Math.random() * 2) : (8 + Math.random() * 8); }
       finUp = s.surfUp > 0.5;
     }
-    s.obj.rotation.y = lerpAngle(s.obj.rotation.y, s.dir, Math.min(1, dt * 2.0));
-    const nx = p.x + Math.sin(s.obj.rotation.y) * speed * dt, nz = p.z + Math.cos(s.obj.rotation.y) * speed * dt;
-    if (WATER_Y - heightAt(nx, nz) > 1.5) { p.x = nx; p.z = nz; } else { s.wpT = 0; }   // stay in deep water
-    const tgtY = finUp ? upY : downY;
-    s._subY += (tgtY - s._subY) * Math.min(1, dt * 1.4);
-    p.y = s._subY + Math.sin(s.tailPh) * 0.05;
+    if (s.state !== 'breach') {           // breach scripts its own position/rotation above
+      s.obj.rotation.y = lerpAngle(s.obj.rotation.y, s.dir, Math.min(1, dt * 2.0));
+      const nx = p.x + Math.sin(s.obj.rotation.y) * speed * dt, nz = p.z + Math.cos(s.obj.rotation.y) * speed * dt;
+      if (WATER_Y - heightAt(nx, nz) > 1.5) { p.x = nx; p.z = nz; } else { s.wpT = 0; }   // stay in deep water
+      const tgtY = finUp ? upY : downY;
+      s._subY += (tgtY - s._subY) * Math.min(1, dt * 1.4);
+      p.y = s._subY + Math.sin(s.tailPh) * 0.05;
+    }
     const sd = s.obj.userData.shark;
     if (sd) {
-      s.tailPh += dt * (s.state === 'lunge' ? 13 : s.state === 'circle' ? 9 : 4);
+      s.tailPh += dt * (s.state === 'breach' ? 15 : s.state === 'lunge' ? 13 : s.state === 'circle' ? 9 : 4);
       sd.tailPiv.rotation.y = Math.sin(s.tailPh) * 0.45;
-      // jaws GAPE WIDE on the strike (and a little while circling), snap shut otherwise
+      // jaws GAPE WIDE on the strike + the breach (and a little while circling), snap shut otherwise
       if (sd.jaw) {
-        const gape = s.state === 'lunge' ? 0.85 : s.state === 'circle' ? 0.18 : 0;
+        const gape = (s.state === 'lunge' || s.state === 'breach') ? 0.85 : s.state === 'circle' ? 0.18 : 0;
         sd.jaw.rotation.x += (gape - sd.jaw.rotation.x) * Math.min(1, dt * 8);
       }
     }
@@ -4000,6 +4044,8 @@ function sharkUpdate(dt) {
   if (audio.sharkDread) audio.sharkDread(dread);
 }
 spawnSharks();   // the lake already exists (built at module load) — stock it once
+window._sharks = SHARKS;   // debug/test hook
+window._forceBreach = () => { _sharkBreachCd = 0; _sharkInWaterT = 99; };   // test: trigger a breach next tick
 
 // ════ THE DEEP ONE ════ a building-sized thing that lives far below, deeper than
 // anything else, never quite resolved. It only ever drifts back and forth in the
@@ -8015,7 +8061,7 @@ function tickBody() {
     const wantPitch = Math.atan2((_cineY - (player.y + EYE)), hd);
     const e = Math.min(1, dt * 7 * _cineStrength);
     player.yaw += Math.atan2(Math.sin(wantYaw - player.yaw), Math.cos(wantYaw - player.yaw)) * e;
-    player.pitch += (Math.max(-0.6, Math.min(0.4, wantPitch)) - player.pitch) * e;
+    player.pitch += (Math.max(-0.6, Math.min(1.3, wantPitch)) - player.pitch) * e;   // allow steep look-UP so a breaching shark overhead stays in frame
     _lookHoldT = 4.5;                                        // hold on what we looked at — don't yank back to the bow
   } else if (inCanoe && !anchored && started && _lookHoldT <= 0 && !drawing) {
     // ── boat-follow camera ── ONLY while DRIVING (anchor up). Anchored = fishing,
