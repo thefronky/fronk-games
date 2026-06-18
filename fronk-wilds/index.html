@@ -137,6 +137,20 @@
   #anchorBtn.dropped{color:#ffd9a4;border-color:rgba(255,200,140,.8);box-shadow:0 0 22px rgba(255,190,120,.5)}
   /* DRIVING (anchor up): the sail lever is the only control — hide bow + jump */
   .driving #shootBtn, .driving #jumpBtn{display:none !important}
+  /* REEL fight — full-screen tap zone + a draining bar at the bottom */
+  #reelUI{position:fixed;inset:0;z-index:24;display:none;pointer-events:none;
+    flex-direction:column;justify-content:flex-end;align-items:center;touch-action:none}
+  #reelUI.show{display:flex;pointer-events:auto}
+  #reelInner{margin-bottom:16%;width:62%;max-width:460px;display:flex;flex-direction:column;align-items:center;gap:12px}
+  #reelLabel{font-family:'Cinzel','Times New Roman',serif;font-weight:600;font-size:15px;letter-spacing:.24em;
+    text-indent:.24em;text-transform:uppercase;color:#ffe9c8;text-shadow:0 0 12px rgba(255,180,110,.6);
+    animation:reelPulse .5s ease-in-out infinite}
+  @keyframes reelPulse{0%,100%{opacity:.6;transform:scale(1)}50%{opacity:1;transform:scale(1.07)}}
+  #reelBar{width:100%;height:22px;border-radius:12px;background:rgba(14,22,30,.5);
+    border:1.5px solid rgba(150,190,220,.5);overflow:hidden;backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)}
+  #reelFill{height:100%;width:45%;border-radius:11px;
+    background:linear-gradient(90deg,#c9772e,#ffd27a);box-shadow:0 0 14px rgba(255,190,110,.6);
+    transition:width .06s linear}
   #sailSlider{position:fixed;left:50%;bottom:7%;transform:translateX(-50%);width:46%;max-width:430px;height:30px;
     z-index:16;opacity:0;pointer-events:none;transition:opacity .25s;touch-action:none;
     background:rgba(14,22,30,.34);border:1.5px solid rgba(150,190,220,.42);border-radius:18px;
@@ -275,6 +289,7 @@
 <button id="consume">take</button>
 <button id="anchorBtn" aria-label="anchor">⚓</button>
 <div id="sailSlider"><div id="sailHandle"></div></div>
+<div id="reelUI"><div id="reelInner"><div id="reelLabel">TAP TO REEL</div><div id="reelBar"><div id="reelFill"></div></div></div></div>
 <div id="title">
   <div id="titleback"></div>
   <h1>CONSUME</h1>

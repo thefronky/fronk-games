@@ -4172,6 +4172,68 @@ function fishUpdate(dt, t) {
 }
 window._fish = FISH;   // debug/test hook
 
+// ── the REEL fight ── shoot a fish with the bow and a draining bar appears; TAP
+// fast to drive it to full before it empties. Bigger fish drain faster + give
+// less per tap (more frantic tapping). Empty = it slips the hook; full = landed.
+let _reel = null;
+const _reelUI = document.getElementById('reelUI'), _reelFill = document.getElementById('reelFill'), _reelLabel = document.getElementById('reelLabel');
+function startReel(f) {
+  if (_reel || !f) return;
+  f.hooked = true;
+  _reel = { fish: f, meter: f.big ? 0.34 : 0.46,
+    drain: Math.min(0.62, 0.30 + f.size * 0.055),     // bigger → drains faster
+    gain: Math.max(0.05, 0.10 - f.size * 0.009) };    // bigger → less per tap
+  if (_reelUI) _reelUI.classList.add('show');
+  if (_reelLabel) _reelLabel.textContent = f.big ? 'BIG ONE — TAP FAST!' : 'TAP TO REEL';
+  toast(f.big ? 'A BIG one! Reel hard — tap fast!' : 'Fish on! Tap to reel it in.', 2200);
+}
+function reelTap() {
+  if (!_reel) return;
+  _reel.meter = Math.min(1, _reel.meter + _reel.gain);
+  if (audio.sharkSfx && Math.random() < 0.35) audio.sharkSfx('shark_splash', player.x, player.z, { gain: 0.22 });
+}
+function reelUpdate(dt) {
+  if (!_reel) return;
+  const r = _reel, f = r.fish, o = f.obj;
+  r.meter -= r.drain * dt;
+  if (_reelFill) _reelFill.style.width = (Math.max(0, Math.min(1, r.meter)) * 100).toFixed(0) + '%';
+  // haul the fish toward the boat, thrashing at the surface, faster as you win
+  const dx = player.x - o.position.x, dz = player.z - o.position.z, d = Math.hypot(dx, dz) || 1;
+  o.position.x += (dx / d) * (1.5 + r.meter * 6) * dt;
+  o.position.z += (dz / d) * (1.5 + r.meter * 6) * dt;
+  o.position.y = WATER_Y - 0.4 + Math.sin(clock.elapsedTime * 9) * 0.3;
+  o.rotation.y = Math.atan2(dx, dz);
+  o.rotation.z = Math.sin(clock.elapsedTime * 12) * 0.25;
+  if (r.meter >= 1) endReel(true);
+  else if (r.meter <= 0) endReel(false);
+}
+function endReel(landed) {
+  const r = _reel; if (!r) return; const f = r.fish;
+  _reel = null;
+  if (_reelUI) _reelUI.classList.remove('show');
+  if (landed) {
+    player.lastAte = clock.elapsedTime;
+    if (player.hp < 100) { player.hp = Math.min(100, player.hp + (f.big ? 34 : 18)); renderHP && renderHP(); }
+    player.meat = Math.min(3, (player.meat || 0) + 1); renderNotes && renderNotes();
+    if (audio.sharkSfx) audio.sharkSfx('shark_splash', f.obj.position.x, f.obj.position.z, { gain: 0.6 });
+    toast(f.big ? 'Landed the big one!' : 'Caught a fish!', 2400);
+    const idx = FISH.indexOf(f); if (idx >= 0) { scene.remove(f.obj); FISH.splice(idx, 1); }
+  } else {
+    if (audio.sharkSfx) audio.sharkSfx('shark_splash', f.obj.position.x, f.obj.position.z, { gain: 0.3 });
+    toast('The line went slack — it slipped the hook.', 2000);
+    f.hooked = false; f.heading = Math.random() * 6.283;
+  }
+  for (let i = arrows.length - 1; i >= 0; i--) if (arrows[i].fishing) { scene.remove(arrows[i].m); arrows.splice(i, 1); }
+}
+window._hookFish = (i) => startReel(FISH[i || 0]);
+window._reelTap = reelTap;
+window._reelDbg = () => _reel && { meter: +_reel.meter.toFixed(3), drain: _reel.drain, gain: _reel.gain };
+if (_reelUI) {
+  const tap = (e) => { e.preventDefault(); e.stopPropagation(); reelTap(); };
+  _reelUI.addEventListener('pointerdown', tap);
+  _reelUI.addEventListener('touchstart', tap, { passive: false });
+}
+
 // pinned to the waterline; faces the nearest of player OR any Horse in range,
 // and SNAPs (gapes the jaw + audio) when something crosses snapR. Never roams,
 // so it never calls stepAnimal (which would reject it out of the water).
@@ -7195,14 +7257,8 @@ function arrowUpdate(dt) {
     if (a.stuck) {
       a.t -= dt;
       if (a.t <= 0) {
-        if (a.fishing === 'soak') {                       // reel the line back in
-          if (a.fishHooked) {
-            player.lastAte = clock.elapsedTime; if (player.hp < 100) { player.hp = Math.min(100, player.hp + 18); renderHP && renderHP(); }
-            player.meat = Math.min(3, (player.meat || 0) + 1); renderNotes();
-            if (audio.sharkSfx) audio.sharkSfx('shark_splash', a.m.position.x, a.m.position.z, { gain: 0.5 });
-            toast('A fish! Reeled it in.', 2400);
-          } else toast('Nothing biting. Cast again.', 1800);
-        }
+        // a soak that never hooked a fish just times out (a hooked fish is removed
+        // by endReel); catching now happens through the reel fight, not at random.
         scene.remove(a.m); arrows.splice(i, 1);
       }
       continue;
@@ -7457,11 +7513,13 @@ function arrowUpdate(dt) {
       if (audio.impact) audio.impact('water', distVol);
       if (a.fishing) {
         a.m.position.y = WATER_Y - 0.05; a.v.set(0, 0, 0);
-        a.stuck = true; a.fishing = 'soak';
-        a.t = 2.0 + Math.random() * 3.0;                 // the wait for a bite
-        a.fishHooked = Math.random() < 0.55;             // ~55% a fish is on when you reel
+        a.stuck = true; a.fishing = 'soak'; a.t = 4.0;
         if (a.m.userData.streak) { a.m.remove(a.m.userData.streak); a.m.userData.streak = null; }
-        toast('Line cast. Wait for a bite…', 1800);
+        // hook the nearest fish to where the line splashed down → the reel fight
+        let best = null, bd = 1e9;
+        for (const f of FISH) { if (f.hooked) continue; const d = Math.hypot(f.obj.position.x - px, f.obj.position.z - pz); if (d < bd) { bd = d; best = f; } }
+        if (best && bd < 5 + best.size * 1.5) { startReel(best); a.t = 30; }   // keep the soak alive through the fight
+        else toast('Line cast — nothing took it. Aim near a fish.', 1900);
       } else { scene.remove(a.m); arrows.splice(i, 1); }
       continue;
     }
@@ -7711,6 +7769,7 @@ function resetDrawState() {
 // the wake-up is skippable — any input fast-forwards it to the end
 function skipIntro() { if (intro) introSkip = true; }
 addEventListener('keydown', e => { keys[e.code] = true;
+  if (_reel) { if (e.code === 'Space') { e.preventDefault(); reelTap(); } return; }   // during a reel fight, Space = tap-to-reel
   if (e.code === 'KeyF' && !intro) toggleAnchor();   // anchor down/up (fishing)
   if (e.code === 'Space' && !intro && !arrowCam) jumpQ = true;
   if (e.code === 'Escape' && drawing) {      // back out of the shot
@@ -9188,7 +9247,8 @@ function tickBody() {
   if (inCanoe && anchored && started) {
     if (!_fishActive) { _fishActive = true; spawnFishAroundBoat(); }
     fishUpdate(wdt, t);
-  } else if (_fishActive) { _fishActive = false; clearFish(); }
+  } else if (_fishActive) { _fishActive = false; if (_reel) endReel(false); clearFish(); }
+  reelUpdate(wdt);   // the tap-to-land fight (no-op when no fish is hooked)
   arrowUpdate(wdt);
   treeFireUpdate(dt);              // burning trees climb, spread, then fall
   groundFireUpdate(dt);           // grass/bush fire sweeps the ground; animals flee/burn; player heat
