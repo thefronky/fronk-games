@@ -4288,6 +4288,7 @@ function reelTap() {
 function reelUpdate(dt) {
   if (!_reel) return;
   const r = _reel, f = r.fish, o = f.obj;
+  if (r.meter >= 1) { endReel(true); return; }   // WIN checked before the drain — taps that fill the bar to full always land (the drain used to knock it back under 1 first, making the catch nearly impossible)
   r.meter -= r.drain * dt;
   if (_reelFill) _reelFill.style.width = (Math.max(0, Math.min(1, r.meter)) * 100).toFixed(0) + '%';
   // haul the fish toward the boat, thrashing at the surface, faster as you win
@@ -4309,8 +4310,7 @@ function endReel(landed) {
     if (player.hp < 100) { player.hp = Math.min(100, player.hp + (f.big ? 34 : 18)); renderHP && renderHP(); }
     player.meat = Math.min(3, (player.meat || 0) + 1); renderNotes && renderNotes();
     if (audio.sharkSfx) audio.sharkSfx('shark_splash', f.obj.position.x, f.obj.position.z, { gain: 0.6 });
-    toast(f.big ? 'Landed the big one!' : 'Caught a fish!', 2400);
-    const idx = FISH.indexOf(f); if (idx >= 0) { scene.remove(f.obj); FISH.splice(idx, 1); }
+    presentFish(f);   // Zelda-style: hold it up in view with a banner
   } else {
     if (audio.sharkSfx) audio.sharkSfx('shark_splash', f.obj.position.x, f.obj.position.z, { gain: 0.3 });
     toast('The line went slack — it slipped the hook.', 2000);
@@ -4318,8 +4318,38 @@ function endReel(landed) {
   }
   for (let i = arrows.length - 1; i >= 0; i--) if (arrows[i].fishing) { scene.remove(arrows[i].m); arrows.splice(i, 1); }
 }
+// ── the CATCH presentation (Zelda-style) ── the landed fish swings UP into view,
+// held in front of the camera, flopping, with a banner — then it's stowed.
+let _fishPresent = null;
+const _catchBanner = document.getElementById('catchBanner');
+function presentFish(f) {
+  const idx = FISH.indexOf(f); if (idx >= 0) FISH.splice(idx, 1);
+  const o = f.obj;
+  scene.remove(o); camera.add(o);                       // parent to the camera so it rides in view
+  o.scale.setScalar(f.big ? 2.4 : 1.7);
+  o.position.set(0.15, -3.0, -3.0);                     // starts low, swings up
+  o.rotation.set(0, Math.PI / 2, 0);                   // broadside to the camera
+  _fishPresent = { obj: o, t: 0, dur: 2.4, big: f.big, ph: Math.random() * 6.28 };
+  if (_catchBanner) { _catchBanner.textContent = f.big ? 'A monster of a fish!' : 'Caught a fish!'; _catchBanner.classList.add('show'); }
+}
+function fishPresentUpdate(dt) {
+  if (!_fishPresent) return;
+  const fp = _fishPresent, o = fp.obj; fp.t += dt;
+  const u = Math.min(1, fp.t / fp.dur);
+  const rise = u < 0.25 ? (u / 0.25) : 1;              // swing up over the first beat
+  o.position.y = -3.0 + rise * 2.45;                   // up to eye level, slightly low
+  o.position.x = 0.15;
+  o.rotation.y = Math.PI / 2 + Math.sin(clock.elapsedTime * 1.2) * 0.5;   // slow turn to show it off
+  o.rotation.z = Math.sin(clock.elapsedTime * (fp.big ? 7 : 11) + fp.ph) * (0.28 * (1 - u * 0.4));  // FLOP, easing as it tires
+  if (u >= 1) {                                        // stow it
+    camera.remove(o);
+    if (_catchBanner) _catchBanner.classList.remove('show');
+    _fishPresent = null;
+  }
+}
 window._hookFish = (i) => startReel(FISH[i || 0]);
 window._reelTap = reelTap;
+window._fishPresent = () => _fishPresent;   // debug/test hook
 window._reelDbg = () => _reel && { meter: +_reel.meter.toFixed(3), drain: _reel.drain, gain: _reel.gain };
 if (_reelUI) {
   const tap = (e) => { e.preventDefault(); e.stopPropagation(); reelTap(); };
@@ -9357,6 +9387,7 @@ function tickBody() {
     fishUpdate(wdt, t);
   } else if (_fishActive) { _fishActive = false; if (_reel) endReel(false); clearFish(); }
   reelUpdate(wdt);   // the tap-to-land fight (no-op when no fish is hooked)
+  fishPresentUpdate(wdt);   // the held-up "caught it!" presentation (no-op when none)
   arrowUpdate(wdt);
   treeFireUpdate(dt);              // burning trees climb, spread, then fall
   groundFireUpdate(dt);           // grass/bush fire sweeps the ground; animals flee/burn; player heat
