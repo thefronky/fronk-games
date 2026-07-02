@@ -74,7 +74,7 @@ export class AudioEngine {
       '_pluck', '_motif', '_setChord', '_bass', '_jawTwang', 'killStinger', 'bearScream',
       'bearCharge', 'bearRustle', 'snapAt', 'grunt', 'breath', 'dawnChorus', 'wakeBreath',
       'sharkRoar', 'gatorAttack', 'sharkSfx', 'sharkDread', 'drawCreak', 'impact',
-      'animalCall', '_wolfVoice'];
+      'animalCall', '_wolfVoice', 'fireCatch', '_fireCrackle'];
     for (const n of SILENCEABLE) {
       const orig = this[n];
       if (typeof orig === 'function') this[n] = (...a) => this._silentOpening ? false : orig.apply(this, a);
@@ -210,11 +210,17 @@ export class AudioEngine {
     // ROARING in the distance, not a campfire in your ear. Crackle pops are
     // scheduled separately in update().
     this.fireGain = C.createGain(); this.fireGain.gain.value = 0;
+    // ── distance lowpass over the WHOLE fire bed ── near = open & bright (you hear
+    // the crackle), far = a muffled low rumble. update() sweeps this cutoff by how
+    // near the nearest fire is, so DISTANCE reads as a change in CHARACTER, not
+    // just volume — a forest roaring far off vs a campfire in your ear.
+    this._fireLP = C.createBiquadFilter(); this._fireLP.type = 'lowpass'; this._fireLP.frequency.value = 6000; this._fireLP.Q.value = 0.4;
+    this.fireGain.connect(this._fireLP).connect(this.master);
     const fs = this._noiseLoop();
     const flp = C.createBiquadFilter(); flp.type = 'lowpass'; flp.frequency.value = 380; flp.Q.value = 0.6;
     const flp2 = C.createBiquadFilter(); flp2.type = 'lowpass'; flp2.frequency.value = 900;
     this._bedNoise.fire = C.createGain();
-    fs.connect(flp2).connect(flp).connect(this._bedNoise.fire).connect(this.fireGain).connect(this.master);
+    fs.connect(flp2).connect(flp).connect(this._bedNoise.fire).connect(this.fireGain);
     this._fireCrackleT = 0;
 
     // ── danger drone (predators) — detuned three-voice cluster, plus a
@@ -1611,6 +1617,9 @@ export class AudioEngine {
   // a fire CATCHING — a soft low whoomph (replaces the old bell-like 'wood' bing)
   fireCatch() {
     if (!this.started) return;
+    const _t = this.ctx.currentTime;
+    if (_t - (this._fireCatchAt || -9) < 1.4) return;   // debounce — never the "flame starting again and again" spam
+    this._fireCatchAt = _t;
     if (this._play('fire_catch', { gain: 0.6 })) return;
     const C = this.ctx, t = C.currentTime;
     const src = C.createBufferSource(); src.buffer = this._shotNoise;
@@ -1846,12 +1855,15 @@ export class AudioEngine {
     // 0..1). Kept gentle so it never gets obnoxious. Crackle pops on top, denser
     // as it builds.
     const fire = Math.max(0, Math.min(1, s.fire || 0));
-    this.fireGain.gain.setTargetAtTime(fire * 0.11, t, 0.6);
+    const fnear = Math.max(0, Math.min(1, s.fireNear == null ? 1 : s.fireNear));   // 1=at the fire, 0=far off
+    // stays present even far away (a massive distant roar), fuller up close
+    this.fireGain.gain.setTargetAtTime(fire * (0.05 + 0.075 * fnear), t, 0.6);
+    if (this._fireLP) this._fireLP.frequency.setTargetAtTime(320 + fnear * fnear * 6200, t, 0.5);   // far=rumble, near=bright
     if (fire > 0.02) {
       this._fireCrackleT -= dt;
       if (this._fireCrackleT <= 0) {
-        this._fireCrackleT = 0.05 + Math.random() * (0.3 - fire * 0.2);   // faster when bigger
-        this._fireCrackle(fire);
+        this._fireCrackleT = (0.05 + Math.random() * 0.28) / (0.3 + fnear);   // denser the closer you are
+        if (fnear > 0.12) this._fireCrackle(fire * fnear);   // crisp pops only when near-ish; far = pure rumble
       }
     }
 
