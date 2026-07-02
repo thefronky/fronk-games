@@ -1,37 +1,60 @@
 import * as THREE from 'three';
+import { PointerLockControls } from './vendor/controls/PointerLockControls.js';
 
 // ---------------------------------------------------------------
 // ONI — first-person prototype
+// Controls: three.js's own official PointerLockControls (MIT,
+// vendor/controls/) — the standard, battle-tested FPS mouse-look,
+// used the same way as its official example. Movement/gravity below
+// follows that same official example's pattern (velocity + damping).
+//
 // Physics principles applied (from ONI_PHYSICS_RESEARCH.md):
 //  - phantom/physical decoupling: sword target follows mouse impulses,
 //    spring-damper (PD controller) pulls the visible blade toward it.
-//    Lag under a force budget = weight.
 //  - velocity-gated damage: only a fast, committed swing cuts.
-//  - Alyx gun laws: one-handed, deliberate draw, diegetic ammo (pips,
-//    no HUD numbers), recoil on the model + screen never shakes.
+//  - Alyx gun laws: one-handed, deliberate draw, diegetic ammo (pips).
 //  - SUPERHOT time-couples-to-motion: stand still, time nearly stops.
 //  - the drink: vignette + warm grade + time-ease, diegetic comfort.
 //  - agency asymmetry: the camera is NEVER forcibly moved.
 // ---------------------------------------------------------------
 
+// never fail silently into a black screen — show it
+window.addEventListener('error', e => showFatal(e.message));
+window.addEventListener('unhandledrejection', e => showFatal(String(e.reason)));
+function showFatal(msg) {
+  let el = document.getElementById('fatal');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'fatal';
+    el.style.cssText = 'position:fixed;inset:0;z-index:999;background:#2a0806;color:#ffdede;font:14px/1.5 monospace;padding:24px;overflow:auto;white-space:pre-wrap';
+    document.body.appendChild(el);
+  }
+  el.textContent += '\n' + msg;
+}
+
+try {
+  main();
+} catch (e) {
+  showFatal('Init failed: ' + (e && e.stack || e));
+}
+
+function main() {
+
 const clock = new THREE.Clock();
 let W = innerWidth, H = innerHeight;
 
 const scene = new THREE.Scene();
-scene.fog = new THREE.FogExp2(0x05070a, 0.045);
-scene.background = new THREE.Color(0x05070a);
+scene.background = new THREE.Color(0x141a2e); // dusk blue — never pure black, always legible
+scene.fog = new THREE.FogExp2(0x141a2e, 0.028);
 
 const camera = new THREE.PerspectiveCamera(72, W / H, 0.05, 200);
-const yawObj = new THREE.Object3D();   // yaw
-yawObj.add(camera);                    // pitch on camera itself
-scene.add(yawObj);
-yawObj.position.set(0, 1.65, 6);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(W, H);
-renderer.shadowMap.enabled = false;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.15;
 document.body.prepend(renderer.domElement);
 
 addEventListener('resize', () => {
@@ -40,18 +63,37 @@ addEventListener('resize', () => {
   renderer.setSize(W, H);
 });
 
+// ---------------- controls (official three.js pattern) ----------------
+const controls = new PointerLockControls(camera, renderer.domElement);
+const player = controls.getObject(); // yaw+pitch rig, standard usage
+scene.add(player);
+player.position.set(0, 1.65, 6);
+
+const isTouch = matchMedia('(pointer: coarse)').matches;
+const startOverlay = document.getElementById('center');
+const startBtn = document.getElementById('startBtn');
+let locked = false;
+
+controls.addEventListener('lock', () => { locked = true; startOverlay.style.display = 'none'; });
+controls.addEventListener('unlock', () => { locked = false; if (!isTouch) startOverlay.style.display = ''; });
+
+startBtn.addEventListener('click', () => {
+  if (isTouch) { startOverlay.style.display = 'none'; locked = true; enableTouchControls(); return; }
+  controls.lock();
+});
+
 // ---------------- environment ----------------
 function cobbleTexture() {
   const c = document.createElement('canvas'); c.width = c.height = 256;
   const g = c.getContext('2d');
-  g.fillStyle = '#15181a'; g.fillRect(0, 0, 256, 256);
+  g.fillStyle = '#22282b'; g.fillRect(0, 0, 256, 256);
   for (let i = 0; i < 260; i++) {
     const x = Math.random() * 256, y = Math.random() * 256, r = 6 + Math.random() * 10;
-    const b = 18 + Math.random() * 20;
-    g.fillStyle = `rgb(${b},${b + 3},${b + 4})`;
+    const b = 30 + Math.random() * 28;
+    g.fillStyle = `rgb(${b},${b + 4},${b + 6})`;
     g.beginPath(); g.ellipse(x, y, r, r * (0.7 + Math.random() * 0.3), Math.random() * Math.PI, 0, 7); g.fill();
   }
-  g.strokeStyle = 'rgba(43,224,127,.04)'; g.lineWidth = 1;
+  g.strokeStyle = 'rgba(43,224,127,.05)'; g.lineWidth = 1;
   for (let i = 0; i < 40; i++) { g.beginPath(); g.moveTo(Math.random() * 256, 0); g.lineTo(Math.random() * 256, 256); g.stroke(); }
   const t = new THREE.CanvasTexture(c);
   t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(14, 40);
@@ -61,9 +103,8 @@ const groundMat = new THREE.MeshStandardMaterial({ map: cobbleTexture(), roughne
 const ground = new THREE.Mesh(new THREE.PlaneGeometry(40, 140), groundMat);
 ground.rotation.x = -Math.PI / 2; ground.position.z = -30;
 scene.add(ground);
-// wet-reflection sheen via a low, faint duplicate
 const sheen = new THREE.Mesh(new THREE.PlaneGeometry(40, 140),
-  new THREE.MeshStandardMaterial({ color: 0x2be07f, transparent: true, opacity: 0.03, roughness: 0.1, metalness: 0.9 }));
+  new THREE.MeshStandardMaterial({ color: 0x2be07f, transparent: true, opacity: 0.04, roughness: 0.1, metalness: 0.9 }));
 sheen.rotation.x = -Math.PI / 2; sheen.position.set(0, 0.001, -30);
 scene.add(sheen);
 
@@ -73,10 +114,9 @@ function buildingRow(side) {
   while (z > -70) {
     const w = 4 + Math.random() * 3, h = 6 + Math.random() * 10, d = 6 + Math.random() * 4;
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d),
-      new THREE.MeshStandardMaterial({ color: 0x0a0c0d, roughness: 0.9 }));
+      new THREE.MeshStandardMaterial({ color: 0x171d20, roughness: 0.9 }));
     mesh.position.set(side * (10 + w / 2), h / 2, z - d / 2);
     group.add(mesh);
-    // window strips (emissive)
     const winCount = 2 + Math.floor(Math.random() * 3);
     for (let i = 0; i < winCount; i++) {
       const win = new THREE.Mesh(new THREE.PlaneGeometry(w * 0.7, 0.35),
@@ -91,23 +131,23 @@ function buildingRow(side) {
 }
 scene.add(buildingRow(1)); scene.add(buildingRow(-1));
 
-// hanging lanterns (a few real point lights, rest emissive-only for perf)
+// hanging lanterns — guarantee a REAL light near spawn so frame 1 is never dark
 const lanterns = [];
 function addLantern(x, y, z, real) {
-  const m = new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 8),
-    new THREE.MeshBasicMaterial({ color: 0xff7a30 }));
+  const m = new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 8), new THREE.MeshBasicMaterial({ color: 0xff9248 }));
   m.position.set(x, y, z); scene.add(m);
   if (real) {
-    const l = new THREE.PointLight(0xff9248, 3.2, 9, 2);
+    const l = new THREE.PointLight(0xff9248, 4.5, 11, 2);
     l.position.copy(m.position); scene.add(l);
   }
   lanterns.push(m);
 }
-for (let z = 4; z > -60; z -= 6) {
-  addLantern(-2.6 + Math.random() * 5.2, 3.2 + Math.random() * 1.4, z, Math.random() < 0.35);
+addLantern(-1.6, 3.0, 3, true); // guaranteed lit lantern right at spawn
+addLantern(1.8, 3.2, 1, true);
+for (let z = -2; z > -60; z -= 6) {
+  addLantern(-2.6 + Math.random() * 5.2, 3.2 + Math.random() * 1.4, z, Math.random() < 0.45);
 }
 
-// blossoms
 function blossomTexture() {
   const c = document.createElement('canvas'); c.width = c.height = 32;
   const g = c.getContext('2d');
@@ -131,34 +171,27 @@ const blossoms = new THREE.Points(bGeo, new THREE.PointsMaterial({
 }));
 scene.add(blossoms);
 
-const ambient = new THREE.AmbientLight(0x2c3a34, 1.3); scene.add(ambient);
-const hemi = new THREE.HemisphereLight(0x2a4a44, 0x0a0a0c, 0.9); scene.add(hemi);
-const moon = new THREE.DirectionalLight(0x9fc4d4, 0.55); moon.position.set(-4, 10, 6); scene.add(moon);
-const handLight = new THREE.PointLight(0xbfe8d0, 0.7, 4.5, 2);
+const ambient = new THREE.AmbientLight(0x3c4a44, 1.7); scene.add(ambient);
+const hemi = new THREE.HemisphereLight(0x3a5a54, 0x14181a, 1.1); scene.add(hemi);
+const moon = new THREE.DirectionalLight(0x9fc4d4, 0.7); moon.position.set(-4, 10, 6); scene.add(moon);
+const handLight = new THREE.PointLight(0xbfe8d0, 0.9, 4.5, 2);
 camera.add(handLight); handLight.position.set(0.2, -0.2, 0.3);
+scene.add(camera); // camera must be in the graph for its child light to render
 
 // ---------------- input ----------------
 const keys = {};
 addEventListener('keydown', e => { keys[e.code] = true; onKeyDown(e.code); });
 addEventListener('keyup', e => { keys[e.code] = false; });
 
-let mouseDX = 0, mouseDY = 0, locked = false;
-document.getElementById('startBtn').addEventListener('click', () => {
-  document.getElementById('center').style.display = 'none';
-  renderer.domElement.requestPointerLock();
-});
-document.addEventListener('pointerlockchange', () => { locked = document.pointerLockElement === renderer.domElement; });
+let mouseDX = 0, mouseDY = 0;
 addEventListener('mousemove', e => {
-  if (!locked) return;
+  if (!locked || isTouch) return;
   mouseDX += e.movementX; mouseDY += e.movementY;
 });
-addEventListener('mousedown', e => { if (locked && e.button === 0) fireOrNothing(); });
-
-const YAW_SENS = 0.0022, PITCH_SENS = 0.0022;
-let pitch = 0;
+addEventListener('mousedown', e => { if (locked && e.button === 0 && !isTouch) fireOrNothing(); });
 
 // ---------------- sword: phantom/physical decoupling ----------------
-const swordPivot = new THREE.Group(); // attaches to camera, this IS the "ghost hand" rest frame
+const swordPivot = new THREE.Group();
 camera.add(swordPivot);
 swordPivot.position.set(0.32, -0.28, -0.55);
 swordPivot.rotation.set(-0.35, 0.5, 0.15);
@@ -172,28 +205,25 @@ tsuka.position.y = -0.11;
 const swordMesh = new THREE.Group(); swordMesh.add(blade, tsuba, tsuka);
 swordPivot.add(swordMesh);
 
-// PD state: local offset (Vector3) + velocity, springing toward zero (=rest pivot)
 const swordOffset = new THREE.Vector3();
 const swordVel = new THREE.Vector3();
-const SPRING_LIN = 620, DAMP_LIN = 26;      // stiff linear -> holds position
-let SPRING_ANG = 40, DAMP_ANG = 7;          // soft rotational -> drags/deflects
+const SPRING_LIN = 620, DAMP_LIN = 26;
+const SPRING_ANG = 40, DAMP_ANG = 7;
 const MAX_REACH = 0.85;
-let swordAngVel = new THREE.Vector3();
-let swordAngOffset = new THREE.Vector3(); // small extra tilt from swing (visual drag)
+const swordAngVel = new THREE.Vector3();
+const swordAngOffset = new THREE.Vector3();
 
 let tipPrevWorld = new THREE.Vector3();
-let tipSpeed = 0; // world units/sec
-const tipLocal = new THREE.Vector3(0, 1.0, 0); // approx blade tip in swordPivot-local space
+let tipSpeed = 0;
+const tipLocal = new THREE.Vector3(0, 1.0, 0);
 
-function updateSword(dt, dtScaled) {
-  // mouse movement -> impulse into velocity (this is the "hand" pushing the phantom target)
+function updateSword(dt) {
   const IMPULSE = 0.016;
   swordVel.x += mouseDX * IMPULSE;
   swordVel.y -= mouseDY * IMPULSE;
   swordAngVel.z += -mouseDX * 0.10;
   swordAngVel.x += mouseDY * 0.10;
 
-  // spring-damper toward rest (0,0,0) — real dt, not time-dilated: the blade is YOUR body, not the world
   const ax = -SPRING_LIN * swordOffset.x - DAMP_LIN * swordVel.x;
   const ay = -SPRING_LIN * swordOffset.y - DAMP_LIN * swordVel.y;
   swordVel.x += ax * dt; swordVel.y += ay * dt;
@@ -209,13 +239,11 @@ function updateSword(dt, dtScaled) {
   swordMesh.rotation.x = swordAngOffset.x;
   swordMesh.rotation.z = swordAngOffset.z;
 
-  // world-space tip velocity for the velocity gate
   const tipWorld = tipLocal.clone().add(swordOffset);
   swordPivot.localToWorld(tipWorld);
   tipSpeed = tipPrevWorld.lengthSq() ? tipWorld.distanceTo(tipPrevWorld) / dt : 0;
   tipPrevWorld.copy(tipWorld);
 
-  // blade brightens with swing speed — the only "readout", no numbers
   const heat = Math.min(1, tipSpeed / 9);
   bladeMat.emissiveIntensity = 0.35 + heat * 1.4;
   bladeMat.emissive.setRGB(0.06 + heat * 0.05, 0.75 * heat + 0.08, 0.35 * heat + 0.06);
@@ -224,7 +252,7 @@ function updateSword(dt, dtScaled) {
   return tipWorld;
 }
 
-const CUT_THRESHOLD = 6.0; // world units/sec — below this, a hit just bounces
+const CUT_THRESHOLD = 6.0;
 
 // ---------------- gun ----------------
 const gunPivot = new THREE.Group();
@@ -241,10 +269,10 @@ const muzzleFlash = new THREE.PointLight(0xfff2c0, 0, 4, 2);
 muzzleFlash.position.set(0, 0.03, -0.4);
 gunPivot.add(muzzleFlash);
 
-let gunState = 'holstered'; // holstered, drawing, ready, firing, recover, empty
+let gunState = 'holstered';
 let ammo = 6, ammoMax = 6;
-let gunHoldPos = new THREE.Vector3(0.22, -0.5, -0.35); // holstered (down, concealed)
-let gunReadyPos = new THREE.Vector3(0.22, -0.16, -0.42);
+const gunHoldPos = new THREE.Vector3(0.22, -0.5, -0.35);
+const gunReadyPos = new THREE.Vector3(0.22, -0.16, -0.42);
 let gunT = 0;
 
 function onKeyDown(code) {
@@ -324,9 +352,9 @@ const enemies = [];
 function makeEnemy(z) {
   const g = new THREE.Group();
   const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.32, 1.05, 4, 8),
-    new THREE.MeshStandardMaterial({ color: 0x11151a, roughness: 0.8 }));
+    new THREE.MeshStandardMaterial({ color: 0x1c2226, roughness: 0.8 }));
   body.position.y = 0.95;
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.2, 10, 8), new THREE.MeshStandardMaterial({ color: 0x1c2226, roughness: 0.7 }));
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.2, 10, 8), new THREE.MeshStandardMaterial({ color: 0x262e33, roughness: 0.7 }));
   head.position.y = 1.75;
   const wep = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.6, 0.07), new THREE.MeshStandardMaterial({ color: 0xcfd8d2, metalness: 0.8, roughness: 0.2, emissive: 0x000000 }));
   wep.position.set(0.32, 1.1, -0.15); wep.rotation.x = -0.6;
@@ -336,7 +364,7 @@ function makeEnemy(z) {
   scene.add(g);
   return g;
 }
-let waveDefs = [1, 2, 2]; // scheduled, not random count-per-wave
+const waveDefs = [1, 2, 2];
 let waveIdx = 0;
 function spawnWave(n) {
   for (let i = 0; i < n; i++) enemies.push(makeEnemy(-8 - i * 3 - Math.random() * 2));
@@ -394,17 +422,15 @@ function updateEnemies(dt, dtScaled, playerPos) {
       e.rotation.z = Math.sin(u.t * 20) * 0.05;
       if (u.t > 0.35) u.state = 'approach';
     } else if (u.state === 'dying') {
-      u.t += dt; // death itself is NOT time-scaled — it already happened
+      u.t += dt;
       e.rotation.x = Math.min(Math.PI / 2, u.t * 4);
       e.position.y = -u.t * 0.4;
       e.traverse(c => { if (c.material) { c.material.transparent = true; c.material.opacity = Math.max(0, 1 - u.t * 0.8); } });
       if (u.t > 1.3) { u.state = 'dead'; scene.remove(e); updateWavePips(); }
     }
 
-    // sword-cut test against this enemy's torso, velocity gated
     if (u.state !== 'dead' && u.state !== 'dying') {
       const target = e.position.clone(); target.y = 1.0;
-      const dSeg = target.distanceTo(camera.getWorldPosition(new THREE.Vector3()).lerp(target, 0));
       const tipWorld = swordPivot.localToWorld(tipLocal.clone().add(swordOffset));
       const hitDist = tipWorld.distanceTo(target);
       if (hitDist < 0.55 && tipSpeed > CUT_THRESHOLD) {
@@ -418,7 +444,7 @@ function updateEnemies(dt, dtScaled, playerPos) {
     setTimeout(() => spawnWave(waveDefs[waveIdx]), 1400);
   } else if (allDeadThisWave && waveIdx === waveDefs.length - 1 && !window.__oniWon) {
     window.__oniWon = true;
-    const card = document.getElementById('endcard'); card.style.opacity = 1;
+    document.getElementById('endcard').style.opacity = 1;
   }
 }
 
@@ -434,7 +460,6 @@ function parryFlash() {
   setTimeout(() => el.style.background = 'rgba(191,47,29,0)', 100);
 }
 
-let lastGunHit = null;
 function raycastShot() {
   const dir = new THREE.Vector3(); camera.getWorldDirection(dir);
   const origin = camera.getWorldPosition(new THREE.Vector3());
@@ -446,29 +471,33 @@ function raycastShot() {
   }
 }
 
-// ---------------- movement + time dilation (SUPERHOT-style) ----------------
-const velocity = new THREE.Vector3();
+// ---------------- movement (official-example pattern) + time dilation ----------------
+const moveVel = new THREE.Vector3();
+const moveDir = new THREE.Vector3();
 let globalTimeScale = 0.15;
 let motionSmoothed = 0;
+let touchMove = { x: 0, y: 0 }; // virtual joystick, -1..1
 
 function updateMovement(dt) {
-  const speed = 3.1;
-  const dir = new THREE.Vector3();
-  const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(yawObj.quaternion);
-  const right = new THREE.Vector3(1, 0, 0).applyQuaternion(yawObj.quaternion);
-  if (keys['KeyW']) dir.add(fwd);
-  if (keys['KeyS']) dir.sub(fwd);
-  if (keys['KeyD']) dir.add(right);
-  if (keys['KeyA']) dir.sub(right);
-  dir.y = 0;
-  const moving = dir.lengthSq() > 0.0001;
-  if (moving) dir.normalize();
-  velocity.lerp(dir.multiplyScalar(speed), moving ? 0.18 : 0.12);
-  yawObj.position.addScaledVector(velocity, dt);
-  yawObj.position.x = THREE.MathUtils.clamp(yawObj.position.x, -9, 9);
-  yawObj.position.z = THREE.MathUtils.clamp(yawObj.position.z, -66, 8);
+  const SPEED = 26, DAMP = 9;
+  moveVel.x -= moveVel.x * DAMP * dt;
+  moveVel.z -= moveVel.z * DAMP * dt;
 
-  const bodyMotion = velocity.length() / speed;
+  moveDir.z = Number(keys['KeyW'] || 0) - Number(keys['KeyS'] || 0) - touchMove.y;
+  moveDir.x = Number(keys['KeyD'] || 0) - Number(keys['KeyA'] || 0) + touchMove.x;
+  moveDir.normalize();
+
+  if (keys['KeyW'] || keys['KeyS'] || touchMove.y) moveVel.z -= moveDir.z * SPEED * dt;
+  if (keys['KeyA'] || keys['KeyD'] || touchMove.x) moveVel.x -= moveDir.x * SPEED * dt;
+
+  controls.moveRight(-moveVel.x * dt);
+  controls.moveForward(-moveVel.z * dt);
+  player.position.x = THREE.MathUtils.clamp(player.position.x, -9, 9);
+  player.position.z = THREE.MathUtils.clamp(player.position.z, -66, 8);
+  player.position.y = 1.65;
+
+  const speedNow = Math.hypot(moveVel.x, moveVel.z);
+  const bodyMotion = Math.min(1, speedNow / SPEED * 3);
   const handMotion = Math.min(1, tipSpeed / 5);
   const rawMotion = Math.max(bodyMotion, handMotion * 0.7);
   motionSmoothed += (rawMotion - motionSmoothed) * 0.12;
@@ -476,16 +505,93 @@ function updateMovement(dt) {
   globalTimeScale = THREE.MathUtils.clamp(0.06 + motionSmoothed * 0.94 - drinkEase, 0.04, 1.05);
 }
 
+// ---------------- touch controls (phone) ----------------
+function enableTouchControls() {
+  const wrap = document.createElement('div');
+  wrap.id = 'touchUI';
+  wrap.innerHTML = `
+    <div id="tJoyBase"><div id="tJoyNub"></div></div>
+    <div id="tLookZone"></div>
+    <button id="tFire" class="tbtn tbtn-big">⚔</button>
+    <button id="tDraw" class="tbtn">Q</button>
+    <button id="tDrink" class="tbtn">⚱</button>`;
+  document.body.appendChild(wrap);
+  const style = document.createElement('style');
+  style.textContent = `
+    #touchUI{position:fixed;inset:0;z-index:20;touch-action:none}
+    #tLookZone{position:absolute;right:0;top:0;width:60%;height:100%}
+    #tJoyBase{position:absolute;left:30px;bottom:30px;width:110px;height:110px;border-radius:50%;background:rgba(234,243,237,.08);border:1px solid rgba(234,243,237,.25)}
+    #tJoyNub{position:absolute;left:35px;top:35px;width:40px;height:40px;border-radius:50%;background:rgba(43,224,127,.5)}
+    .tbtn{position:absolute;pointer-events:auto;border-radius:50%;border:1px solid rgba(234,243,237,.3);background:rgba(10,15,12,.55);color:#eaf3ed;font-size:20px}
+    .tbtn-big{right:26px;bottom:110px;width:78px;height:78px;font-size:30px;color:#2be07f}
+    #tDraw{right:30px;bottom:26px;width:52px;height:52px}
+    #tDrink{right:118px;bottom:26px;width:52px;height:52px}
+  `;
+  document.head.appendChild(style);
+
+  const base = document.getElementById('tJoyBase'), nub = document.getElementById('tJoyNub');
+  let joyId = null, joyOrigin = { x: 0, y: 0 };
+  base.addEventListener('touchstart', e => {
+    const t = e.changedTouches[0]; joyId = t.identifier;
+    const r = base.getBoundingClientRect(); joyOrigin = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  }, { passive: true });
+  addEventListener('touchmove', e => {
+    for (const t of e.changedTouches) {
+      if (t.identifier === joyId) {
+        let dx = t.clientX - joyOrigin.x, dy = t.clientY - joyOrigin.y;
+        const max = 45, len = Math.hypot(dx, dy);
+        if (len > max) { dx = dx / len * max; dy = dy / len * max; }
+        nub.style.left = 35 + dx + 'px'; nub.style.top = 35 + dy + 'px';
+        touchMove.x = dx / max; touchMove.y = dy / max;
+      }
+    }
+  }, { passive: true });
+  addEventListener('touchend', e => {
+    for (const t of e.changedTouches) if (t.identifier === joyId) {
+      joyId = null; touchMove.x = 0; touchMove.y = 0;
+      nub.style.left = '35px'; nub.style.top = '35px';
+    }
+  });
+
+  const lookZone = document.getElementById('tLookZone');
+  let lookId = null, lastX = 0, lastY = 0;
+  lookZone.addEventListener('touchstart', e => {
+    const t = e.changedTouches[0]; lookId = t.identifier; lastX = t.clientX; lastY = t.clientY;
+  }, { passive: true });
+  lookZone.addEventListener('touchmove', e => {
+    for (const t of e.changedTouches) if (t.identifier === lookId) {
+      mouseDX += (t.clientX - lastX) * 1.4; mouseDY += (t.clientY - lastY) * 1.4;
+      lastX = t.clientX; lastY = t.clientY;
+    }
+  }, { passive: true });
+  lookZone.addEventListener('touchend', e => { for (const t of e.changedTouches) if (t.identifier === lookId) lookId = null; });
+
+  document.getElementById('tFire').addEventListener('touchstart', e => { e.preventDefault(); fireOrNothing(); }, { passive: false });
+  document.getElementById('tDraw').addEventListener('touchstart', e => { e.preventDefault(); toggleDraw(); }, { passive: false });
+  document.getElementById('tDrink').addEventListener('touchstart', e => { e.preventDefault(); drink(); }, { passive: false });
+}
+
+// touch look also feeds the sword (swipe = swing), same physics as mouse
+let touchLookDX = 0, touchLookDY = 0;
+addEventListener('touchmove', e => {
+  if (!isTouch || !locked) return;
+});
+
 // ---------------- main loop ----------------
+function applyTouchLookToCamera(yawDelta, pitchDelta) {
+  player.rotation.y -= yawDelta * 0.0022;
+  const euler = new THREE.Euler(0, 0, 0, 'YXZ');
+  euler.setFromQuaternion(camera.quaternion);
+  euler.x = THREE.MathUtils.clamp(euler.x - pitchDelta * 0.0022, -1.2, 1.2);
+  camera.quaternion.setFromEuler(euler);
+}
+
 function tick() {
   requestAnimationFrame(tick);
   const dt = Math.min(clock.getDelta(), 0.05);
 
-  if (locked) {
-    yawObj.rotation.y -= mouseDXforLook() * YAW_SENS;
-    pitch -= mouseDYforLook() * PITCH_SENS;
-    pitch = THREE.MathUtils.clamp(pitch, -1.15, 1.15);
-    camera.rotation.x = pitch;
+  if (isTouch && locked) {
+    applyTouchLookToCamera(mouseDX, mouseDY);
   }
 
   updateMovement(dt);
@@ -493,11 +599,10 @@ function tick() {
   hitStopT = Math.max(0, hitStopT - dt);
   const dtScaled = hitStopT > 0 ? dt * 0.03 : dt * globalTimeScale;
 
-  updateSword(dt, dtScaled); // sword itself always responds at real dt (it's your body)
+  updateSword(dt);
   updateGun(dt);
-  updateEnemies(dt, dtScaled, yawObj.position);
+  updateEnemies(dt, dtScaled, player.position);
 
-  // blossoms drift at world time-scale (part of the world, not the player's body)
   const arr = blossoms.geometry.attributes.position.array;
   for (let i = 0; i < N_BLOSSOM; i++) {
     arr[i * 3] += bVel[i].x * dtScaled;
@@ -507,28 +612,23 @@ function tick() {
   }
   blossoms.geometry.attributes.position.needsUpdate = true;
 
-  // drink visual: vignette intensifies, warm tint rises, slowly decays
   drinkLevel = Math.max(0, drinkLevel - dt * 0.02);
   document.getElementById('drinkTint').style.opacity = drinkLevel.toFixed(2);
-  document.getElementById('vignette').style.opacity = (0.85 + drinkLevel * 0.3).toFixed(2);
+  document.getElementById('vignette').style.opacity = (0.55 + drinkLevel * 0.3).toFixed(2);
 
   renderer.render(scene, camera);
 }
 
-// separate accumulators so mouse read/reset doesn't race between sword + look
-let lookDX = 0, lookDY = 0;
-addEventListener('mousemove', e => { if (locked) { lookDX += e.movementX; lookDY += e.movementY; } });
-function mouseDXforLook() { const v = lookDX; lookDX = 0; return v; }
-function mouseDYforLook() { const v = lookDY; lookDY = 0; return v; }
-
 tick();
 
-// expose a tiny debug hook for verification (no gameplay effect)
 window.__oni = {
   drink, toggleDraw, reload,
-  state: () => ({ gunState, ammo, drinksLeft, drinkLevel, waveIdx, enemies: enemies.length, tipSpeed, globalTimeScale,
-    enemyStates: enemies.map(e => ({ state: e.userData.state, dist: e.position.distanceTo(yawObj.position).toFixed(2) })) }),
+  state: () => ({ gunState, ammo, drinksLeft, drinkLevel, waveIdx, enemies: enemies.length, tipSpeed, globalTimeScale, locked,
+    enemyStates: enemies.map(e => ({ state: e.userData.state, dist: e.position.distanceTo(player.position).toFixed(2) })) }),
   simulateSwing: (dx, dy) => { mouseDX += dx; mouseDY += dy; },
-  teleportEnemyClose: (i) => { if (enemies[i]) { enemies[i].position.set(0, 0, yawObj.position.z - 1.6); enemies[i].userData.state = 'approach'; } },
-  playerPos: () => yawObj.position.toArray(),
+  teleportEnemyClose: (i) => { if (enemies[i]) { enemies[i].position.set(0, 0, player.position.z - 1.6); enemies[i].userData.state = 'approach'; } },
+  playerPos: () => player.position.toArray(),
+  forceLock: () => { locked = true; startOverlay.style.display = 'none'; },
 };
+
+} // main()
