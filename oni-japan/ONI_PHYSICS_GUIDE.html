@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ONI — The Physics Field Guide</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Shippori+Mincho+B1:wght@600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#040605; --ink:#eaf3ed; --green:#2be07f; --dim:#9fb3a8;
+    --panel:#0a0f0c; --line:rgba(43,224,127,.18);
+    --disp:'Chakra Petch',system-ui,sans-serif;
+    --brand:'Shippori Mincho B1',serif;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{background:var(--bg);color:var(--ink);font-family:var(--disp);-webkit-font-smoothing:antialiased;overflow-x:hidden}
+
+  header{padding:12vh 7vw 6vh;max-width:1100px;margin:0 auto}
+  .brand{font-family:var(--brand);font-weight:800;font-size:clamp(40px,7vw,96px);line-height:.95}
+  .brand .g{color:var(--green);text-shadow:0 0 30px rgba(43,224,127,.45)}
+  .sub{font-family:var(--brand);font-weight:600;margin-top:.8rem;font-size:clamp(16px,2.2vw,26px);color:var(--dim)}
+  .intro{margin-top:2.2rem;font-size:clamp(15px,1.6vw,19px);line-height:1.65;color:#c7d2cb;max-width:62ch}
+  .intro b{color:var(--ink)}
+
+  section{max-width:1100px;margin:0 auto;padding:5vh 7vw}
+  .eyebrow{font-weight:600;letter-spacing:.45em;text-transform:uppercase;font-size:clamp(10px,1.15vw,13px);color:var(--green);margin-bottom:1rem}
+  h2{font-family:var(--brand);font-weight:700;font-size:clamp(24px,3.4vw,44px);line-height:1.12;margin-bottom:1.2rem;max-width:26ch}
+  .lede{font-size:clamp(15px,1.55vw,19px);line-height:1.65;color:#c7d2cb;max-width:62ch;margin-bottom:2rem}
+  .lede b,.lede em{color:var(--ink);font-style:normal}
+
+  .demo{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden;margin:1.6rem 0}
+  .demo canvas{display:block;width:100%;height:auto;cursor:crosshair;touch-action:none}
+  .demo .bar{display:flex;flex-wrap:wrap;gap:.9rem 1.6rem;align-items:center;padding:.9rem 1.2rem;border-top:1px solid var(--line);font-size:13px;color:var(--dim)}
+  .demo .bar label{display:flex;align-items:center;gap:.55rem;cursor:pointer;user-select:none}
+  .demo .bar input[type=range]{accent-color:var(--green);width:120px}
+  .toggle{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+  .toggle button{background:transparent;border:0;color:var(--dim);font-family:var(--disp);font-weight:600;font-size:12px;letter-spacing:.12em;text-transform:uppercase;padding:.55em 1em;cursor:pointer}
+  .toggle button.on{background:var(--green);color:#04140b}
+  .hint{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);opacity:.8}
+  .readout{font-weight:700;color:var(--green);min-width:9ch}
+
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:1.2rem;margin-top:1.4rem}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:1.3rem 1.4rem}
+  .card h3{font-size:14px;letter-spacing:.16em;text-transform:uppercase;color:var(--green);margin-bottom:.6rem}
+  .card p{font-size:14.5px;line-height:1.55;color:#c7d2cb}
+  .card p b{color:var(--ink)}
+
+  .masters{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:1.2rem;margin-top:1.6rem}
+  .master{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:1.6rem 1.7rem;display:flex;flex-direction:column}
+  .master .tag{font-family:var(--brand);font-weight:700;font-size:clamp(19px,2.2vw,26px);color:var(--ink);margin-bottom:.15rem}
+  .master .role{font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--green);margin-bottom:1rem}
+  .master .lesson{font-size:15px;line-height:1.55;color:#dfe8e1;margin-bottom:1rem;font-weight:600}
+  .master ul{list-style:none;display:flex;flex-direction:column;gap:.7rem;margin-top:auto}
+  .master li{font-size:14px;line-height:1.5;color:#c0ccc4;padding-left:1.1rem;position:relative}
+  .master li::before{content:"";position:absolute;left:0;top:.55em;width:6px;height:6px;background:var(--green);border-radius:1px;opacity:.7}
+  .master li b{color:var(--ink)}
+  .master .src{margin-top:1.1rem;font-size:11px;letter-spacing:.08em;color:var(--dim);opacity:.75}
+
+  .curriculum{counter-reset:c;display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:.8rem;margin-top:1.4rem}
+  .curriculum li{list-style:none;counter-increment:c;position:relative;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:1.1rem 1.2rem 1.1rem 3.2rem;font-size:14px;line-height:1.5;color:#c7d2cb}
+  .curriculum li::before{content:counter(c);position:absolute;left:1rem;top:1rem;font-family:var(--brand);font-weight:800;font-size:20px;color:var(--green);opacity:.8}
+  .curriculum li b{color:var(--ink)}
+
+  .map{margin-top:1.4rem;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .map .row{display:grid;grid-template-columns:minmax(120px,1fr) 2.4fr;border-bottom:1px solid var(--line)}
+  .map .row:last-child{border-bottom:0}
+  .map .k{padding:1rem 1.2rem;font-family:var(--brand);font-weight:700;color:var(--green);background:rgba(43,224,127,.04);font-size:15px}
+  .map .v{padding:1rem 1.2rem;font-size:14px;line-height:1.55;color:#c7d2cb}
+  .map .v b{color:var(--ink)}
+  .gate{margin-top:1.6rem;border:1px solid rgba(191,47,29,.4);border-left:3px solid var(--blood,#bf2f1d);border-radius:8px;background:rgba(191,47,29,.06);padding:1.3rem 1.5rem}
+  .gate h3{font-family:var(--brand);color:#e8836f;font-size:16px;margin-bottom:.5rem}
+  .gate p{font-size:14.5px;line-height:1.6;color:#e2d0cb}
+  .gate p b{color:#fff}
+  .valid{margin-top:1rem;border:1px solid rgba(43,224,127,.4);border-left:3px solid var(--green);border-radius:8px;background:rgba(43,224,127,.06);padding:1.3rem 1.5rem}
+  .valid h3{font-family:var(--brand);color:var(--green);font-size:16px;margin-bottom:.5rem}
+  .valid p{font-size:14.5px;line-height:1.6;color:#dfe8e1}
+  .valid p b{color:#fff}
+
+  .divider{border:0;border-top:1px solid var(--line);margin:4vh 7vw}
+  footer{text-align:center;padding:6vh 7vw 8vh;color:var(--dim);font-size:12px;letter-spacing:.2em;text-transform:uppercase}
+  footer .g{color:var(--green)}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">ONI <span class="g">·</span> <span class="g">Physics Field Guide</span></div>
+  <div class="sub">How great VR combat actually feels real — and how to learn it.</div>
+  <p class="intro">
+    Every game we're building on solved one piece of the same problem: <b>your controller is
+    weightless, but the weapon must not be.</b> This page is the distilled craft — the handful of
+    mechanisms behind Blade &amp; Sorcery's heavy steel, Alyx's hands, Thrill of the Fight's honest
+    punches, SUPERHOT's time. The demos are live — <b>use your mouse; feel the idea.</b>
+  </p>
+</header>
+
+<hr class="divider">
+
+<!-- DEMO 1 + 2 — the ghost hand / spring-damper sword + velocity gate -->
+<section>
+  <div class="eyebrow">Concept 01 — the one that matters most</div>
+  <h2>Your hand is a ghost. The sword is real.</h2>
+  <p class="lede">
+    The core trick of weighty VR melee: the blade is <b>a real physics object with mass and
+    inertia</b>, and it is <em>not</em> glued to your hand — it <b>chases</b> your hand, pulled by a
+    spring-damper (a "PD controller"). Move slowly and it obeys. Whip it and it <b>lags, bends your
+    arc, carries momentum</b> — your brain reads that lag as weight. Blade &amp; Sorcery is this idea,
+    tuned for five years.<br><br>
+    And damage is <b>velocity-gated</b> (Thrill of the Fight's law): a lazy push does nothing — the
+    lantern just swings away. A committed cut takes it clean. <b>Try to slice the lantern.</b>
+  </p>
+  <div class="demo">
+    <canvas id="c1" width="1000" height="460"></canvas>
+    <div class="bar">
+      <span class="toggle" id="modeT">
+        <button data-m="arcade">Glued (arcade)</button>
+        <button data-m="physical" class="on">Physical (ONI)</button>
+      </span>
+      <label>mass <input type="range" id="mass" min="0.4" max="3" step="0.1" value="1.4"></label>
+      <label>grip strength <input type="range" id="grip" min="0.2" max="1" step="0.05" value="0.62"></label>
+      <span class="hint">tip speed <span class="readout" id="spd">0.0 m/s</span></span>
+      <span class="hint" id="cutmsg">swing hard to cut — push = bounce</span>
+    </div>
+  </div>
+  <div class="cards">
+    <div class="card"><h3>Why lag = weight</h3><p>With no force feedback, the only channel left is <b>visual dynamics</b>. The delay and overshoot of a massive blade chasing your ghost-hand is a pseudo-haptic: your brain infers mass from motion it can see.</p></div>
+    <div class="card"><h3>Why gate on velocity</h3><p>If contact alone did damage, waggling would win. Gating on <b>tip speed (and edge alignment)</b> makes real technique — hip rotation, follow-through — the winning strategy. That's the workout, enforced by physics.</p></div>
+    <div class="card"><h3>The tuning war</h3><p>Too stiff a spring = weightless toy. Too soft = drunk noodle. The entire "feel" of a melee game lives in <b>this one tuning curve</b> — and it must be found by playtesting, never by reasoning.</p></div>
+  </div>
+</section>
+
+<hr class="divider">
+
+<!-- DEMO 3 — time moves when you move -->
+<section>
+  <div class="eyebrow">Concept 02 — SUPERHOT's law, ONI's drink</div>
+  <h2>Time belongs to the player.</h2>
+  <p class="lede">
+    SUPERHOT's whole genius is one line of code: <b>world speed = your speed.</b> Hold still and the
+    fight waits for you; commit and it commits back. It converts panic into choreography — which is
+    exactly how ONI's <b>legendary drink</b> works: the drunker you are, the more time eases, the more
+    the night becomes a dance you can learn. <b>Move your mouse to move time.</b> Survive the volley.
+  </p>
+  <div class="demo">
+    <canvas id="c2" width="1000" height="380"></canvas>
+    <div class="bar">
+      <label>drink level <input type="range" id="drink" min="0" max="0.8" step="0.05" value="0"></label>
+      <span class="hint">world speed <span class="readout" id="tscale">0%</span></span>
+      <span class="hint">the drink slider adds slow-mo + softens the frame — comfort disguised as an advantage</span>
+    </div>
+  </div>
+  <div class="cards">
+    <div class="card"><h3>Why it's replayable</h3><p>Deterministic choreography + player-owned time = <b>mastery curve</b>. The fight is the same; you are not. Run 30, you move like John Wick — that's the loop ONI is built on.</p></div>
+    <div class="card"><h3>The drink, mechanically</h3><p>Vignette strengthens (comfort), color richens (style), time eases (assist). Three dials, one diegetic object. The player never sees a settings menu — <b>they see a drink.</b></p></div>
+    <div class="card"><h3>Warm-up by design</h3><p>Early waves run slower and telegraph longer — an athletic warm-up disguised as story pacing, so the body is ready when the night gets fast.</p></div>
+  </div>
+</section>
+
+<hr class="divider">
+
+<!-- RESEARCH SECTIONS — filled from the four research briefs -->
+<section id="research">
+  <div class="eyebrow">The Craft — what each game actually does</div>
+  <h2>Four masters. One lesson each.</h2>
+  <p class="lede">Pulled from developer commentary, GDC talks, SDK docs, and modder reverse-engineering — the <b>real</b> techniques, not reviews. Every one of these is buildable with today's engines.</p>
+
+  <div class="masters">
+    <div class="master">
+      <div class="tag">Blade &amp; Sorcery</div>
+      <div class="role">Our sword model</div>
+      <div class="lesson">The weapon is a real physics object that <em>chases</em> your hand — it's never glued on.</div>
+      <ul>
+        <li><b>Spring / damper / maxForce</b> joint between hand and blade. The force <b>cap</b> — not mass — is what makes a claymore feel unlike a dagger.</li>
+        <li><b>Linear stiff, rotational soft</b> → the blade deflects in angle and drags along obstacles. That's why clashes read as fencing.</li>
+        <li><b>Velocity-gated damage</b> + edge-alignment dot test. Taps bounce; a committed cut along the edge kills.</li>
+        <li><b>Penetration = collision swapped for a damped constraint</b> — the wet drag of a stab is pure damper tuning. Most-praised sensation in the game.</li>
+        <li><b>Enemies are active ragdolls</b> — muscle-springs pull limbs to the animation pose. "Knockdown" = turning the springs down.</li>
+      </ul>
+      <div class="src">Fletcher · BasSDK docs · KospY interviews</div>
+    </div>
+
+    <div class="master">
+      <div class="tag">Half-Life: Alyx</div>
+      <div class="role">Our gun model</div>
+      <div class="lesson">Sell the hands, cut what has no feedback, make fumbles the player's fault.</div>
+      <ul>
+        <li><b>Physics hands chase a "ghost" target</b>; grab = snap to an authored pose, brief desync tolerated. A right-looking grip beats 1:1.</li>
+        <li><b>Multi-step reload on separate buttons</b> (eject / insert / rack). Players blame themselves, not the game — playtesters' favorite moment.</li>
+        <li><b>Diegetic ammo on the weapon</b> (grip LEDs), never a HUD. Reload-early keeps the round chambered — the gun rewards intimacy.</li>
+        <li><b>Recoil = model kick + haptic burst. Never the camera</b> — in VR the camera is your head.</li>
+        <li><b>They CUT melee &amp; two-handed guns</b> rather than ship them half-convincing. One hand always free.</li>
+      </ul>
+      <div class="src">Valve Developer Commentary · Road to VR</div>
+    </div>
+
+    <div class="master">
+      <div class="tag">Thrill of the Fight</div>
+      <div class="role">Our hand-to-hand + workout</div>
+      <div class="lesson">Measure what the body actually did. Reward form, not muscle. No game in between.</div>
+      <ul>
+        <li><b>Auto-calibration</b>: the game finds the hardest punch you can land <em>reliably</em> and makes that your max. Shoving = outlier = instant nerf.</li>
+        <li><b>Body Effort (TotF2)</b>: power graded on the whole chain — torso, weight shift, footwork. Arm-flicks grade low.</li>
+        <li><b>No lock-on, no health bars, no windows.</b> Design test: does real boxing skill transfer? It does.</li>
+        <li><b>Blocking is pure geometry</b> — limb volumes disarm the incoming fist. Free-form parry, zero parry system.</li>
+        <li><b>Your real body is the stamina meter.</b> Fitness is emergent — 9–15 kcal/min, sparring-level.</li>
+      </ul>
+      <div class="src">Ian Fitz guide + threads · UploadVR · VR Health Inst.</div>
+    </div>
+
+    <div class="master">
+      <div class="tag">The Field</div>
+      <div class="role">SUPERHOT · Boneworks · Gorn · Until You Fall</div>
+      <div class="lesson">Time, tone, and the one rule you can never break.</div>
+      <ul>
+        <li><b>SUPERHOT: time couples to BODY motion</b> (not head). Scanning is free; committing costs time. Slow-mo feels like skill. <b>← ONI's drink/loop.</b></li>
+        <li><b>Gorn proves tuning IS tone</b> — same lag params, stiff = heft, loose = comedy. You can't borrow numbers across feels.</li>
+        <li><b>Until You Fall: feedback stacking</b> — haptic + flash + SFX + kill slow-mo. Five weak channels ≈ the one (force) VR lacks.</li>
+        <li><b>The agency asymmetry:</b> you can react to the player but <em>never move</em> the player. All forces on them must be diegetic.</li>
+        <li><b>Pseudo-haptics (science):</b> render the virtual hand slightly slower than the real one → the brain perceives weight (Samad, CHI 2019).</li>
+      </ul>
+      <div class="src">GDC Vault · Game Developer · Voices of VR · ACM</div>
+    </div>
+  </div>
+</section>
+
+<hr class="divider">
+
+<section>
+  <div class="eyebrow">The Curriculum</div>
+  <h2>Eight concepts. Learn these and you can build weighty VR melee.</h2>
+  <p class="lede">Ranked. The first one is 80% of the feel; the rest is tuning and honesty.</p>
+  <ol class="curriculum">
+    <li><b>Phantom/physical decoupling.</b> Invisible tracked target + visible rigidbody weapon joined by springs. Every serious system is this.</li>
+    <li><b>PD / spring-damper tuning as tone.</b> The stiffness & damping constants ARE the game's personality. Asymmetric linear-vs-rotational is the pro move.</li>
+    <li><b>Pseudo-haptics (control/display ratio).</b> Why lag reads as mass, how far you can push it, and why you must coach the player to "pretend it's heavy."</li>
+    <li><b>Velocity-gated damage.</b> Momentum-at-contact + minimum thresholds + edge alignment. The anti-waggle law — your real muscles become the weight sim.</li>
+    <li><b>Feedback stacking instead of force.</b> Haptic pulse + SFX + VFX + world-side hit-stop + enemy flinch. Never freeze the camera.</li>
+    <li><b>Active-ragdoll enemies.</b> Spring-driven ragdolls tracking animation poses; impulse on hit; 0.1–0.3s blend to full ragdoll on death.</li>
+    <li><b>The agency asymmetry.</b> Never impose motion/knockback/hit-stop on the player's body. Governs your whole comfort/nausea budget.</li>
+    <li><b>The resolution contract.</b> Decide before tuning: total-on-contact (SUPERHOT), simulation (B&amp;S), or telegraph/pattern (Until You Fall). Don't mix.</li>
+  </ol>
+</section>
+
+<hr class="divider">
+
+<section>
+  <div class="eyebrow">The Synthesis</div>
+  <h2>What this means for ONI: Japan.</h2>
+  <p class="lede">Every pillar maps to a proven, shipping technique. The one novel piece — the cloth — is answered below.</p>
+  <div class="map">
+    <div class="row"><div class="k">Sword</div><div class="v">Blade &amp; Sorcery's spring/damper/maxForce blade + velocity-gated edge damage + penetration-as-constraint. <b>Tune stiff + damped for heavy katana heft.</b> Proven recipe.</div></div>
+    <div class="row"><div class="k">Gun</div><div class="v">Alyx's laws exactly: one-handed, multi-step reload, diegetic ammo, recoil on the model + haptic. <b>The "cost of the draw" is just Alyx's earned-reload gesture applied to concealment.</b></div></div>
+    <div class="row"><div class="k">Hands</div><div class="v">Thrill of the Fight's velocity + body-effort model with reliability-seeking auto-calibration. <b>Form beats muscle; your body is the stamina meter = the workout.</b></div></div>
+    <div class="row"><div class="k">The drink</div><div class="v">SUPERHOT's time-couples-to-motion is the diegetic engine. <b>Slowing time is BOTH the mastery aid AND a nausea reducer</b> — the drink disguises an accessibility assist as an advantage.</div></div>
+    <div class="row"><div class="k">Opponents</div><div class="v">Active-ragdoll bodies + damage-driven reactions + distinct exploitable styles. <b>Matches "each fighter is a school of the sword, same move each run" exactly.</b></div></div>
+    <div class="row"><div class="k">The floor</div><div class="v">The agency asymmetry is the hard constraint: the fight comes to the player at a station; we never shove the camera. <b>Room-scale footwork is the player's own.</b></div></div>
+  </div>
+  <div class="gate">
+    <h3>The tech bet — answered</h3>
+    <p><b>The shirt-lift concealed draw is genuinely novel</b> — no shipping VR game does grabbable worn cloth (all "clothing physics" out there is ambient sway or an invisible holster trigger with zero cloth in the loop). We'd be inventing, not copying. The verdict: a <b>scoped, choreographed hem-grab is feasible TODAY</b> at 90fps — one hero garment, a <em>guided</em> grab (the hand snaps to a pinned hem region, not free-collision anywhere), body mostly still during the draw, ~2–3k-particle cloth (Obi Cloth in Unity has pin-constraints as a first-class primitive; or Chaos panel-cloth + hand-attach in UE5). What stays years away: fully general, free-form "grab any cloth anywhere while sprinting." <b>So don't simulate the whole shirt honestly — stage the reveal.</b> Everything else in ONI is buildable with techniques that already shipped.</p>
+  </div>
+  <div class="valid">
+    <h3>Bonus — the drink mechanic is scientifically validated</h3>
+    <p>Slowing time cuts <b>vection and acceleration</b> — the actual drivers of VR nausea — and a dynamic <b>vignette reduces sickness without hurting presence, and players mostly never notice it</b> (Fernandes &amp; Feiner, IEEE 2016, Best Paper). Disguising a comfort layer as in-world fiction is proven, admired design (Metroid Prime's visor, Dead Space's suit UI). <b>The legendary drink is a real, evidence-backed comfort + accessibility system wearing a costume.</b> It's not a gimmick — it's the smartest part of the design.</p>
+  </div>
+</section>
+
+<hr class="divider">
+
+<section id="syllabus">
+  <div class="eyebrow">Go Deeper — the syllabus</div>
+  <h2>If you want to actually learn this, read these in order.</h2>
+  <p class="lede">Ranked by value-per-minute. The first two will teach you 70% of what matters.</p>
+  <ol class="curriculum" style="grid-template-columns:1fr">
+    <li><b>Evan Fletcher — "Sword Mechanics for VR"</b> · the single best public write-up of phantom/physical decoupling + spring tuning. Start here. <br><a href="https://evanfletcher42.com/2018/12/29/sword-mechanics-for-vr/" target="_blank" rel="noopener">evanfletcher42.com/2018/12/29/sword-mechanics-for-vr</a></li>
+    <li><b>Half-Life: Alyx Developer Commentary</b> (full transcript) · Valve's real postmortem — hands, reloads, why they cut melee. 147 nodes, devs named. <br><a href="https://combineoverwiki.net/wiki/Developer_commentary/Half-Life:_Alyx" target="_blank" rel="noopener">combineoverwiki.net/wiki/Developer_commentary/Half-Life:_Alyx</a></li>
+    <li><b>Until You Fall — GDC 2020, "Building Satisfying VR Combat on a Budget" pts 1–2</b> · the feedback-stacking masterclass. <br><a href="https://gdcvault.com/play/1026748/Game-VR-AR-Until-You" target="_blank" rel="noopener">gdcvault.com/play/1026748</a></li>
+    <li><b>Blade &amp; Sorcery SDK docs (ThunderRoad)</b> · the actual parameter names — Damager JSON, Ragdoll, Handle. This is the recipe. <br><a href="https://kospy.github.io/BasSDK/Components/ThunderRoad/JSON/Damager.html" target="_blank" rel="noopener">kospy.github.io/BasSDK</a></li>
+    <li><b>Samad et al., "Pseudo-Haptic Weight" (CHI 2019, Facebook Reality Labs)</b> · the science of why lag reads as mass (control/display ratio). <br><a href="https://dl.acm.org/doi/10.1145/3290605.3300550" target="_blank" rel="noopener">dl.acm.org/doi/10.1145/3290605.3300550</a></li>
+    <li><b>Thrill of the Fight — Ian Fitz's Official Guide + Steam threads</b> · auto-calibration, the "no game layer" doctrine, damage formula. <br><a href="https://steamcommunity.com/sharedfiles/filedetails/?id=1780809608" target="_blank" rel="noopener">steamcommunity.com/…/1780809608</a></li>
+    <li><b>"How physics converge in Boneworks" (Game Developer)</b> + <b>Broken Edge swordplay (Game Developer)</b> · the full-physics pole &amp; the agency-asymmetry rule. <br><a href="https://www.gamedeveloper.com/design/how-classical-game-mechanics-and-physics-converge-in-vr-hit-i-boneworks-i-" target="_blank" rel="noopener">gamedeveloper.com — Boneworks</a></li>
+    <li><b>Full raw research digest</b> (this folder) · every technique + every source link, unabridged. <br><span style="color:var(--dim)">ONI_PHYSICS_RESEARCH.md</span></li>
+  </ol>
+</section>
+
+<footer>ONI <span class="g">Japan</span> — internal craft study · demos are illustrative 2D toys of 3D techniques · full sources in ONI_PHYSICS_RESEARCH.md</footer>
+
+<script>
+(()=>{ // ---------- DEMO 1: spring-damper sword + velocity-gated lantern ----------
+const cv=document.getElementById('c1'),x=cv.getContext('2d');
+const W=cv.width,H=cv.height;
+let mode='physical';
+const massEl=document.getElementById('mass'),gripEl=document.getElementById('grip');
+const spdEl=document.getElementById('spd'),cutEl=document.getElementById('cutmsg');
+document.getElementById('modeT').addEventListener('click',e=>{
+  const b=e.target.closest('button');if(!b)return;
+  mode=b.dataset.m;
+  document.querySelectorAll('#modeT button').forEach(n=>n.classList.toggle('on',n===b));
+});
+let mx=W*0.3,my=H*0.6;
+const pos=(e)=>{const r=cv.getBoundingClientRect();const p=e.touches?e.touches[0]:e;
+  mx=(p.clientX-r.left)*(W/r.width);my=(p.clientY-r.top)*(H/r.height);};
+cv.addEventListener('mousemove',pos);cv.addEventListener('touchmove',e=>{pos(e);e.preventDefault()},{passive:false});
+// sword state: handle point + angle
+let hx=mx,hy=my,vx=0,vy=0,ang=-0.9,angV=0;
+const LEN=180;
+// lantern on a rope
+const ROPE=110,ax=W*0.72,ay=26;
+let la=0.0,laV=0,cut=false,cutT=0,halves=[];
+let sparks=[];
+let prevTipX=0,prevTipY=0,first=true;
+function resetLantern(){cut=false;halves=[];la=0;laV=0;cutEl.textContent='swing hard to cut — push = bounce';cutEl.style.color='';}
+function step(){
+  const m=parseFloat(massEl.value),grip=parseFloat(gripEl.value);
+  const dt=1/60;
+  if(mode==='arcade'){hx=mx;hy=my;const want=Math.atan2(my-(my-60),mx-(mx-60));ang+= ((-0.9)-ang)*0.3; vx=vy=0;}
+  else{
+    // PD: spring toward mouse, damped, scaled down by mass
+    const kp=520*grip/m,kd=2*Math.sqrt(520*grip*m)/m*0.55;
+    vx+=(kp*(mx-hx)-kd*vx)*dt; vy+=(kp*(my-hy)-kd*vy)*dt+ 240*dt; // slight gravity
+    hx+=vx*dt; hy+=vy*dt;
+    // blade angle chases velocity direction (leading the cut), gravity droops the tip
+    const speed=Math.hypot(vx,vy);
+    let target=speed>40?Math.atan2(vy,vx):ang;
+    let dA=((target-ang+Math.PI*3)%(Math.PI*2))-Math.PI;
+    const akp=26*grip/m, akd=6/m;
+    angV+=(akp*dA-akd*angV)*dt + (Math.cos(ang)*2.2/m)*dt; // gravity torque droop
+    ang+=angV*dt;
+  }
+  const tipX=hx+Math.cos(ang)*LEN, tipY=hy+Math.sin(ang)*LEN;
+  if(first){prevTipX=tipX;prevTipY=tipY;first=false;}
+  const tipSpd=Math.hypot(tipX-prevTipX,tipY-prevTipY)*60/100; // ~m/s toy scale
+  spdEl.textContent=tipSpd.toFixed(1)+' m/s';
+  // lantern physics (pendulum)
+  if(!cut){
+    laV+= (-Math.sin(la)*3.2)*dt; laV*=0.995; la+=laV*dt;
+    const lx=ax+Math.sin(la)*ROPE, ly=ay+Math.cos(la)*ROPE;
+    // blade segment vs lantern circle
+    const d=segDist(hx,hy,tipX,tipY,lx,ly);
+    if(d<26){
+      if(tipSpd>7){cut=true;cutT=0;
+        cutEl.textContent='CUT — '+tipSpd.toFixed(1)+' m/s ✓';cutEl.style.color='#2be07f';
+        for(let i=0;i<26;i++)sparks.push({x:lx,y:ly,vx:(Math.random()-0.5)*260,vy:(Math.random()-0.7)*260,l:1});
+        halves=[{x:lx,y:ly,vx:-40+vx*0.3,vy:20,r:0,s:1},{x:lx,y:ly,vx:60+vx*0.4,vy:60,r:0,s:2}];
+        setTimeout(resetLantern,2200);
+      }else{
+        laV+= (vx*0.004); // push it — no cut
+        cutEl.textContent='too slow ('+tipSpd.toFixed(1)+' m/s) — it just swings away';cutEl.style.color='#c99a3f';
+      }
+    }
+  }else{cutT+=dt;halves.forEach(h=>{h.vy+=500*dt;h.x+=h.vx*dt;h.y+=h.vy*dt;h.r+=dt*2;});}
+  sparks.forEach(s=>{s.vy+=400*dt;s.x+=s.vx*dt;s.y+=s.vy*dt;s.l-=dt*1.6;});
+  sparks=sparks.filter(s=>s.l>0);
+  prevTipX=tipX;prevTipY=tipY;
+  draw(tipX,tipY,tipSpd);
+  requestAnimationFrame(step);
+}
+function segDist(x1,y1,x2,y2,px,py){const dx=x2-x1,dy=y2-y1;const t=Math.max(0,Math.min(1,((px-x1)*dx+(py-y1)*dy)/(dx*dx+dy*dy)));return Math.hypot(px-(x1+dx*t),py-(y1+dy*t));}
+function draw(tx,ty,tipSpd){
+  x.fillStyle='#060a08';x.fillRect(0,0,W,H);
+  // floor line + hint
+  x.strokeStyle='rgba(234,243,237,.06)';x.beginPath();x.moveTo(0,H-40);x.lineTo(W,H-40);x.stroke();
+  // rope + lantern
+  x.strokeStyle='rgba(234,243,237,.35)';
+  if(!cut){const lx=ax+Math.sin(la)*ROPE,ly=ay+Math.cos(la)*ROPE;
+    x.beginPath();x.moveTo(ax,ay);x.lineTo(lx,ly);x.stroke();
+    lantern(lx,ly,1,0);
+  }else{halves.forEach(h=>lantern(h.x,h.y,0.9,h.r,h.s));}
+  // sparks
+  sparks.forEach(s=>{x.globalAlpha=Math.max(0,s.l);x.fillStyle='#ffd977';x.fillRect(s.x,s.y,3,3);});x.globalAlpha=1;
+  // ghost hand (mouse)
+  x.strokeStyle='rgba(43,224,127,.5)';x.beginPath();x.arc(mx,my,9,0,7);x.stroke();
+  x.fillStyle='rgba(43,224,127,.18)';x.beginPath();x.arc(mx,my,4,0,7);x.fill();
+  if(mode==='physical'){x.strokeStyle='rgba(43,224,127,.22)';x.setLineDash([4,6]);x.beginPath();x.moveTo(mx,my);x.lineTo(hx,hy);x.stroke();x.setLineDash([]);}
+  // sword: handle→tip
+  const hue=Math.min(1,tipSpd/14);
+  x.lineWidth=5;x.strokeStyle='#c9d4cd';
+  x.beginPath();x.moveTo(hx,hy);x.lineTo(tx,ty);x.stroke();
+  x.lineWidth=2;x.strokeStyle=`rgba(43,224,127,${0.15+hue*0.85})`;
+  x.beginPath();x.moveTo(hx,hy);x.lineTo(tx,ty);x.stroke();
+  // tsuka
+  x.lineWidth=9;x.strokeStyle='#2a2320';
+  x.beginPath();x.moveTo(hx,hy);x.lineTo(hx-Math.cos(ang)*34,hy-Math.sin(ang)*34);x.stroke();
+  x.lineWidth=1;
+  // labels
+  x.fillStyle='rgba(159,179,168,.7)';x.font='12px Chakra Petch';
+  x.fillText(mode==='physical'?'ghost hand → spring → massive blade':'blade glued to cursor (no mass, no truth)',18,26);
+}
+function lantern(lx,ly,alpha,rot,side){
+  x.save();x.translate(lx,ly);x.rotate(rot*(side===1?-1:1));
+  x.globalAlpha=alpha;
+  const g=x.createRadialGradient(0,0,2,0,0,30);g.addColorStop(0,'rgba(255,170,60,.9)');g.addColorStop(1,'rgba(255,100,30,.08)');
+  x.fillStyle=g;x.beginPath();x.arc(0,0,30,0,7);x.fill();
+  x.fillStyle='#d1452b';
+  if(!side){x.beginPath();x.ellipse(0,0,16,22,0,0,7);x.fill();}
+  else if(side===1){x.beginPath();x.ellipse(0,0,16,22,0,Math.PI/2,Math.PI*1.5);x.fill();}
+  else{x.beginPath();x.ellipse(0,0,16,22,0,-Math.PI/2,Math.PI/2);x.fill();}
+  x.strokeStyle='rgba(0,0,0,.4)';x.beginPath();x.moveTo(0,-22);x.lineTo(0,22);x.stroke();
+  x.restore();x.globalAlpha=1;
+}
+resetLantern();step();
+})();
+
+(()=>{ // ---------- DEMO 2: time moves when you move ----------
+const cv=document.getElementById('c2'),x=cv.getContext('2d');
+const W=cv.width,H=cv.height;
+const tEl=document.getElementById('tscale'),drinkEl=document.getElementById('drink');
+let mx=W/2,my=H/2,pmx=mx,pmy=my,speed=0;
+const pos=(e)=>{const r=cv.getBoundingClientRect();const p=e.touches?e.touches[0]:e;
+  mx=(p.clientX-r.left)*(W/r.width);my=(p.clientY-r.top)*(H/r.height);};
+cv.addEventListener('mousemove',pos);cv.addEventListener('touchmove',e=>{pos(e);e.preventDefault()},{passive:false});
+let bullets=[],hitFlash=0,dodges=0,hits=0;
+function spawn(){const a=Math.random()*Math.PI*2;const R=Math.max(W,H)*0.62;
+  bullets.push({x:W/2+Math.cos(a)*R,y:H/2+Math.sin(a)*R*0.5,t:0});}
+for(let i=0;i<7;i++)spawn();
+function step(){
+  const drink=parseFloat(drinkEl.value);
+  const inst=Math.hypot(mx-pmx,my-pmy);speed=speed*0.86+inst*0.14;pmx=mx;pmy=my;
+  let ts=Math.min(1,speed/26);ts=Math.max(0.04,ts)*(1-drink*0.7);
+  tEl.textContent=Math.round(ts*100)+'%';
+  bullets.forEach(b=>{
+    const dx=mx-b.x,dy=my-b.y,d=Math.hypot(dx,dy);
+    const v=95*ts;
+    b.x+=dx/d*v*(1/60)*60/1;b.y+=dy/d*v*(1/60)*60/1;
+    b.x+= (dx/d)*v*0; // keep simple
+    if(d<14){hits++;hitFlash=1;b.dead=true;}
+    if(d>Math.max(W,H)){b.dead=true;dodges++;}
+  });
+  // bullets that pass close but miss count as dodged when behind
+  bullets=bullets.filter(b=>!b.dead);
+  while(bullets.length<7)spawn();
+  hitFlash*=0.92;
+  draw(ts,drink);
+  requestAnimationFrame(step);
+}
+function draw(ts,drink){
+  x.fillStyle='#060a08';x.fillRect(0,0,W,H);
+  // drink vignette + warmth
+  if(drink>0){const g=x.createRadialGradient(W/2,H/2,H*0.25,W/2,H/2,H*0.75);
+    g.addColorStop(0,'rgba(0,0,0,0)');g.addColorStop(1,`rgba(20,8,2,${drink})`);
+    x.fillStyle=g;x.fillRect(0,0,W,H);
+    x.fillStyle=`rgba(255,150,50,${drink*0.06})`;x.fillRect(0,0,W,H);}
+  if(hitFlash>0.05){x.fillStyle=`rgba(191,47,29,${hitFlash*0.5})`;x.fillRect(0,0,W,H);}
+  // bullets w/ trails
+  bullets.forEach(b=>{
+    const dx=mx-b.x,dy=my-b.y,d=Math.hypot(dx,dy);
+    x.strokeStyle='rgba(255,217,119,.5)';x.beginPath();x.moveTo(b.x,b.y);
+    x.lineTo(b.x-dx/d*26,b.y-dy/d*26);x.stroke();
+    x.fillStyle='#ffd977';x.beginPath();x.arc(b.x,b.y,4,0,7);x.fill();
+  });
+  // player
+  x.strokeStyle='rgba(43,224,127,.9)';x.beginPath();x.arc(mx,my,12,0,7);x.stroke();
+  x.fillStyle='rgba(43,224,127,.25)';x.beginPath();x.arc(mx,my,5,0,7);x.fill();
+  x.fillStyle='rgba(159,179,168,.7)';x.font='12px Chakra Petch';
+  x.fillText('hold still — time nearly stops. move — it attacks. hits: '+hits,18,26);
+}
+step();
+})();
+</script>
+</body>
+</html>
