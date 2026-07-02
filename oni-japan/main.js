@@ -180,14 +180,12 @@ scene.add(camera); // camera must be in the graph for its child light to render
 
 // ---------------- input ----------------
 const keys = {};
-addEventListener('keydown', e => { keys[e.code] = true; onKeyDown(e.code); });
+addEventListener('keydown', e => { keys[e.code] = true; if (!e.repeat) onKeyDown(e.code); });
 addEventListener('keyup', e => { keys[e.code] = false; });
 
+// mouse now does ONE job — look (handled internally by PointerLockControls
+// on desktop). mouseDX/mouseDY below are fed ONLY by touch drag-to-look.
 let mouseDX = 0, mouseDY = 0;
-addEventListener('mousemove', e => {
-  if (!locked || isTouch) return;
-  mouseDX += e.movementX; mouseDY += e.movementY;
-});
 addEventListener('mousedown', e => { if (locked && e.button === 0 && !isTouch) fireOrNothing(); });
 
 // ---------------- sword: phantom/physical decoupling ----------------
@@ -205,6 +203,11 @@ tsuka.position.y = -0.11;
 const swordMesh = new THREE.Group(); swordMesh.add(blade, tsuba, tsuka);
 swordPivot.add(swordMesh);
 
+// Combat is discrete BUTTONS, not mouse motion: F=swing, C=slash, V=stab,
+// Space(hold)=block. Each button injects a scripted impulse into the same
+// spring-damper (still real physics — the blade still lags/overshoots/
+// carries weight) instead of reading continuous mouse delta. Mouse now
+// does only one job: look.
 const swordOffset = new THREE.Vector3();
 const swordVel = new THREE.Vector3();
 const SPRING_LIN = 620, DAMP_LIN = 26;
@@ -217,23 +220,48 @@ let tipPrevWorld = new THREE.Vector3();
 let tipSpeed = 0;
 const tipLocal = new THREE.Vector3(0, 1.0, 0);
 
+let isBlocking = false;
+let atkCooldown = 0;
+let currentAttack = null;
+const ATTACK_COOLDOWN = 0.38;
+const GUARD_POS = new THREE.Vector3(0.05, 0.32, 0.12);
+const ATTACK_IMPULSE = {
+  swing: { vel: new THREE.Vector3(3.6, -0.5, 0), angVel: new THREE.Vector3(0.4, 0, -3.4) },
+  slash: { vel: new THREE.Vector3(-3.2, 2.0, 0), angVel: new THREE.Vector3(-0.4, 0, 3.4) },
+  stab: { vel: new THREE.Vector3(0, 0.1, -4.4), angVel: new THREE.Vector3(0, 0, 0) },
+};
+
+function performAttack(type) {
+  if (isBlocking || atkCooldown > 0) return;
+  const preset = ATTACK_IMPULSE[type];
+  swordVel.copy(preset.vel);
+  swordAngVel.copy(preset.angVel);
+  currentAttack = type;
+  atkCooldown = ATTACK_COOLDOWN;
+  setState(type);
+}
+
 function updateSword(dt) {
-  const IMPULSE = 0.016;
-  swordVel.x += mouseDX * IMPULSE;
-  swordVel.y -= mouseDY * IMPULSE;
-  swordAngVel.z += -mouseDX * 0.10;
-  swordAngVel.x += mouseDY * 0.10;
+  atkCooldown = Math.max(0, atkCooldown - dt);
 
-  const ax = -SPRING_LIN * swordOffset.x - DAMP_LIN * swordVel.x;
-  const ay = -SPRING_LIN * swordOffset.y - DAMP_LIN * swordVel.y;
-  swordVel.x += ax * dt; swordVel.y += ay * dt;
-  swordOffset.x += swordVel.x * dt; swordOffset.y += swordVel.y * dt;
-  if (swordOffset.length() > MAX_REACH) swordOffset.setLength(MAX_REACH);
+  if (isBlocking) {
+    swordOffset.lerp(GUARD_POS, 1 - Math.pow(0.001, dt));
+    swordVel.set(0, 0, 0);
+    swordAngOffset.lerp(new THREE.Vector3(0.25, 0, -0.15), 1 - Math.pow(0.001, dt));
+    swordAngVel.set(0, 0, 0);
+  } else {
+    const ax = -SPRING_LIN * swordOffset.x - DAMP_LIN * swordVel.x;
+    const ay = -SPRING_LIN * swordOffset.y - DAMP_LIN * swordVel.y;
+    const az = -SPRING_LIN * swordOffset.z - DAMP_LIN * swordVel.z;
+    swordVel.x += ax * dt; swordVel.y += ay * dt; swordVel.z += az * dt;
+    swordOffset.x += swordVel.x * dt; swordOffset.y += swordVel.y * dt; swordOffset.z += swordVel.z * dt;
+    if (swordOffset.length() > MAX_REACH) swordOffset.setLength(MAX_REACH);
 
-  const aax = -SPRING_ANG * swordAngOffset.x - DAMP_ANG * swordAngVel.x;
-  const aaz = -SPRING_ANG * swordAngOffset.z - DAMP_ANG * swordAngVel.z;
-  swordAngVel.x += aax * dt; swordAngVel.z += aaz * dt;
-  swordAngOffset.x += swordAngVel.x * dt; swordAngOffset.z += swordAngVel.z * dt;
+    const aax = -SPRING_ANG * swordAngOffset.x - DAMP_ANG * swordAngVel.x;
+    const aaz = -SPRING_ANG * swordAngOffset.z - DAMP_ANG * swordAngVel.z;
+    swordAngVel.x += aax * dt; swordAngVel.z += aaz * dt;
+    swordAngOffset.x += swordAngVel.x * dt; swordAngOffset.z += swordAngVel.z * dt;
+  }
 
   swordMesh.position.copy(swordOffset);
   swordMesh.rotation.x = swordAngOffset.x;
@@ -245,14 +273,14 @@ function updateSword(dt) {
   tipPrevWorld.copy(tipWorld);
 
   const heat = Math.min(1, tipSpeed / 9);
-  bladeMat.emissiveIntensity = 0.35 + heat * 1.4;
-  bladeMat.emissive.setRGB(0.06 + heat * 0.05, 0.75 * heat + 0.08, 0.35 * heat + 0.06);
+  bladeMat.emissiveIntensity = isBlocking ? 0.9 : 0.35 + heat * 1.4;
+  bladeMat.emissive.setRGB(isBlocking ? 0.05 : 0.06 + heat * 0.05, isBlocking ? 0.55 : 0.75 * heat + 0.08, isBlocking ? 0.75 : 0.35 * heat + 0.06);
 
-  mouseDX = 0; mouseDY = 0;
+  if (atkCooldown <= 0 && !isBlocking && currentAttack) { currentAttack = null; setState('sword'); }
   return tipWorld;
 }
 
-const CUT_THRESHOLD = 6.0;
+const CUT_THRESHOLD = 3.0; // lower now: the button press itself is the commitment, not a tracked swing
 
 // ---------------- gun ----------------
 const gunPivot = new THREE.Group();
@@ -279,6 +307,9 @@ function onKeyDown(code) {
   if (code === 'KeyQ') toggleDraw();
   if (code === 'KeyR') reload();
   if (code === 'KeyE') drink();
+  if (code === 'KeyF') performAttack('swing');
+  if (code === 'KeyC') performAttack('slash');
+  if (code === 'KeyV') performAttack('stab');
 }
 function toggleDraw() {
   if (gunState === 'holstered' || gunState === 'empty') { gunState = 'drawing'; gunT = 0; gunGroup.visible = true; setState('drawing'); }
@@ -408,8 +439,7 @@ function updateEnemies(dt, dtScaled, playerPos) {
       u.wep.rotation.x = -1.7 + g * 2.0;
       if (g >= 1) {
         if (dist < u.engageDist + 0.4) {
-          const blocking = swordOffset.length() > 0.35;
-          if (!blocking) playerHit(); else parryFlash();
+          if (!isBlocking) playerHit(); else parryFlash();
         }
         u.state = 'recover'; u.t = 0;
       }
@@ -477,6 +507,7 @@ const moveDir = new THREE.Vector3();
 let globalTimeScale = 0.15;
 let motionSmoothed = 0;
 let touchMove = { x: 0, y: 0 }; // virtual joystick, -1..1
+let touchBlockHeld = false;
 
 function updateMovement(dt) {
   const SPEED = 26, DAMP = 9;
@@ -512,9 +543,13 @@ function enableTouchControls() {
   wrap.innerHTML = `
     <div id="tJoyBase"><div id="tJoyNub"></div></div>
     <div id="tLookZone"></div>
-    <button id="tFire" class="tbtn tbtn-big">⚔</button>
-    <button id="tDraw" class="tbtn">Q</button>
-    <button id="tDrink" class="tbtn">⚱</button>`;
+    <button id="tSwing" class="tbtn tbtn-big" style="right:150px;bottom:150px">／</button>
+    <button id="tSlash" class="tbtn tbtn-big" style="right:60px;bottom:190px">＼</button>
+    <button id="tStab" class="tbtn tbtn-big" style="right:16px;bottom:110px">→</button>
+    <button id="tBlock" class="tbtn tbtn-big" style="right:150px;bottom:60px;color:#52cfc6">◇</button>
+    <button id="tFire" class="tbtn" style="right:16px;bottom:16px">◉</button>
+    <button id="tDraw" class="tbtn" style="right:80px;bottom:16px">Q</button>
+    <button id="tDrink" class="tbtn" style="right:144px;bottom:16px">⚱</button>`;
   document.body.appendChild(wrap);
   const style = document.createElement('style');
   style.textContent = `
@@ -522,10 +557,8 @@ function enableTouchControls() {
     #tLookZone{position:absolute;right:0;top:0;width:60%;height:100%}
     #tJoyBase{position:absolute;left:30px;bottom:30px;width:110px;height:110px;border-radius:50%;background:rgba(234,243,237,.08);border:1px solid rgba(234,243,237,.25)}
     #tJoyNub{position:absolute;left:35px;top:35px;width:40px;height:40px;border-radius:50%;background:rgba(43,224,127,.5)}
-    .tbtn{position:absolute;pointer-events:auto;border-radius:50%;border:1px solid rgba(234,243,237,.3);background:rgba(10,15,12,.55);color:#eaf3ed;font-size:20px}
-    .tbtn-big{right:26px;bottom:110px;width:78px;height:78px;font-size:30px;color:#2be07f}
-    #tDraw{right:30px;bottom:26px;width:52px;height:52px}
-    #tDrink{right:118px;bottom:26px;width:52px;height:52px}
+    .tbtn{position:absolute;pointer-events:auto;border-radius:50%;border:1px solid rgba(234,243,237,.3);background:rgba(10,15,12,.6);color:#eaf3ed;font-size:17px;width:44px;height:44px}
+    .tbtn-big{width:56px;height:56px;font-size:22px;color:#2be07f}
   `;
   document.head.appendChild(style);
 
@@ -569,13 +602,13 @@ function enableTouchControls() {
   document.getElementById('tFire').addEventListener('touchstart', e => { e.preventDefault(); fireOrNothing(); }, { passive: false });
   document.getElementById('tDraw').addEventListener('touchstart', e => { e.preventDefault(); toggleDraw(); }, { passive: false });
   document.getElementById('tDrink').addEventListener('touchstart', e => { e.preventDefault(); drink(); }, { passive: false });
+  document.getElementById('tSwing').addEventListener('touchstart', e => { e.preventDefault(); performAttack('swing'); }, { passive: false });
+  document.getElementById('tSlash').addEventListener('touchstart', e => { e.preventDefault(); performAttack('slash'); }, { passive: false });
+  document.getElementById('tStab').addEventListener('touchstart', e => { e.preventDefault(); performAttack('stab'); }, { passive: false });
+  const blockBtn = document.getElementById('tBlock');
+  blockBtn.addEventListener('touchstart', e => { e.preventDefault(); touchBlockHeld = true; }, { passive: false });
+  blockBtn.addEventListener('touchend', e => { e.preventDefault(); touchBlockHeld = false; }, { passive: false });
 }
-
-// touch look also feeds the sword (swipe = swing), same physics as mouse
-let touchLookDX = 0, touchLookDY = 0;
-addEventListener('touchmove', e => {
-  if (!isTouch || !locked) return;
-});
 
 // ---------------- main loop ----------------
 function applyTouchLookToCamera(yawDelta, pitchDelta) {
@@ -593,6 +626,8 @@ function tick() {
   if (isTouch && locked) {
     applyTouchLookToCamera(mouseDX, mouseDY);
   }
+  isBlocking = !!keys['Space'] || touchBlockHeld;
+  if (isBlocking) setState('block'); else if (!currentAttack) setState(gunState === 'holstered' ? 'sword' : (gunState === 'ready' ? 'gun' : gunState));
 
   updateMovement(dt);
 
@@ -622,10 +657,11 @@ function tick() {
 tick();
 
 window.__oni = {
-  drink, toggleDraw, reload,
+  drink, toggleDraw, reload, performAttack,
   state: () => ({ gunState, ammo, drinksLeft, drinkLevel, waveIdx, enemies: enemies.length, tipSpeed, globalTimeScale, locked,
+    isBlocking, currentAttack, atkCooldown: atkCooldown.toFixed(2),
     enemyStates: enemies.map(e => ({ state: e.userData.state, dist: e.position.distanceTo(player.position).toFixed(2) })) }),
-  simulateSwing: (dx, dy) => { mouseDX += dx; mouseDY += dy; },
+  setBlock: (v) => { touchBlockHeld = v; },
   teleportEnemyClose: (i) => { if (enemies[i]) { enemies[i].position.set(0, 0, player.position.z - 1.6); enemies[i].userData.state = 'approach'; } },
   playerPos: () => player.position.toArray(),
   forceLock: () => { locked = true; startOverlay.style.display = 'none'; },
